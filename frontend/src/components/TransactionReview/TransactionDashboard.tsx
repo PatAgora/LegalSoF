@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 interface Stats {
   total_transactions: number;
   total_alerts: number;
@@ -26,7 +28,7 @@ export default function TransactionDashboard({ matterId }: TransactionDashboardP
   const fetchDashboard = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/matters/${matterId}/transaction-dashboard`);
+      const response = await fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transaction-dashboard`);
       const data = await response.json();
       setStats(data.stats);
     } catch (error) {

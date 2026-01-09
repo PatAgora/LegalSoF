@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 interface Alert {
   id: number;
   txn_id: string;
@@ -30,7 +32,7 @@ export default function TransactionAlerts({ matterId }: TransactionAlertsProps) 
   const fetchAlerts = async () => {
     setLoading(true);
     try {
-      let url = `http://localhost:8000/api/v1/matters/${matterId}/transaction-alerts`;
+      let url = `${API_BASE_URL}/api/v1/matters/${matterId}/transaction-alerts`;
       if (severityFilter) url += `?severity=${severityFilter}`;
       
       const response = await fetch(url);
