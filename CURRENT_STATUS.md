@@ -245,6 +245,7 @@ To replace with real data:
 
 ### Current Limitations
 - ✅ **RESOLVED:** Login redirect issue (auth now disabled)
+- ✅ **RESOLVED:** Blank page issue (removed auth dependency from Dashboard)
 - ⚠️ All data is mock/dummy data
 - ⚠️ Backend CRUD endpoints not implemented
 - ⚠️ No document upload functionality
