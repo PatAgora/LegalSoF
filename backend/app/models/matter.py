@@ -88,5 +88,10 @@ class Matter(Base):
     audit_logs = relationship("AuditLog", back_populates="matter", cascade="all, delete-orphan")
     approvals = relationship("Approval", back_populates="matter", cascade="all, delete-orphan")
     
+    # Transaction Review relationships
+    transactions = relationship("Transaction", back_populates="matter", cascade="all, delete-orphan")
+    transaction_alerts = relationship("TransactionAlert", back_populates="matter", cascade="all, delete-orphan")
+    kyc_profile = relationship("KYCProfile", back_populates="matter", uselist=False, cascade="all, delete-orphan")
+    
     def __repr__(self):
         return f"<Matter {self.reference_number}: {self.client_name}>"
