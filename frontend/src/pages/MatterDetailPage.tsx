@@ -107,6 +107,7 @@ export default function MatterDetailPage() {
         {activeTab === 'questionnaire' && <QuestionnaireTab matter={matter} />}
         {activeTab === 'documents' && <DocumentsTab matter={matter} />}
         {activeTab === 'funds-chain' && <FundsChainTab matter={matter} />}
+        {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
         {activeTab === 'checks' && <ChecksTab matter={matter} />}
         {activeTab === 'notes' && <NotesTab matter={matter} />}
         {activeTab === 'audit' && <AuditTab matter={matter} />}
