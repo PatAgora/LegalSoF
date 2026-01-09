@@ -23,6 +23,27 @@
 
 ---
 
+## 🆕 Latest Update: Transaction Review Integration
+
+**Transaction monitoring and AML alerts now integrated!** The Transaction Review tool from the Due Diligence app has been extracted and blended into the Legal SoF Platform.
+
+### ✅ Backend Complete
+- ✅ Database models created (5 tables: transactions, transaction_alerts, ref_country_risk, kyc_profiles, transaction_config)
+- ✅ Schema initialized with reference data
+- ✅ 57 countries with risk levels seeded (5 prohibited, 13 high-risk, 7 high-3rd, 10 medium, 22 low)
+- ✅ 15 monitoring rules configured (thresholds, toggles, keywords)
+- ✅ API endpoint structure defined for upload, alerts, dashboard, config
+
+### ⏳ Frontend Pending
+- ⏳ React components to be created (TransactionDashboard, TransactionAlerts, TransactionExplore, etc.)
+- ⏳ Transaction Review tab for Matter details
+- ⏳ CSV upload interface
+- ⏳ Dashboard visualizations
+
+📄 **See [TRANSACTION_REVIEW_INTEGRATION.md](./TRANSACTION_REVIEW_INTEGRATION.md) for full details**
+
+---
+
 ## 🎯 What You Can Access Now
 
 ### ✅ Dashboard (Home Page)
@@ -95,7 +116,7 @@ The backend endpoints are structured but not yet implemented:
 
 ### Backend
 - **Framework:** FastAPI (Python)
-- **Database:** SQLite with 10 tables
+- **Database:** SQLite with 15 tables (+ 5 new for Transaction Review)
 - **Auth:** Endpoints exist but frontend doesn't use them
 - **Port:** 8000
 - **Status:** Running and healthy
@@ -113,6 +134,13 @@ The backend endpoints are structured but not yet implemented:
 ✅ notes
 ✅ approvals
 ✅ audit_logs
+
+🆕 Transaction Review Tables (NEW):
+✅ transactions              - Bank transactions linked to matters
+✅ transaction_alerts        - Automated AML alerts
+✅ ref_country_risk          - Country risk reference data (57 countries)
+✅ kyc_profiles              - Expected transaction volumes per customer
+✅ transaction_config        - Monitoring rules configuration (15 settings)
 ```
 
 ---
