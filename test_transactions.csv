@@ -1,0 +1,11 @@
+id,txn_date,customer_id,direction,amount,currency,country_iso2,payer_sort_code,payee_sort_code,channel,narrative
+TXN001,2024-01-15,CUST001,in,5000,GBP,IR,123456,654321,online,Payment from supplier in Iran
+TXN002,2024-01-16,CUST001,out,25000,GBP,GB,123456,654321,branch,Large cash withdrawal
+TXN003,2024-01-17,CUST001,in,50000,GBP,AF,123456,654321,online,Transfer from Afghanistan
+TXN004,2024-01-18,CUST001,out,2500,GBP,GB,123456,654321,online,Payment with cryptocurrency mention
+TXN005,2024-01-19,CUST001,in,1000,GBP,GB,123456,654321,online,Regular payment
+TXN006,2024-01-20,CUST001,out,8000,GBP,GB,123456,654321,atm,Cash withdrawal
+TXN007,2024-01-21,CUST001,in,100000,GBP,GB,123456,654321,online,Large deposit
+TXN008,2024-01-22,CUST001,out,500,GBP,RU,123456,654321,online,Payment to Russia
+TXN009,2024-01-23,CUST001,in,3000,GBP,CN,123456,654321,online,Payment from China
+TXN010,2024-01-24,CUST001,out,15000,GBP,GB,123456,654321,branch,Cash deposit
