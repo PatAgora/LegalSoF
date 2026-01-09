@@ -1,7 +1,7 @@
 """
 Entity model for tracking parties, accounts, and organizations.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -61,6 +61,3 @@ class Entity(Base):
     
     def __repr__(self):
         return f"<Entity {self.name} ({self.entity_type})>"
-
-
-from sqlalchemy import Boolean

@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     ]
     
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sof_platform"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./sof_platform.db"
     
     # OpenAI
     OPENAI_API_KEY: str = ""
