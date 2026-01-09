@@ -1,7 +1,10 @@
 import { useParams } from 'react-router-dom'
 import { useState } from 'react'
+import TransactionDashboard from '../components/TransactionReview/TransactionDashboard'
+import TransactionAlerts from '../components/TransactionReview/TransactionAlerts'
+import TransactionUpload from '../components/TransactionReview/TransactionUpload'
 
-type TabType = 'overview' | 'documents' | 'funds-chain' | 'checks' | 'questionnaire' | 'notes' | 'audit'
+type TabType = 'overview' | 'documents' | 'funds-chain' | 'checks' | 'questionnaire' | 'notes' | 'audit' | 'transactions'
 
 export default function MatterDetailPage() {
   const { id } = useParams()
@@ -30,6 +33,7 @@ export default function MatterDetailPage() {
     { id: 'questionnaire' as TabType, name: 'Questionnaire', count: '3/8' },
     { id: 'documents' as TabType, name: 'Documents', count: 5 },
     { id: 'funds-chain' as TabType, name: 'Funds Chain', count: 12 },
+    { id: 'transactions' as TabType, name: '🆕 Transaction Review', count: null },
     { id: 'checks' as TabType, name: 'Checks', count: '2 flags' },
     { id: 'notes' as TabType, name: 'Notes', count: 3 },
     { id: 'audit' as TabType, name: 'Audit Trail', count: null },
@@ -803,6 +807,64 @@ function ProgressItem({ label, percentage, status }: { label: string; percentage
           className="bg-primary-600 h-2 rounded-full transition-all"
           style={{ width: `${percentage}%` }}
         />
+      </div>
+    </div>
+  )
+}
+
+// Transaction Review Tab
+function TransactionReviewTab({ matterId }: { matterId: number }) {
+  const [view, setView] = useState<'dashboard' | 'alerts' | 'upload'>('dashboard')
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const handleUploadSuccess = () => {
+    setRefreshKey(prev => prev + 1)
+    setView('dashboard')
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* View Selector */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex space-x-4">
+          <button
+            onClick={() => setView('dashboard')}
+            className={`px-4 py-2 rounded-lg font-medium ${
+              view === 'dashboard' 
+                ? 'bg-primary-600 text-white' 
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
+            onClick={() => setView('alerts')}
+            className={`px-4 py-2 rounded-lg font-medium ${
+              view === 'alerts' 
+                ? 'bg-primary-600 text-white' 
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Alerts
+          </button>
+          <button
+            onClick={() => setView('upload')}
+            className={`px-4 py-2 rounded-lg font-medium ${
+              view === 'upload' 
+                ? 'bg-primary-600 text-white' 
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Upload CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div key={refreshKey}>
+        {view === 'dashboard' && <TransactionDashboard matterId={matterId} />}
+        {view === 'alerts' && <TransactionAlerts matterId={matterId} />}
+        {view === 'upload' && <TransactionUpload matterId={matterId} onUploadSuccess={handleUploadSuccess} />}
       </div>
     </div>
   )
