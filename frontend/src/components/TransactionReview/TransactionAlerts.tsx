@@ -32,14 +32,24 @@ export default function TransactionAlerts({ matterId }: TransactionAlertsProps) 
   const fetchAlerts = async () => {
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       let url = `${API_BASE_URL}/api/v1/matters/${matterId}/transaction-alerts`;
       if (severityFilter) url += `?severity=${severityFilter}`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       const data = await response.json();
       setAlerts(data);
     } catch (error) {
       console.error('Error fetching alerts:', error);
+      setAlerts([]);
     } finally {
       setLoading(false);
     }

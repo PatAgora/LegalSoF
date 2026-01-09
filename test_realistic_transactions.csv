@@ -1,0 +1,31 @@
+id,txn_date,customer_id,direction,amount,currency,country_iso2,payer_sort_code,payee_sort_code,channel,narrative
+TXN001,2024-01-15,ACME001,in,5000,GBP,IR,123456,654321,online,Payment from supplier in Iran
+TXN002,2024-01-16,ACME001,out,25000,GBP,GB,123456,654321,branch,Large cash withdrawal
+TXN003,2024-01-17,ACME001,in,50000,GBP,AF,123456,654321,online,Transfer from Afghanistan supplier
+TXN004,2024-01-18,ACME001,out,2500,GBP,GB,123456,654321,online,Payment for cryptocurrency purchase
+TXN005,2024-01-19,ACME001,in,1000,GBP,GB,123456,654321,online,Regular invoice payment
+TXN006,2024-01-20,ACME001,out,8000,GBP,GB,123456,654321,atm,Cash withdrawal
+TXN007,2024-01-21,ACME001,in,100000,GBP,GB,123456,654321,online,Large deposit from sale
+TXN008,2024-01-22,ACME001,out,500,GBP,RU,123456,654321,online,Payment to Russia
+TXN009,2024-01-23,ACME001,in,3000,GBP,CN,123456,654321,online,Payment from China
+TXN010,2024-01-24,ACME001,out,15000,GBP,GB,123456,654321,branch,Cash deposit
+TXN011,2024-01-25,ACME001,in,12000,GBP,KP,123456,654321,online,North Korea supplier payment
+TXN012,2024-01-26,ACME001,out,45000,GBP,GB,123456,654321,branch,Large cash payment
+TXN013,2024-01-27,ACME001,in,2000,GBP,MM,123456,654321,online,Myanmar textile import
+TXN014,2024-01-28,ACME001,out,3500,GBP,GB,123456,654321,online,Payment with bearer bonds mention
+TXN015,2024-01-29,ACME001,in,95000,GBP,GB,123456,654321,online,Unusually large deposit
+TXN016,2024-01-30,ACME001,out,1200,GBP,SY,123456,654321,online,Syria payment
+TXN017,2024-02-01,ACME001,in,5500,GBP,YE,123456,654321,online,Yemen services payment
+TXN018,2024-02-02,ACME001,out,22000,GBP,GB,123456,654321,atm,Multiple cash withdrawals
+TXN019,2024-02-03,ACME001,in,4000,GBP,GB,123456,654321,online,Shell company payment
+TXN020,2024-02-04,ACME001,out,8500,GBP,GB,123456,654321,branch,Cash payment offshore account
+TXN021,2024-02-05,ACME001,in,150000,GBP,GB,123456,654321,online,Extremely large deposit
+TXN022,2024-02-06,ACME001,out,6000,GBP,BY,123456,654321,online,Belarus supplier
+TXN023,2024-02-07,ACME001,in,2500,GBP,SO,123456,654321,online,Somalia payment
+TXN024,2024-02-08,ACME001,out,35000,GBP,GB,123456,654321,branch,Large cash withdrawal ATM
+TXN025,2024-02-09,ACME001,in,7000,GBP,GB,123456,654321,online,Money laundering services
+TXN026,2024-02-10,ACME001,out,12000,GBP,GB,123456,654321,online,Digital currency exchange
+TXN027,2024-02-11,ACME001,in,4500,GBP,IQ,123456,654321,online,Iraq construction payment
+TXN028,2024-02-12,ACME001,out,28000,GBP,GB,123456,654321,branch,Large cash for bearer instruments
+TXN029,2024-02-13,ACME001,in,85000,GBP,GB,123456,654321,online,Suspicious large transfer
+TXN030,2024-02-14,ACME001,out,9500,GBP,GB,123456,654321,atm,Cash withdrawal structuring
