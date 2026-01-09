@@ -1,15 +1,7 @@
-import { Outlet, Link, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+import { Outlet, Link } from 'react-router-dom'
 
 export default function Layout() {
-  const { user, logout } = useAuthStore()
-  const navigate = useNavigate()
-
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
-
+  // Authentication disabled for development
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Navigation */}
@@ -37,15 +29,9 @@ export default function Layout() {
             </div>
             <div className="flex items-center space-x-4">
               <div className="text-sm text-gray-700">
-                <span className="font-medium">{user?.full_name}</span>
-                <span className="ml-2 text-gray-500">({user?.role})</span>
+                <span className="font-medium">Development Mode</span>
+                <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">No Auth</span>
               </div>
-              <button
-                onClick={handleLogout}
-                className="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md hover:bg-gray-100"
-              >
-                Logout
-              </button>
             </div>
           </div>
         </div>
