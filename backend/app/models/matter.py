@@ -11,30 +11,30 @@ from app.db.base import Base
 
 class MatterStatus(str, enum.Enum):
     """Matter workflow status."""
-    DRAFT = "draft"
-    AWAITING_CLIENT = "awaiting_client"
-    CLIENT_UPLOADING = "client_uploading"
-    UNDER_REVIEW = "under_review"
-    QUERIES_RAISED = "queries_raised"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    COMPLETED = "completed"
+    DRAFT = "DRAFT"
+    AWAITING_CLIENT = "AWAITING_CLIENT"
+    CLIENT_UPLOADING = "CLIENT_UPLOADING"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    QUERIES_RAISED = "QUERIES_RAISED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    COMPLETED = "COMPLETED"
 
 
 class RiskRating(str, enum.Enum):
     """Risk rating levels."""
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 class TransactionType(str, enum.Enum):
     """Type of business transaction."""
-    BUSINESS_PURCHASE = "business_purchase"
-    PROPERTY_PURCHASE = "property_purchase"
-    INVESTMENT = "investment"
-    OTHER = "other"
+    BUSINESS_PURCHASE = "BUSINESS_PURCHASE"
+    PROPERTY_PURCHASE = "PROPERTY_PURCHASE"
+    INVESTMENT = "INVESTMENT"
+    OTHER = "OTHER"
 
 
 class Matter(Base):
