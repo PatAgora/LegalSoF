@@ -308,7 +308,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     {uploadingFiles.bank_statement ? 'Uploading...' : 'Choose CSV/PDF'}
                   </span>
                 </label>
-                {status && status.files_summary.bank_statements_count > 0 && (
+                {status && status.files_summary && status.files_summary.bank_statements_count > 0 && (
                   <div className="mt-3 text-green-600 text-sm font-medium">
                     ✓ {status.files_summary.bank_statements_count} transaction(s)
                   </div>
