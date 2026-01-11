@@ -34,30 +34,58 @@ export default function TransactionList({ matterId }: TransactionListProps) {
   const [loading, setLoading] = useState(true);
   const [filterSeverity, setFilterSeverity] = useState<string>('');
 
+  // Debug logging
+  console.log('🔍 TransactionList mounted with matterId:', matterId);
+  console.log('🔍 matterId type:', typeof matterId);
+  console.log('🔍 matterId is valid:', matterId && !isNaN(matterId));
+
   useEffect(() => {
-    fetchData();
+    if (matterId && !isNaN(matterId)) {
+      fetchData();
+    } else {
+      console.error('❌ Invalid matterId:', matterId);
+      setLoading(false);
+    }
   }, [matterId]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
+      console.log('🔍 Fetching transaction data for matter:', matterId);
+      console.log('🔍 API Base URL:', API_BASE_URL);
+      
       // Fetch both transactions and alerts
+      const txnUrl = `${API_BASE_URL}/api/v1/matters/${matterId}/transactions`;
+      const alertUrl = `${API_BASE_URL}/api/v1/matters/${matterId}/transaction-alerts`;
+      
+      console.log('🔍 Fetching transactions from:', txnUrl);
+      console.log('🔍 Fetching alerts from:', alertUrl);
+      
       const [txnResponse, alertResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transactions`),
-        fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transaction-alerts`)
+        fetch(txnUrl),
+        fetch(alertUrl)
       ]);
+
+      console.log('📊 Transaction response status:', txnResponse.status);
+      console.log('📊 Alert response status:', alertResponse.status);
 
       if (txnResponse.ok) {
         const txnData = await txnResponse.json();
+        console.log('✅ Transactions loaded:', txnData.length);
         setTransactions(txnData);
+      } else {
+        console.error('❌ Transaction fetch failed:', txnResponse.status, txnResponse.statusText);
       }
 
       if (alertResponse.ok) {
         const alertData = await alertResponse.json();
+        console.log('✅ Alerts loaded:', alertData.length);
         setAlerts(alertData);
+      } else {
+        console.error('❌ Alert fetch failed:', alertResponse.status, alertResponse.statusText);
       }
     } catch (error) {
-      console.error('Error fetching transaction data:', error);
+      console.error('❌ Error fetching transaction data:', error);
     } finally {
       setLoading(false);
     }

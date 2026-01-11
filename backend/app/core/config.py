@@ -32,8 +32,12 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
+        "http://localhost:5175",
         "http://localhost:3000",
         "http://localhost:8000",
+        "https://5173-iuy1pmhbm169wep8nogbw-b32ec7bb.sandbox.novita.ai",
+        "https://5175-iuy1pmhbm169wep8nogbw-b32ec7bb.sandbox.novita.ai",
+        "*",  # Allow all for development
     ]
     
     # Database
