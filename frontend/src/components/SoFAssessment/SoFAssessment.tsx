@@ -831,16 +831,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
   return (
     <div className="space-y-6">
-      {/* Logo Header */}
-      <div className="flex items-center justify-between px-4 py-4 bg-white rounded-lg shadow-sm">
-        <div>
-          <img src="/forbes-logo.png" alt="Forbes Solicitors" className="h-12" />
-        </div>
-        <div>
-          <img src="/more-than-law-logo.png" alt="More than law" className="h-10" />
-        </div>
-      </div>
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
