@@ -294,6 +294,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     }
   };
 
+  const extractFinalAssessmentText = (rationale: string): string[] => {
+    // Extract the Final Assessment section
+    const finalMatch = rationale.match(/=== FINAL ASSESSMENT ===([\s\S]*?)(?:$)/);
+    if (!finalMatch) return ['Assessment details not available.'];
+    
+    const content = finalMatch[1].trim();
+    // Remove the DECISION: line and get the explanation
+    const lines = content.split('\n').filter(line => 
+      line.trim() && 
+      !line.includes('DECISION:') && 
+      !line.includes('===')
+    );
+    
+    // Group into paragraphs (non-empty lines)
+    return lines.map(line => line.trim()).filter(line => line.length > 0);
+  };
+
   const renderStructuredRationale = (result: AssessmentResult) => {
     // Parse the rationale into sections
     const rationale = result.outcome.rationale;
@@ -306,14 +323,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           const title = lines[0].trim();
           const content = lines.slice(1).join('\n');
           
-          // Determine section type
+          // Determine section type - SKIP FINAL ASSESSMENT (now in top box)
           if (title.includes('SOURCE OF FUNDS')) {
             return renderSoFSection(content, result);
           } else if (title.includes('TRANSACTION REVIEW')) {
             return renderTransactionReviewSection(content, result);
-          } else if (title.includes('FINAL ASSESSMENT')) {
-            return renderFinalAssessmentSection(content);
           }
+          // Don't render Final Assessment here - it's in the top decision box
           return null;
         })}
       </div>
@@ -531,36 +547,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
-  const renderFinalAssessmentSection = (content: string) => {
-    const decisionMatch = content.match(/DECISION: (\w+)/);
-    const decision = decisionMatch ? decisionMatch[1] : 'UNKNOWN';
-    
-    const explanation = content.split('\n\n').slice(1).join('\n\n').trim();
-    
-    const isGood = decision === 'SUFFICIENT';
-    const isBorderline = decision === 'BORDERLINE';
-    
-    return (
-      <div key="final" className={`border-2 rounded-lg overflow-hidden ${
-        isGood ? 'border-green-500 bg-green-50' :
-        isBorderline ? 'border-yellow-500 bg-yellow-50' :
-        'border-red-500 bg-red-50'
-      }`}>
-        <div className="px-6 py-4">
-          <h3 className="text-lg font-bold mb-3">
-            {isGood ? '✅' : isBorderline ? '⚠️' : '❌'} Final Assessment: {decision}
-          </h3>
-          <div className="text-sm space-y-2">
-            {explanation.split('\n').filter(line => line.trim()).map((line, idx) => (
-              <p key={idx} className={isGood ? 'text-green-900' : isBorderline ? 'text-yellow-900' : 'text-red-900'}>
-                {line.trim()}
-              </p>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -925,9 +911,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Results Step */}
       {activeStep === 'results' && result && (
         <div className="space-y-6">
-          {/* Overall Decision Badge */}
+          {/* Overall Decision Badge with Full Summary */}
           <div className={`rounded-lg p-6 text-white ${getStatusColor(result.outcome.status)}`}>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-2xl font-bold mb-2">
                   {result.outcome.status.toUpperCase()}
@@ -937,6 +923,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <div className="text-5xl">
                 {result.outcome.status === 'sufficient' ? '✅' :
                  result.outcome.status === 'borderline' ? '⚠️' : '❌'}
+              </div>
+            </div>
+            
+            {/* Final Assessment Summary */}
+            <div className="mt-4 pt-4 border-t border-white/20">
+              <h4 className="text-lg font-semibold mb-3">Assessment Summary</h4>
+              <div className="space-y-2 text-white/95 text-sm leading-relaxed">
+                {extractFinalAssessmentText(result.outcome.rationale).map((paragraph, idx) => (
+                  <p key={idx}>{paragraph}</p>
+                ))}
               </div>
             </div>
           </div>
