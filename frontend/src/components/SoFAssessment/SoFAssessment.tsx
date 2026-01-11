@@ -60,6 +60,26 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const [uploadingFiles, setUploadingFiles] = useState<{ [key: string]: boolean }>({});
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [activeStep, setActiveStep] = useState<'upload' | 'results'>('upload');
+  
+  // Client Info input method
+  const [clientInfoInputMethod, setClientInfoInputMethod] = useState<'manual' | 'file' | null>(null);
+  
+  // Manual input form state
+  const [manualClientInfo, setManualClientInfo] = useState({
+    client_name: '',
+    client_risk_rating: 'medium' as 'low' | 'medium' | 'high',
+    pep_status: false,
+    business_sector: '',
+  });
+  
+  const [manualPurchase, setManualPurchase] = useState({
+    amount: '',
+    currency: 'GBP',
+    expected_payment_date: '',
+    description: '',
+  });
+  
+  const [manualSofExplanation, setManualSofExplanation] = useState('');
 
   useEffect(() => {
     fetchStatus();
@@ -125,6 +145,75 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       setErrors(prev => ({ ...prev, [category]: error.message }));
     } finally {
       setUploadingFiles(prev => ({ ...prev, [category]: false }));
+    }
+  };
+
+  const handleManualSubmit = async () => {
+    setUploadingFiles(prev => ({ ...prev, client_info: true }));
+    setErrors(prev => ({ ...prev, client_info: '' }));
+
+    try {
+      // Validate required fields
+      if (!manualClientInfo.client_name) {
+        throw new Error('Client name is required');
+      }
+      if (!manualPurchase.amount || !manualPurchase.currency) {
+        throw new Error('Purchase amount and currency are required');
+      }
+      if (!manualSofExplanation) {
+        throw new Error('Source of Funds explanation is required');
+      }
+
+      // Create JSON structure
+      const clientInfoJson = {
+        client_info: {
+          client_name: manualClientInfo.client_name,
+          client_risk_rating: manualClientInfo.client_risk_rating,
+          pep_status: manualClientInfo.pep_status,
+          business_sector: manualClientInfo.business_sector || 'Not specified',
+        },
+        purchase: {
+          amount: parseFloat(manualPurchase.amount),
+          currency: manualPurchase.currency,
+          expected_payment_date: manualPurchase.expected_payment_date || new Date().toISOString().split('T')[0],
+          description: manualPurchase.description || 'Business purchase',
+        },
+        sof_explanation: manualSofExplanation,
+        known_documents: [],
+        flags: {
+          pep: manualClientInfo.pep_status,
+          high_risk_jurisdictions: [],
+        },
+        constraints: {},
+      };
+
+      // Convert to JSON blob and upload
+      const blob = new Blob([JSON.stringify(clientInfoJson, null, 2)], { type: 'application/json' });
+      const file = new File([blob], 'client_info_manual.json', { type: 'application/json' });
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('file_category', 'client_info');
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Upload failed');
+      }
+
+      await fetchStatus();
+      setClientInfoInputMethod(null); // Reset to show success state
+    } catch (error: any) {
+      setErrors(prev => ({ ...prev, client_info: error.message }));
+    } finally {
+      setUploadingFiles(prev => ({ ...prev, client_info: false }));
     }
   };
 
@@ -264,26 +353,194 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <div className="text-center">
                 <div className="text-4xl mb-3">📋</div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Client Info</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  JSON file with client details, purchase info, and SoF explanation
-                </p>
-                <label className="cursor-pointer">
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={(e) => handleFileUpload(e, 'client_info')}
-                    className="hidden"
-                    disabled={uploadingFiles.client_info}
-                  />
-                  <span className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50">
-                    {uploadingFiles.client_info ? 'Uploading...' : 'Choose JSON File'}
-                  </span>
-                </label>
-                {status && status.files_summary && status.files_summary.client_info === 'uploaded' && (
-                  <div className="mt-3 text-green-600 text-sm font-medium">✓ Uploaded</div>
-                )}
-                {errors.client_info && (
-                  <div className="mt-3 text-red-600 text-sm">{errors.client_info}</div>
+                
+                {/* Show success state if already uploaded */}
+                {status && status.files_summary && status.files_summary.client_info === 'uploaded' ? (
+                  <>
+                    <div className="mt-3 text-green-600 text-sm font-medium">✓ Uploaded</div>
+                    <button
+                      onClick={() => setClientInfoInputMethod(null)}
+                      className="mt-2 text-xs text-blue-600 hover:text-blue-700 underline"
+                    >
+                      Change
+                    </button>
+                  </>
+                ) : clientInfoInputMethod === null ? (
+                  // Initial choice
+                  <>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Choose how to provide client information
+                    </p>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setClientInfoInputMethod('manual')}
+                        className="w-full px-4 py-2 border-2 border-blue-500 text-blue-700 rounded-md hover:bg-blue-50 font-medium"
+                      >
+                        ✏️ Enter Manually
+                      </button>
+                      <button
+                        onClick={() => setClientInfoInputMethod('file')}
+                        className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+                      >
+                        📁 Upload File
+                      </button>
+                    </div>
+                  </>
+                ) : clientInfoInputMethod === 'file' ? (
+                  // File upload mode
+                  <>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Upload CSV, JSON, Word Doc, or PDF
+                    </p>
+                    <label className="cursor-pointer">
+                      <input
+                        type="file"
+                        accept=".json,.csv,.pdf,.doc,.docx"
+                        onChange={(e) => handleFileUpload(e, 'client_info')}
+                        className="hidden"
+                        disabled={uploadingFiles.client_info}
+                      />
+                      <span className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50">
+                        {uploadingFiles.client_info ? 'Uploading...' : 'Choose File'}
+                      </span>
+                    </label>
+                    <button
+                      onClick={() => setClientInfoInputMethod(null)}
+                      className="mt-2 text-xs text-gray-600 hover:text-gray-700 underline block mx-auto"
+                    >
+                      ← Back
+                    </button>
+                    {errors.client_info && (
+                      <div className="mt-3 text-red-600 text-sm">{errors.client_info}</div>
+                    )}
+                  </>
+                ) : (
+                  // Manual input mode
+                  <div className="text-left space-y-3 mt-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Client Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={manualClientInfo.client_name}
+                        onChange={(e) => setManualClientInfo({...manualClientInfo, client_name: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        placeholder="ABC Corp Ltd"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Risk Rating *
+                      </label>
+                      <select
+                        value={manualClientInfo.client_risk_rating}
+                        onChange={(e) => setManualClientInfo({...manualClientInfo, client_risk_rating: e.target.value as any})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Business Sector
+                      </label>
+                      <input
+                        type="text"
+                        value={manualClientInfo.business_sector}
+                        onChange={(e) => setManualClientInfo({...manualClientInfo, business_sector: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        placeholder="Manufacturing"
+                      />
+                    </div>
+                    
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={manualClientInfo.pep_status}
+                        onChange={(e) => setManualClientInfo({...manualClientInfo, pep_status: e.target.checked})}
+                        className="mr-2"
+                      />
+                      <label className="text-xs text-gray-700">
+                        Politically Exposed Person (PEP)
+                      </label>
+                    </div>
+                    
+                    <div className="border-t pt-3">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Purchase Amount * (£)
+                      </label>
+                      <input
+                        type="number"
+                        value={manualPurchase.amount}
+                        onChange={(e) => setManualPurchase({...manualPurchase, amount: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        placeholder="500000"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Purchase Description
+                      </label>
+                      <input
+                        type="text"
+                        value={manualPurchase.description}
+                        onChange={(e) => setManualPurchase({...manualPurchase, description: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        placeholder="Business acquisition"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Expected Payment Date
+                      </label>
+                      <input
+                        type="date"
+                        value={manualPurchase.expected_payment_date}
+                        onChange={(e) => setManualPurchase({...manualPurchase, expected_payment_date: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Source of Funds Explanation *
+                      </label>
+                      <textarea
+                        value={manualSofExplanation}
+                        onChange={(e) => setManualSofExplanation(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        rows={4}
+                        placeholder="Explain where the funds came from (e.g., inheritance, property sale, savings, loan...)"
+                      />
+                    </div>
+                    
+                    <div className="pt-2 space-y-2">
+                      <button
+                        onClick={handleManualSubmit}
+                        disabled={uploadingFiles.client_info}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                      >
+                        {uploadingFiles.client_info ? 'Submitting...' : '✓ Submit'}
+                      </button>
+                      <button
+                        onClick={() => setClientInfoInputMethod(null)}
+                        className="w-full text-xs text-gray-600 hover:text-gray-700 underline"
+                      >
+                        ← Back
+                      </button>
+                    </div>
+                    
+                    {errors.client_info && (
+                      <div className="mt-3 text-red-600 text-xs">{errors.client_info}</div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
