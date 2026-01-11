@@ -28,13 +28,7 @@ export default function TransactionDashboard({ matterId }: TransactionDashboardP
   const fetchDashboard = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transaction-dashboard`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transaction-dashboard`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

@@ -106,7 +106,6 @@ async def upload_transactions(
     matter_id: int,
     file: UploadFile = File(...),
     customer_id: str = Form(...),
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -117,6 +116,8 @@ async def upload_transactions(
     - PDF bank statements (automatically extracts transactions)
     
     File types accepted: .csv, .pdf
+    
+    Note: Authentication removed - accessible without login
     """
     # Verify matter exists
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
@@ -196,7 +197,6 @@ async def get_transactions(
     matter_id: int,
     limit: int = 100,
     offset: int = 0,
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -214,7 +214,6 @@ async def get_transaction_alerts(
     matter_id: int,
     severity: Optional[str] = None,
     status: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -267,7 +266,6 @@ async def review_alert(
     alert_id: int,
     status: str = Form(...),
     notes: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -294,7 +292,6 @@ async def review_alert(
 @router.post("/matters/{matter_id}/run-transaction-checks")
 async def run_transaction_checks(
     matter_id: int,
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -322,7 +319,6 @@ async def run_transaction_checks(
 @router.get("/matters/{matter_id}/transaction-dashboard", response_model=DashboardResponse)
 async def get_transaction_dashboard(
     matter_id: int,
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -404,7 +400,6 @@ async def get_transaction_dashboard(
 
 @router.get("/transaction-config")
 async def get_transaction_config(
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
@@ -426,7 +421,6 @@ async def get_transaction_config(
 @router.put("/transaction-config")
 async def update_transaction_config(
     updates: Dict[str, str],
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_sync_db)
 ):
     """
