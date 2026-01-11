@@ -320,7 +320,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   <span>{verified ? '✅' : '⚠️'}</span>
                   <span>
                     {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
-                    <span className="ml-2 font-semibold">[{verified ? 'VERIFIED' : 'NOT VERIFIED'}]</span>
+                    <span className="ml-2 font-semibold">[{verified ? 'BANK PAYMENT FOUND' : 'NO BANK PAYMENT'}]</span>
                   </span>
                 </li>
               );
@@ -334,22 +334,28 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <p className="text-sm mb-2">
             Direct verification: {verified_count}/{total_claims} claims matched to bank statement entries.
           </p>
+          <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-3 mb-3 text-sm">
+            <p className="font-semibold text-yellow-300 mb-1">⚠️ IMPORTANT:</p>
+            <p className="text-yellow-100">
+              Bank statements alone are INSUFFICIENT. Corroborating source documents (e.g., probate grants, 
+              completion statements) are REQUIRED to prove legitimacy. Bank payments verify receipt, NOT lawful origin.
+            </p>
+          </div>
           <ul className="space-y-2 text-sm">
             {result.evidence_matches.map((evidence, idx) => (
               <li key={idx}>
                 {evidence.verified ? (
                   <div>
-                    <div className="font-medium">✅ Claim {idx + 1} ({evidence.claim_source}): VERIFIED</div>
+                    <div className="font-medium">✅ Claim {idx + 1} ({evidence.claim_source}): Bank payment found</div>
                     {evidence.transactions.length > 0 && (
                       <div className="ml-6 mt-1 space-y-1">
                         {evidence.transactions.map((txn: any, tidx: number) => (
                           <div key={tidx} className="text-xs">
-                            <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date} | Type: {txn.direction === 'credit' ? 'Incoming payment' : 'Outgoing payment'}</div>
-                            <div className="ml-2 text-white/70 italic">
-                              Evidence quality: {evidence.match_quality} match. 
-                              {txn.counterparty && `Source: ${txn.counterparty}. `}
-                              Amount aligns with client's claimed {evidence.claim_source.toLowerCase()} of £{evidence.expected_amount?.toLocaleString() || 'N/A'}, 
-                              supporting the legitimacy of this funding source.
+                            <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
+                            <div>• Transaction: {txn.description || 'N/A'}</div>
+                            <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
+                            <div className="ml-2 text-orange-300 font-semibold mt-1">
+                              ⚠️ REQUIRES: Source documentation to prove legitimacy
                             </div>
                           </div>
                         ))}
@@ -508,8 +514,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           const title = lines[0].trim();
           const content = lines.slice(1).join('\n');
           
-          // Determine section type - SKIP FINAL ASSESSMENT (now in top box)
-          if (title.includes('SOURCE OF FUNDS')) {
+          // Determine section type
+          if (title.includes('CLIENT INFORMATION')) {
+            return renderClientInfoSection(content);
+          } else if (title.includes('SOURCE OF FUNDS')) {
             return renderSoFSection(content, result);
           } else if (title.includes('TRANSACTION REVIEW')) {
             return renderTransactionReviewSection(content, result);
@@ -521,13 +529,35 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
+  const renderClientInfoSection = (content: string) => {
+    return (
+      <div key="client-info" className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {/* Header */}
+        <div className="bg-purple-50 border-b border-purple-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-purple-900">👤 Client Information</h3>
+        </div>
+        
+        {/* Client Details */}
+        <div className="px-6 py-4">
+          <pre className="whitespace-pre-wrap text-sm text-gray-800 font-mono">{content}</pre>
+        </div>
+      </div>
+    );
+  };
+
   const renderSoFSection = (content: string, result: AssessmentResult) => {
-    // Extract overall status
-    const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/);
+    // Extract status lines (both old and new formats)
+    const bankPaymentMatch = content.match(/BANK PAYMENT STATUS:([^\n]+)/);
+    const docStatusMatch = content.match(/DOCUMENTATION STATUS:([^\n]+)/);
+    const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/); // Legacy format
+    
+    const bankStatus = bankPaymentMatch ? bankPaymentMatch[1].trim() : '';
+    const docStatus = docStatusMatch ? docStatusMatch[1].trim() : '';
     const overallStatus = overallMatch ? overallMatch[1].trim() : '';
     
-    const isGood = overallStatus.includes('✅') || overallStatus.includes('Sufficient');
-    const isPartial = overallStatus.includes('⚠️') || overallStatus.includes('Partial');
+    const displayStatus = bankStatus || overallStatus;
+    const isGood = displayStatus.includes('✅') || displayStatus.includes('100%');
+    const isPartial = displayStatus.includes('⚠️') || displayStatus.includes('Partial');
     
     return (
       <div key="sof" className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -536,11 +566,28 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <h3 className="text-lg font-bold text-blue-900">📊 Source of Funds Analysis</h3>
         </div>
         
-        {/* Overall Status */}
+        {/* Status Lines */}
         <div className={`px-6 py-4 border-b ${isGood ? 'bg-green-50 border-green-200' : isPartial ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`}>
-          <p className={`font-semibold ${isGood ? 'text-green-900' : isPartial ? 'text-yellow-900' : 'text-red-900'}`}>
-            {overallStatus}
-          </p>
+          {bankStatus && (
+            <p className={`font-semibold mb-2 ${isGood ? 'text-green-900' : isPartial ? 'text-yellow-900' : 'text-red-900'}`}>
+              {bankStatus}
+            </p>
+          )}
+          {docStatus && (
+            <div>
+              <p className="font-semibold text-orange-900 mb-1">{docStatus}</p>
+              {content.includes('Bank payments alone are INSUFFICIENT') && (
+                <p className="text-sm text-orange-800 italic ml-4">
+                  Bank payments alone are INSUFFICIENT for AML compliance.
+                </p>
+              )}
+            </div>
+          )}
+          {!bankStatus && overallStatus && (
+            <p className={`font-semibold ${isGood ? 'text-green-900' : isPartial ? 'text-yellow-900' : 'text-red-900'}`}>
+              {overallStatus}
+            </p>
+          )}
         </div>
         
         {/* Claims Table */}
