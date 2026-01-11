@@ -22,6 +22,8 @@ interface Alert {
   reasons: string[];
   rule_tags: string[];
   status: string;
+  ai_rationale?: string;
+  ai_outreach?: string;
 }
 
 interface TransactionListProps {
@@ -290,32 +292,99 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                         🚨 {txnAlerts.length} Alert{txnAlerts.length > 1 ? 's' : ''}:
                       </span>
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {txnAlerts.map((alert) => (
-                        <div key={alert.id} className="bg-gray-50 rounded-md p-3">
-                          <div className="flex items-start justify-between mb-2">
-                            <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${getSeverityBadge(alert.severity)}`}>
-                              {alert.severity}
+                        <div key={alert.id} className="bg-gray-50 rounded-md p-4 border border-gray-200">
+                          {/* Alert Header */}
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center space-x-2">
+                              <span className={`inline-block px-3 py-1 text-xs font-semibold rounded ${getSeverityBadge(alert.severity)}`}>
+                                {alert.severity}
+                              </span>
+                              <span className="text-xs font-medium text-gray-600">Risk Score: {alert.score}/100</span>
+                            </div>
+                            <span className={`text-xs font-medium px-2 py-1 rounded ${
+                              alert.status === 'open' ? 'bg-yellow-100 text-yellow-800' :
+                              alert.status === 'reviewed' ? 'bg-blue-100 text-blue-800' :
+                              alert.status === 'closed' ? 'bg-green-100 text-green-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {alert.status.charAt(0).toUpperCase() + alert.status.slice(1)}
                             </span>
-                            <span className="text-xs text-gray-500">Score: {alert.score}</span>
                           </div>
-                          <div className="space-y-1">
-                            {alert.reasons.map((reason, idx) => (
-                              <div key={idx} className="text-sm text-gray-700 flex items-start">
-                                <span className="mr-2">•</span>
-                                <span>{reason}</span>
-                              </div>
-                            ))}
-                          </div>
-                          {alert.rule_tags.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {alert.rule_tags.map((tag, idx) => (
-                                <span key={idx} className="inline-block px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">
-                                  {tag}
-                                </span>
+
+                          {/* Alert Reasons */}
+                          <div className="mb-3">
+                            <div className="text-xs font-semibold text-gray-700 mb-1">🚩 Alert Reasons:</div>
+                            <div className="space-y-1">
+                              {alert.reasons.map((reason, idx) => (
+                                <div key={idx} className="text-sm text-gray-700 flex items-start">
+                                  <span className="mr-2 text-red-500">•</span>
+                                  <span>{reason}</span>
+                                </div>
                               ))}
                             </div>
+                          </div>
+
+                          {/* Rule Tags */}
+                          {alert.rule_tags.length > 0 && (
+                            <div className="mb-3">
+                              <div className="text-xs font-semibold text-gray-700 mb-1">🏷️ Triggered Rules:</div>
+                              <div className="flex flex-wrap gap-1">
+                                {alert.rule_tags.map((tag, idx) => (
+                                  <span key={idx} className="inline-block px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           )}
+
+                          {/* AI Rationale */}
+                          <div className="mb-3 bg-white rounded p-3 border border-blue-200">
+                            <div className="flex items-center mb-2">
+                              <span className="text-xs font-semibold text-blue-700">🤖 AI Rationale</span>
+                            </div>
+                            <p className="text-sm text-gray-700 italic">
+                              {alert.ai_rationale || `This ${alert.severity.toLowerCase()} risk transaction from ${txn.country_iso2} for ${txn.currency} ${txn.amount.toLocaleString()} has been flagged due to: ${alert.reasons.slice(0, 2).join(', ')}. ${
+                                alert.severity === 'CRITICAL' ? 'Immediate review and enhanced due diligence is strongly recommended before processing.' :
+                                alert.severity === 'HIGH' ? 'Enhanced due diligence and additional documentation should be obtained.' :
+                                'Standard verification procedures should be followed.'
+                              }`}
+                            </p>
+                          </div>
+
+                          {/* AI Outreach */}
+                          <div className="mb-3 bg-white rounded p-3 border border-purple-200">
+                            <div className="flex items-center mb-2">
+                              <span className="text-xs font-semibold text-purple-700">💬 AI Suggested Outreach</span>
+                            </div>
+                            <p className="text-sm text-gray-700 italic">
+                              {alert.ai_outreach || `Dear ${txn.customer_id}, regarding your recent ${txn.direction === 'in' ? 'incoming' : 'outgoing'} transaction of ${txn.currency} ${txn.amount.toLocaleString()} on ${new Date(txn.txn_date).toLocaleDateString()}, we require additional documentation to complete our compliance review. Please provide: ${
+                                alert.severity === 'CRITICAL' ? '1) Source of funds documentation, 2) Proof of business relationship, 3) Purpose of transaction, 4) Beneficial ownership details.' :
+                                alert.severity === 'HIGH' ? '1) Transaction purpose statement, 2) Supporting invoices/contracts, 3) Proof of business activity.' :
+                                '1) Brief transaction description, 2) Any supporting documentation.'
+                              } Thank you for your cooperation.`}
+                            </p>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center justify-between pt-3 border-t border-gray-200">
+                            <div className="flex space-x-2">
+                              <button className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded">
+                                ✓ Approve
+                              </button>
+                              <button className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded">
+                                👁️ Review
+                              </button>
+                              <button className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded">
+                                🚫 Flag
+                              </button>
+                            </div>
+                            <button className="text-xs text-gray-600 hover:text-gray-800 underline">
+                              View Full Details →
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
