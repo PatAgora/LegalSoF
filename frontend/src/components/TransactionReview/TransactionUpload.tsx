@@ -63,8 +63,15 @@ export default function TransactionUpload({ matterId, onUploadSuccess }: Transac
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold mb-4">Upload Bank Transactions</h3>
+      <h3 className="text-lg font-semibold mb-4">📄 Upload Bank Transactions</h3>
       
+      <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <h4 className="text-sm font-semibold text-blue-900 mb-2">✨ Now Supports PDF!</h4>
+        <p className="text-sm text-blue-800">
+          Upload CSV files or PDF bank statements. Our AI automatically extracts transactions from PDFs.
+        </p>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -82,17 +89,29 @@ export default function TransactionUpload({ matterId, onUploadSuccess }: Transac
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            CSV File
+            Bank Statement File (CSV or PDF)
           </label>
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.pdf"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             required
           />
           <p className="mt-1 text-xs text-gray-500">
-            CSV format: id, date, amount, currency, direction, country, narrative
+            {file?.name ? (
+              <span className="font-medium text-blue-600">
+                Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+              </span>
+            ) : (
+              <>
+                Accepted formats: <span className="font-medium">.csv, .pdf</span>
+                <br />
+                CSV format: id, date, amount, currency, direction, country, narrative
+                <br />
+                PDF format: Any standard bank statement with transaction tables
+              </>
+            )}
           </p>
         </div>
 
@@ -105,19 +124,50 @@ export default function TransactionUpload({ matterId, onUploadSuccess }: Transac
         <button
           type="submit"
           disabled={uploading}
-          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
-          {uploading ? 'Uploading...' : 'Upload Transactions'}
+          {uploading ? (
+            <>
+              <span className="inline-block animate-spin mr-2">⏳</span>
+              Uploading and analyzing...
+            </>
+          ) : (
+            <>
+              <span className="mr-2">📤</span>
+              Upload Transactions
+            </>
+          )}
         </button>
       </form>
 
-      <div className="mt-6 p-4 bg-gray-50 rounded-md">
-        <h4 className="text-sm font-semibold mb-2">Sample CSV Format:</h4>
-        <pre className="text-xs overflow-x-auto">
+      <div className="mt-6 space-y-4">
+        {/* CSV Example */}
+        <div className="p-4 bg-gray-50 rounded-md border border-gray-200">
+          <h4 className="text-sm font-semibold mb-2 flex items-center">
+            <span className="mr-2">📊</span>
+            Sample CSV Format:
+          </h4>
+          <pre className="text-xs overflow-x-auto bg-white p-2 rounded border">
 {`id,txn_date,customer_id,direction,amount,currency,country_iso2,narrative
 TXN001,2024-01-15,CUST001,in,5000,GBP,IR,Payment from supplier
 TXN002,2024-01-16,CUST001,out,25000,GBP,GB,Large cash withdrawal`}
-        </pre>
+          </pre>
+        </div>
+
+        {/* PDF Info */}
+        <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-md border border-purple-200">
+          <h4 className="text-sm font-semibold mb-2 flex items-center text-purple-900">
+            <span className="mr-2">📄</span>
+            PDF Bank Statement Support:
+          </h4>
+          <ul className="text-xs text-purple-800 space-y-1 ml-4">
+            <li>• Upload PDF statements from any bank (HSBC, Barclays, Lloyds, etc.)</li>
+            <li>• AI automatically extracts transaction data from tables</li>
+            <li>• Detects dates, amounts, descriptions, and currencies</li>
+            <li>• Works with multi-page statements</li>
+            <li>• Instantly generates AML alerts for suspicious activity</li>
+          </ul>
+        </div>
       </div>
     </div>
   );

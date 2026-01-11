@@ -17,6 +17,7 @@ from app.models import (
     KYCProfile, TransactionConfig
 )
 from app.services.transaction_parser import TransactionCSVParser
+from app.services.pdf_transaction_parser import PDFTransactionParser
 from app.services.transaction_monitoring import TransactionMonitoringService
 
 from pydantic import BaseModel, Field
@@ -109,23 +110,53 @@ async def upload_transactions(
     db: Session = Depends(get_sync_db)
 ):
     """
-    Upload CSV file with bank transactions and run AML checks
+    Upload CSV or PDF file with bank transactions and run AML checks.
+    
+    Supports:
+    - CSV files with transaction data
+    - PDF bank statements (automatically extracts transactions)
+    
+    File types accepted: .csv, .pdf
     """
     # Verify matter exists
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
     
-    # Read CSV content
-    csv_content = await file.read()
-    csv_str = csv_content.decode('utf-8')
+    # Read file content
+    file_content = await file.read()
     
-    # Parse CSV
-    parser = TransactionCSVParser()
+    # Determine file type and parse accordingly
+    filename = file.filename.lower() if file.filename else ""
+    
     try:
-        parsed_transactions = parser.parse_csv(csv_str, customer_id)
+        if filename.endswith('.pdf'):
+            # Parse PDF bank statement
+            pdf_parser = PDFTransactionParser()
+            parsed_transactions = pdf_parser.parse_pdf(file_content, customer_id)
+            
+            if not parsed_transactions:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="No transactions found in PDF. Please ensure it's a valid bank statement."
+                )
+            
+        elif filename.endswith('.csv'):
+            # Parse CSV file
+            csv_str = file_content.decode('utf-8')
+            csv_parser = TransactionCSVParser()
+            parsed_transactions = csv_parser.parse_csv(csv_str, customer_id)
+            
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Unsupported file type. Please upload a CSV or PDF file."
+            )
+            
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"CSV parsing error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"File parsing error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
     
     # Create transaction records
     transactions_created = 0
@@ -150,9 +181,11 @@ async def upload_transactions(
     monitoring_service = TransactionMonitoringService(db)
     alerts = monitoring_service.run_checks_for_matter(matter_id)
     
+    file_type = "PDF" if filename.endswith('.pdf') else "CSV"
+    
     return UploadResponse(
         success=True,
-        message=f"Successfully uploaded {transactions_created} transactions and generated {len(alerts)} alerts",
+        message=f"Successfully processed {file_type} file: {transactions_created} transactions uploaded, {len(alerts)} alerts generated",
         transactions_created=transactions_created,
         alerts_generated=len(alerts)
     )
