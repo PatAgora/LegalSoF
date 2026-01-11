@@ -80,7 +80,9 @@ class SoFAssessmentEngine:
             evidence_matches,
             funding_paths,
             red_flags,
-            transaction_review_data
+            transaction_review_data,
+            client_info=client_info,
+            purchase=purchase
         )
         
         # Step 8: Generate next actions
@@ -645,7 +647,9 @@ class SoFAssessmentEngine:
         evidence_matches: List[Dict[str, Any]],
         funding_paths: List[Dict[str, Any]],
         red_flags: List[Dict[str, Any]],
-        transaction_review_data: Dict[str, Any]
+        transaction_review_data: Dict[str, Any],
+        client_info: Dict[str, Any] = None,
+        purchase: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         Make overall risk decision considering all factors
@@ -717,7 +721,9 @@ class SoFAssessmentEngine:
             critical_flags=critical_flags,
             high_flags=high_flags,
             status=status,
-            red_flags=red_flags
+            red_flags=red_flags,
+            client_info=client_info,
+            purchase=purchase
         )
         
         return {
@@ -740,12 +746,29 @@ class SoFAssessmentEngine:
         critical_flags: int,
         high_flags: int,
         status: str,
-        red_flags: List[Dict[str, Any]]
+        red_flags: List[Dict[str, Any]],
+        client_info: Dict[str, Any] = None,
+        purchase: Dict[str, Any] = None
     ) -> str:
         """
         Build detailed, structured rationale with sections and tables
         """
         sections = []
+        
+        # ============================================================
+        # CLIENT INFORMATION HEADER
+        # ============================================================
+        if client_info and purchase:
+            client_section = ["=== CLIENT INFORMATION ==="]
+            client_section.append(f"Client Name: {client_info.get('client_name', 'Not provided')}")
+            client_section.append(f"Risk Rating: {client_info.get('client_risk_rating', 'Not specified').upper()}")
+            client_section.append(f"Business Sector: {client_info.get('business_sector', 'Not specified')}")
+            client_section.append(f"PEP Status: {'Yes' if client_info.get('is_pep', False) else 'No'}")
+            client_section.append(f"Purchase Amount: £{purchase.get('amount', 0):,.2f} {purchase.get('currency', 'GBP')}")
+            client_section.append(f"Purchase Description: {purchase.get('description', 'Not specified')}")
+            client_section.append(f"Expected Payment Date: {purchase.get('expected_payment_date', 'Not specified')}")
+            client_section.append("")  # Empty line
+            sections.append("\n".join(client_section))
         
         # ============================================================
         # SECTION 1: SOURCE OF FUNDS ANALYSIS
@@ -755,15 +778,19 @@ class SoFAssessmentEngine:
         # Overall funding status
         if best_coverage >= 90:
             sof_section.append(
-                f"✅ OVERALL STATUS: Sufficient incoming payments found to cover purchase amount ({best_coverage}% coverage).\n"
+                f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                f"⚠️ DOCUMENTATION STATUS: Corroborating source documents REQUIRED to prove legitimacy.\n"
+                f"   Bank payments alone are INSUFFICIENT for AML compliance.\n"
             )
         elif best_coverage >= 70:
             sof_section.append(
-                f"⚠️ OVERALL STATUS: Partial funding traced ({best_coverage}% coverage). Some gaps identified.\n"
+                f"⚠️ BANK PAYMENT STATUS: Partial payments traced ({best_coverage}% coverage). Gaps identified.\n"
+                f"⚠️ DOCUMENTATION STATUS: Source documents REQUIRED for all claims.\n"
             )
         else:
             sof_section.append(
-                f"❌ OVERALL STATUS: Insufficient funding traced ({best_coverage}% coverage). Material gaps exist.\n"
+                f"❌ BANK PAYMENT STATUS: Insufficient payments traced ({best_coverage}% coverage). Material gaps exist.\n"
+                f"❌ DOCUMENTATION STATUS: Source documents REQUIRED for all claims.\n"
             )
         
         # Claim-by-claim table
@@ -803,10 +830,10 @@ class SoFAssessmentEngine:
             
             # Summary
             if evidence['verified']:
-                summary = "✅ VERIFIED"
+                summary = "⚠️ Payment found, docs req'd"
             else:
                 if best_coverage >= 90:
-                    summary = "⚠️ Needs docs"
+                    summary = "❌ No payment, docs req'd"
                 else:
                     summary = "❌ MISSING"
             
