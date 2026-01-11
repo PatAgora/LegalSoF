@@ -314,36 +314,36 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       <div className="space-y-4">
         {/* Client Information Header */}
         {result.client_info && result.purchase && (
-          <div className="bg-blue-900/30 border border-blue-500/50 rounded-lg p-4">
-            <h5 className="font-semibold text-blue-300 mb-3 text-lg">Client Information</h5>
+          <div className="bg-[#EAD8C0] border border-[#D4C4B0] rounded-lg p-4">
+            <h5 className="font-semibold text-gray-800 mb-3 text-lg">Client Information</h5>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <span className="text-blue-200 font-medium">Client Name:</span>
-                <span className="text-white ml-2">{result.client_info.client_name || 'Not provided'}</span>
+                <span className="text-gray-700 font-medium">Client Name:</span>
+                <span className="text-gray-900 ml-2">{result.client_info.client_name || 'Not provided'}</span>
               </div>
               <div>
-                <span className="text-blue-200 font-medium">Risk Rating:</span>
-                <span className="text-white ml-2">{(result.client_info.client_risk_rating || 'Not specified').toUpperCase()}</span>
+                <span className="text-gray-700 font-medium">Risk Rating:</span>
+                <span className="text-gray-900 ml-2">{(result.client_info.client_risk_rating || 'Not specified').toUpperCase()}</span>
               </div>
               <div>
-                <span className="text-blue-200 font-medium">Business Sector:</span>
-                <span className="text-white ml-2">{result.client_info.business_sector || 'Not specified'}</span>
+                <span className="text-gray-700 font-medium">Business Sector:</span>
+                <span className="text-gray-900 ml-2">{result.client_info.business_sector || 'Not specified'}</span>
               </div>
               <div>
-                <span className="text-blue-200 font-medium">PEP Status:</span>
-                <span className="text-white ml-2">{result.client_info.is_pep ? 'Yes' : 'No'}</span>
+                <span className="text-gray-700 font-medium">PEP Status:</span>
+                <span className="text-gray-900 ml-2">{result.client_info.is_pep ? 'Yes' : 'No'}</span>
               </div>
               <div>
-                <span className="text-blue-200 font-medium">Purchase Amount:</span>
-                <span className="text-white ml-2">£{result.purchase.amount?.toLocaleString() || 0} {result.purchase.currency || 'GBP'}</span>
+                <span className="text-gray-700 font-medium">Purchase Amount:</span>
+                <span className="text-gray-900 ml-2">£{result.purchase.amount?.toLocaleString() || 0} {result.purchase.currency || 'GBP'}</span>
               </div>
               <div>
-                <span className="text-blue-200 font-medium">Purchase Description:</span>
-                <span className="text-white ml-2">{result.purchase.description || 'Not specified'}</span>
+                <span className="text-gray-700 font-medium">Purchase Description:</span>
+                <span className="text-gray-900 ml-2">{result.purchase.description || 'Not specified'}</span>
               </div>
               <div className="col-span-2">
-                <span className="text-blue-200 font-medium">Expected Payment Date:</span>
-                <span className="text-white ml-2">{result.purchase.expected_payment_date || 'Not specified'}</span>
+                <span className="text-gray-700 font-medium">Expected Payment Date:</span>
+                <span className="text-gray-900 ml-2">{result.purchase.expected_payment_date || 'Not specified'}</span>
               </div>
             </div>
           </div>
@@ -351,7 +351,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
         {/* Claims Overview */}
         <div>
-          <h5 className="font-semibold text-white mb-2">Client's SoF Explanation:</h5>
+          <h5 className="font-semibold text-gray-900 mb-2">Client's SoF Explanation:</h5>
           <ul className="space-y-1 text-sm">
             {result.claims.map((claim, idx) => {
               const evidence = result.evidence_matches[idx];
@@ -371,13 +371,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
         {/* Evidence Summary */}
         <div>
-          <h5 className="font-semibold text-white mb-2">Evidence Review:</h5>
-          <p className="text-sm mb-2">
+          <h5 className="font-semibold text-gray-900 mb-2">Evidence Review:</h5>
+          <p className="text-sm mb-2 text-gray-900">
             Direct verification: {verified_count}/{total_claims} claims matched to bank statement entries.
           </p>
-          <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-3 mb-3 text-sm">
-            <p className="font-semibold text-yellow-300 mb-1">⚠️ IMPORTANT:</p>
-            <p className="text-yellow-100">
+          <div className="bg-[#D4C4B0] border border-[#C4B4A0] rounded p-3 mb-3 text-sm">
+            <p className="font-semibold text-gray-800 mb-1">⚠️ IMPORTANT:</p>
+            <p className="text-gray-900">
               Bank statements alone are INSUFFICIENT. Corroborating source documents (e.g., probate grants, 
               completion statements) are REQUIRED to prove legitimacy. Bank payments verify receipt, NOT lawful origin.
             </p>
@@ -603,29 +603,29 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     return (
       <div key="sof" className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         {/* Header */}
-        <div className="bg-blue-50 border-b border-blue-200 px-6 py-4">
-          <h3 className="text-lg font-bold text-blue-900">📊 Source of Funds Analysis</h3>
+        <div className="bg-[#EAD8C0] border-b border-[#D4C4B0] px-6 py-4">
+          <h3 className="text-lg font-bold text-gray-900">📊 Source of Funds Analysis</h3>
         </div>
         
         {/* Status Lines */}
-        <div className={`px-6 py-4 border-b ${isGood ? 'bg-green-50 border-green-200' : isPartial ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`}>
+        <div className="bg-[#F5EBE0] border-b border-[#D4C4B0] px-6 py-4">
           {bankStatus && (
-            <p className={`font-semibold mb-2 ${isGood ? 'text-green-900' : isPartial ? 'text-yellow-900' : 'text-red-900'}`}>
+            <p className="font-semibold mb-2 text-gray-900">
               {bankStatus}
             </p>
           )}
           {docStatus && (
             <div>
-              <p className="font-semibold text-orange-900 mb-1">{docStatus}</p>
+              <p className="font-semibold text-gray-900 mb-1">{docStatus}</p>
               {content.includes('Bank payments alone are INSUFFICIENT') && (
-                <p className="text-sm text-orange-800 italic ml-4">
+                <p className="text-sm text-gray-800 italic ml-4">
                   Bank payments alone are INSUFFICIENT for AML compliance.
                 </p>
               )}
             </div>
           )}
           {!bankStatus && overallStatus && (
-            <p className={`font-semibold ${isGood ? 'text-green-900' : isPartial ? 'text-yellow-900' : 'text-red-900'}`}>
+            <p className="font-semibold text-gray-900">
               {overallStatus}
             </p>
           )}
@@ -682,8 +682,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       </td>
                       <td className="px-4 py-3">
                         {verified ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            ✅ VERIFIED
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#D4C4B0] text-gray-900">
+                            ⚠️ Payment found, docs req'd
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
@@ -721,13 +721,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     return (
       <div key="tr" className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         {/* Header */}
-        <div className="bg-orange-50 border-b border-orange-200 px-6 py-4">
-          <h3 className="text-lg font-bold text-orange-900">🚨 Automated Transaction Review</h3>
+        <div className="bg-[#EAD8C0] border-b border-[#D4C4B0] px-6 py-4">
+          <h3 className="text-lg font-bold text-gray-900">🚨 Automated Transaction Review</h3>
         </div>
         
         {/* Overall Status */}
-        <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-          <p className={`font-semibold ${hasCritical ? 'text-red-900' : 'text-green-900'}`}>
+        <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-red-50 border-red-200' : 'bg-[#F5EBE0] border-[#D4C4B0]'}`}>
+          <p className={`font-semibold ${hasCritical ? 'text-red-900' : 'text-gray-900'}`}>
             {overallStatus}
           </p>
         </div>
@@ -736,21 +736,21 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="grid grid-cols-4 gap-4">
-              <div className="bg-gray-100 rounded-lg p-3 text-center">
+              <div className="bg-[#EAD8C0] rounded-lg p-3 text-center">
                 <div className="text-2xl font-bold text-gray-900">{result.transaction_review_summary.total_alerts}</div>
-                <div className="text-xs text-gray-600 mt-1">Total Alerts</div>
+                <div className="text-xs text-gray-700 mt-1">Total Alerts</div>
               </div>
               <div className="bg-red-100 rounded-lg p-3 text-center">
                 <div className="text-2xl font-bold text-red-600">{result.transaction_review_summary.critical_alerts}</div>
                 <div className="text-xs text-red-800 mt-1">Critical</div>
               </div>
-              <div className="bg-orange-100 rounded-lg p-3 text-center">
-                <div className="text-2xl font-bold text-orange-600">{result.transaction_review_summary.high_alerts}</div>
-                <div className="text-xs text-orange-800 mt-1">High</div>
+              <div className="bg-[#D4C4B0] rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-gray-800">{result.transaction_review_summary.high_alerts}</div>
+                <div className="text-xs text-gray-700 mt-1">High</div>
               </div>
-              <div className="bg-yellow-100 rounded-lg p-3 text-center">
-                <div className="text-2xl font-bold text-yellow-600">{result.transaction_review_summary.medium_alerts}</div>
-                <div className="text-xs text-yellow-800 mt-1">Medium</div>
+              <div className="bg-[#F5EBE0] rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-gray-800">{result.transaction_review_summary.medium_alerts}</div>
+                <div className="text-xs text-gray-700 mt-1">Medium</div>
               </div>
             </div>
           </div>
