@@ -30,6 +30,18 @@ interface AssessmentOutcome {
 }
 
 interface AssessmentResult {
+  client_info?: {
+    client_name?: string;
+    client_risk_rating?: string;
+    business_sector?: string;
+    is_pep?: boolean;
+  };
+  purchase?: {
+    amount?: number;
+    currency?: string;
+    description?: string;
+    expected_payment_date?: string;
+  };
   claims: any[];
   evidence_matches: any[];
   funding_paths: any[];
@@ -308,6 +320,43 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     
     return (
       <div className="space-y-4">
+        {/* Client Information Header */}
+        {result.client_info && result.purchase && (
+          <div className="bg-blue-900/30 border border-blue-500/50 rounded-lg p-4">
+            <h5 className="font-semibold text-blue-300 mb-3 text-lg">Client Information</h5>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-blue-200 font-medium">Client Name:</span>
+                <span className="text-white ml-2">{result.client_info.client_name || 'Not provided'}</span>
+              </div>
+              <div>
+                <span className="text-blue-200 font-medium">Risk Rating:</span>
+                <span className="text-white ml-2">{(result.client_info.client_risk_rating || 'Not specified').toUpperCase()}</span>
+              </div>
+              <div>
+                <span className="text-blue-200 font-medium">Business Sector:</span>
+                <span className="text-white ml-2">{result.client_info.business_sector || 'Not specified'}</span>
+              </div>
+              <div>
+                <span className="text-blue-200 font-medium">PEP Status:</span>
+                <span className="text-white ml-2">{result.client_info.is_pep ? 'Yes' : 'No'}</span>
+              </div>
+              <div>
+                <span className="text-blue-200 font-medium">Purchase Amount:</span>
+                <span className="text-white ml-2">£{result.purchase.amount?.toLocaleString() || 0} {result.purchase.currency || 'GBP'}</span>
+              </div>
+              <div>
+                <span className="text-blue-200 font-medium">Purchase Description:</span>
+                <span className="text-white ml-2">{result.purchase.description || 'Not specified'}</span>
+              </div>
+              <div className="col-span-2">
+                <span className="text-blue-200 font-medium">Expected Payment Date:</span>
+                <span className="text-white ml-2">{result.purchase.expected_payment_date || 'Not specified'}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Claims Overview */}
         <div>
           <h5 className="font-semibold text-white mb-2">Client's SoF Explanation:</h5>
@@ -317,10 +366,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               const verified = evidence?.verified || false;
               return (
                 <li key={idx} className="flex items-center space-x-2">
-                  <span>{verified ? '✅' : '⚠️'}</span>
+                  <span>⚠️</span>
                   <span>
                     {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
-                    <span className="ml-2 font-semibold">[{verified ? 'BANK PAYMENT FOUND' : 'NO BANK PAYMENT'}]</span>
+                    <span className="ml-2 font-semibold">[{verified ? 'BANK PAYMENT FOUND - DOCS REQUIRED' : 'NO BANK PAYMENT - DOCS REQUIRED'}]</span>
                   </span>
                 </li>
               );
@@ -346,7 +395,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <li key={idx}>
                 {evidence.verified ? (
                   <div>
-                    <div className="font-medium">✅ Claim {idx + 1} ({evidence.claim_source}): Bank payment found</div>
+                    <div className="font-medium">⚠️ Claim {idx + 1} ({evidence.claim_source}): Bank payment found - SOURCE DOCS REQUIRED</div>
                     {evidence.transactions.length > 0 && (
                       <div className="ml-6 mt-1 space-y-1">
                         {evidence.transactions.map((txn: any, tidx: number) => (

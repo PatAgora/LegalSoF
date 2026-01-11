@@ -109,6 +109,8 @@ class SoFAssessmentEngine:
         )
         
         return {
+            "client_info": client_info,
+            "purchase": purchase,
             "claims": claims,
             "evidence_matches": evidence_matches,
             "funding_paths": funding_paths,
