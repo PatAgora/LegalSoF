@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>Testing Transaction API</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testAPI() {
+            const results = document.getElementById('results');
+            
+            // Test 1: Transactions
+            try {
+                const response = await fetch('http://localhost:8000/api/v1/matters/1/transactions');
+                const data = await response.json();
+                results.innerHTML += `<p>✅ Transactions: ${data.length} found</p>`;
+            } catch (e) {
+                results.innerHTML += `<p>❌ Transactions Error: ${e.message}</p>`;
+            }
+            
+            // Test 2: Alerts
+            try {
+                const response = await fetch('http://localhost:8000/api/v1/matters/1/transaction-alerts');
+                const data = await response.json();
+                results.innerHTML += `<p>✅ Alerts: ${data.length} found</p>`;
+            } catch (e) {
+                results.innerHTML += `<p>❌ Alerts Error: ${e.message}</p>`;
+            }
+        }
+        
+        testAPI();
+    </script>
+</body>
+</html>
