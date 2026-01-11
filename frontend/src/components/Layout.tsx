@@ -28,7 +28,7 @@ export default function Layout() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <img src="/more-than-law-logo.png" alt="More than law" className="h-8" />
+              <img src="/more-than-law-logo-clean.png" alt="More than law" className="h-12" />
               <div className="text-sm text-gray-700">
                 <span className="font-medium">Development Mode</span>
                 <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">No Auth</span>
