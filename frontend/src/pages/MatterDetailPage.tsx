@@ -3,6 +3,7 @@ import { useState } from 'react'
 import TransactionDashboard from '../components/TransactionReview/TransactionDashboard'
 import TransactionAlerts from '../components/TransactionReview/TransactionAlerts'
 import TransactionUpload from '../components/TransactionReview/TransactionUpload'
+import TransactionList from '../components/TransactionReview/TransactionList'
 
 type TabType = 'overview' | 'documents' | 'funds-chain' | 'checks' | 'questionnaire' | 'notes' | 'audit' | 'transactions'
 
@@ -815,58 +816,9 @@ function ProgressItem({ label, percentage, status }: { label: string; percentage
 
 // Transaction Review Tab
 function TransactionReviewTab({ matterId }: { matterId: number }) {
-  const [view, setView] = useState<'dashboard' | 'alerts' | 'upload'>('dashboard')
-  const [refreshKey, setRefreshKey] = useState(0)
-
-  const handleUploadSuccess = () => {
-    setRefreshKey(prev => prev + 1)
-    setView('dashboard')
-  }
-
   return (
     <div className="space-y-6">
-      {/* View Selector */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex space-x-4">
-          <button
-            onClick={() => setView('dashboard')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              view === 'dashboard' 
-                ? 'bg-primary-600 text-white' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Dashboard
-          </button>
-          <button
-            onClick={() => setView('alerts')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              view === 'alerts' 
-                ? 'bg-primary-600 text-white' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Alerts
-          </button>
-          <button
-            onClick={() => setView('upload')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              view === 'upload' 
-                ? 'bg-primary-600 text-white' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Upload CSV
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div key={refreshKey}>
-        {view === 'dashboard' && <TransactionDashboard matterId={matterId} />}
-        {view === 'alerts' && <TransactionAlerts matterId={matterId} />}
-        {view === 'upload' && <TransactionUpload matterId={matterId} onUploadSuccess={handleUploadSuccess} />}
-      </div>
+      <TransactionList matterId={matterId} />
     </div>
   )
 }
