@@ -130,16 +130,16 @@ class SoFAssessmentEngine:
         """
         claims = []
         
-        # Common source patterns
+        # Common source patterns - require currency symbol or "for" to avoid false matches
         patterns = {
-            'inheritance': r'inherit(?:ed|ance).*?(?:£|GBP|EUR|USD)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'property_sale': r'(?:sold|sale of).*?property.*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'savings': r'savings.*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'loan': r'loan.*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'business_sale': r'(?:sold|sale of).*?(?:business|company).*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'investment': r'investment.*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'gift': r'gift.*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'dividend': r'dividend.*?(?:£|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)'
+            'inheritance': r'inherit(?:ed|ance).*?(?:of|worth|totalling)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'property_sale': r'(?:sold|sale of).*?property.*?(?:for|of|at)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'savings': r'savings.*?(?:of|totalling)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'loan': r'loan.*?(?:of|for)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'business_sale': r'(?:sold|sale of).*?(?:business|company).*?(?:for|of)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'investment': r'investment.*?(?:of|worth)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'gift': r'gift.*?(?:of)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'dividend': r'dividend.*?(?:of)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)'
         }
         
         # Bank account mentions
