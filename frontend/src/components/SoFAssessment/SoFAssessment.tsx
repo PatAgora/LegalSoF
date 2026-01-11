@@ -334,11 +334,28 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <p className="text-sm mb-2">
             Direct verification: {verified_count}/{total_claims} claims matched to bank statement entries.
           </p>
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-2 text-sm">
             {result.evidence_matches.map((evidence, idx) => (
               <li key={idx}>
                 {evidence.verified ? (
-                  <>✅ Claim {idx + 1} ({evidence.claim_source}): VERIFIED - Supported by {evidence.transactions.length} transaction(s). Match quality: {evidence.match_quality}.</>
+                  <div>
+                    <div className="font-medium">✅ Claim {idx + 1} ({evidence.claim_source}): VERIFIED</div>
+                    {evidence.transactions.length > 0 && (
+                      <div className="ml-6 mt-1 space-y-1">
+                        {evidence.transactions.map((txn: any, tidx: number) => (
+                          <div key={tidx} className="text-xs">
+                            <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date} | Type: {txn.direction === 'credit' ? 'Incoming payment' : 'Outgoing payment'}</div>
+                            <div className="ml-2 text-white/70 italic">
+                              Evidence quality: {evidence.match_quality} match. 
+                              {txn.counterparty && `Source: ${txn.counterparty}. `}
+                              Amount aligns with client's claimed {evidence.claim_source.toLowerCase()} of £{evidence.expected_amount?.toLocaleString() || 'N/A'}, 
+                              supporting the legitimacy of this funding source.
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <>⚠️ Claim {idx + 1} ({evidence.claim_source}): NOT VERIFIED - No direct matching transaction found in statements provided.</>
                 )}
@@ -411,6 +428,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       {otherSteps.length > 0 && (
                         <div>
                           <p className="font-medium mb-1">Other potential funding pathway:</p>
+                          <p className="text-xs italic text-white/70 mb-2">
+                            The below are other potential incoming funds that may be used for the purchase. They may need to be clarified by the client.
+                          </p>
                           <ul className="ml-4 space-y-1">
                             {otherSteps.map((step, idx) => (
                               <li key={idx}>• {step}</li>
