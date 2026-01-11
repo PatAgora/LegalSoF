@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 import pdfplumber
-import PyMuPDF  # fitz
+import fitz  # PyMuPDF
 from fastapi import UploadFile
 
 

@@ -10,12 +10,29 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
 
-from app.database import get_db
+from app.db.session import get_db
 from app.services.file_processor import file_processor
 from app.services.sof_assessment_engine import SoFAssessmentEngine
 from app.models import Matter
 
 router = APIRouter()
+
+
+# Sync DB helper (for blocking file operations)
+def get_sync_db():
+    """Get synchronous database session for blocking operations"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.core.config import settings
+    
+    db_url = str(settings.DATABASE_URL).replace("sqlite+aiosqlite", "sqlite")
+    engine = create_engine(db_url)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 # In-memory storage for assessment data (per matter)
@@ -28,7 +45,7 @@ async def upload_sof_files(
     matter_id: int,
     file: UploadFile = File(...),
     file_category: str = Form(...),  # 'client_info', 'bank_statement', 'supporting_doc'
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     Upload and process a file for SoF assessment
@@ -139,7 +156,7 @@ async def upload_sof_files(
 @router.get("/matters/{matter_id}/sof-assessment/status")
 async def get_sof_assessment_status(
     matter_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     Get current status of SoF assessment for a matter
@@ -183,7 +200,7 @@ async def get_sof_assessment_status(
 @router.post("/matters/{matter_id}/sof-assessment/run")
 async def run_sof_assessment(
     matter_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     Run SoF assessment engine on uploaded data
@@ -270,7 +287,7 @@ async def run_sof_assessment(
 @router.get("/matters/{matter_id}/sof-assessment/results")
 async def get_sof_assessment_results(
     matter_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     Get full SoF assessment results
@@ -311,7 +328,7 @@ async def get_sof_assessment_results(
 @router.get("/matters/{matter_id}/sof-assessment/file-note")
 async def download_file_note(
     matter_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     Download audit-ready file note as plain text
@@ -353,7 +370,7 @@ async def download_file_note(
 @router.delete("/matters/{matter_id}/sof-assessment/reset")
 async def reset_sof_assessment(
     matter_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_sync_db)
 ):
     """
     Reset/clear SoF assessment data for a matter
