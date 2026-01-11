@@ -173,11 +173,6 @@ export default function TransactionList({ matterId }: TransactionListProps) {
       </div>
     );
   }
-          <p className="text-gray-600">Loading transactions...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (transactions.length === 0) {
     return (
