@@ -290,9 +290,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       case 'CRITICAL':
         return 'bg-red-600';
       case 'HIGH':
-        return 'bg-orange-600';
+        return 'bg-[#D4A574]'; // Warm tan/brown for high severity
       case 'MEDIUM':
-        return 'bg-yellow-600';
+        return 'bg-[#E8D5C4]'; // Light cream for medium
       default:
         return 'bg-gray-600';
     }
@@ -395,7 +395,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
                             <div>• Transaction: {txn.description || 'N/A'}</div>
                             <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
-                            <div className="ml-2 text-orange-300 font-semibold mt-1">
+                            <div className="ml-2 text-gray-800 font-semibold mt-1">
                               ⚠️ REQUIRES: Source documentation to prove legitimacy
                             </div>
                           </div>
@@ -669,7 +669,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         {verified ? (
                           <span className="text-green-700">✓ Verified</span>
                         ) : (
-                          <span className="text-orange-700">
+                          <span className="text-gray-800">
                             Request {
                               claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
                               claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
@@ -780,20 +780,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       <tr key={idx} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                            severity === 'CRITICAL' ? 'bg-red-600 text-white' : 'bg-orange-600 text-white'
+                            severity === 'CRITICAL' ? 'bg-red-600 text-white' : 'bg-[#D4A574] text-white'
                           }`}>
                             {severity === 'CRITICAL' ? '🔴 CRITICAL' : '🟠 HIGH'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">{concern}</td>
-                        <td className="px-4 py-3 text-sm text-orange-700">
+                        <td className="px-4 py-3 text-sm text-gray-800">
                           {isSanctioned ? 'Explain all sanctioned transactions' :
                            isCash ? 'Provide cash source documentation' :
                            'Explain business purpose and parties'}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            severity === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'
+                            severity === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-[#EAD8C0] text-gray-800'
                           }`}>
                             {severity === 'CRITICAL' ? '❌ BLOCKS COMPLETION' : '⚠️ REQUIRES REVIEW'}
                           </span>
@@ -901,7 +901,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     <div className="space-y-2">
                       <button
                         onClick={() => setClientInfoInputMethod('manual')}
-                        className="w-full px-4 py-2 border-2 border-blue-500 text-blue-700 rounded-md hover:bg-blue-50 font-medium"
+                        className="w-full px-4 py-2 border-2 border-[#A8D5BA] text-gray-800 rounded-md hover:bg-[#E8F5E9] font-medium"
                       >
                         ✏️ Enter Manually
                       </button>
@@ -1052,7 +1052,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       <button
                         onClick={handleManualSubmit}
                         disabled={uploadingFiles.client_info}
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                        className="w-full px-4 py-2 bg-[#A8D5BA] text-gray-900 rounded-md hover:bg-[#8BC5A0] disabled:opacity-50 text-sm font-medium"
                       >
                         {uploadingFiles.client_info ? 'Submitting...' : '✓ Submit'}
                       </button>
@@ -1160,7 +1160,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <button
                 onClick={runAssessment}
                 disabled={loading}
-                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-lg shadow-lg"
+                className="px-8 py-3 bg-[#A8D5BA] text-gray-900 rounded-lg hover:bg-[#8BC5A0] disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-lg shadow-lg"
               >
                 {loading ? '⏳ Running Assessment...' : '🚀 Run SoF Assessment'}
               </button>
@@ -1174,7 +1174,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           )}
 
           {!status || !status.ready_for_assessment && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-800">
+            <div className="bg-[#F5EBE0] border border-[#D4C4B0] rounded-lg p-4 text-gray-800">
               <strong>Required:</strong> Upload Client Info (JSON) and at least one Bank Statement (CSV/PDF) to run assessment.
             </div>
           )}
@@ -1246,7 +1246,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <div className="flex justify-center">
             <button
               onClick={downloadFileNote}
-              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-lg"
+              className="px-6 py-3 bg-[#A8D5BA] text-gray-900 rounded-lg hover:bg-[#8BC5A0] font-semibold shadow-lg"
             >
               📥 Download Audit File Note
             </button>
