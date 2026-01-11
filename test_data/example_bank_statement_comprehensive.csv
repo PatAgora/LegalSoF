@@ -1,0 +1,31 @@
+account_id,date,amount,currency,direction,description,counterparty_name,balance
+Barclays_****1234,2023-05-15,250000.00,GBP,credit,Estate Distribution - Probate Grant 2023/4521,Smith & Partners Solicitors,250000.00
+Barclays_****1234,2023-05-16,35.00,GBP,debit,Bank Monthly Fee,,249965.00
+Barclays_****1234,2023-05-20,1500.00,GBP,debit,Payment to HMRC - Inheritance Tax,HM Revenue & Customs,248465.00
+Barclays_****1234,2023-06-01,2500.00,GBP,credit,Salary Payment,ABC Manufacturing Ltd,250965.00
+Barclays_****1234,2023-06-05,800.00,GBP,debit,Rent Payment,London Property Management,250165.00
+Barclays_****1234,2023-06-10,150.00,GBP,debit,Utilities - Gas & Electric,British Gas,250015.00
+Barclays_****1234,2023-06-15,200000.00,GBP,debit,Transfer to HSBC Business Account,HSBC UK,50015.00
+Barclays_****1234,2023-07-01,2500.00,GBP,credit,Salary Payment,ABC Manufacturing Ltd,52515.00
+Barclays_****1234,2023-07-20,5000.00,GBP,debit,Transfer to Investment Account,Vanguard Investments,47515.00
+Barclays_****1234,2023-08-01,2500.00,GBP,credit,Salary Payment,ABC Manufacturing Ltd,50015.00
+HSBC_****5678,2023-06-15,200000.00,GBP,credit,Transfer from Barclays,Barclays Bank,200000.00
+HSBC_****5678,2023-06-16,50.00,GBP,debit,Account Setup Fee,,199950.00
+HSBC_****5678,2023-07-01,300000.00,GBP,credit,Property Sale Proceeds - 45 Oak Street London,Taylor & Brown Solicitors,499950.00
+HSBC_****5678,2023-07-02,2500.00,GBP,debit,Solicitor Fees - Property Sale,Taylor & Brown Solicitors,497450.00
+HSBC_____5678,2023-07-03,850.00,GBP,debit,Estate Agent Commission,Prime Properties Ltd,496600.00
+HSBC_****5678,2023-07-05,125000.00,GBP,debit,Mortgage Redemption,Nationwide Building Society,371600.00
+HSBC_****5678,2023-07-15,3500.00,GBP,credit,Dividend Payment - Share Portfolio,Hargreaves Lansdown,375100.00
+HSBC_****5678,2023-08-01,1200.00,GBP,debit,Business Insurance Premium,AXA Insurance,373900.00
+HSBC_****5678,2023-08-15,25000.00,GBP,credit,Loan from Family Member,Mrs Elizabeth Johnson,398900.00
+HSBC_****5678,2023-08-20,2000.00,GBP,debit,Legal Fees - Business Purchase DD,Wilson & Co Solicitors,396900.00
+HSBC_****5678,2023-09-01,50000.00,GBP,credit,Business Loan Drawdown,Lloyds Bank Commercial,446900.00
+HSBC_****5678,2023-09-02,1500.00,GBP,debit,Accountant Fees - DD Preparation,Smith Accounting Ltd,445400.00
+HSBC_****5678,2023-09-10,5000.00,GBP,debit,Valuation & Survey Fees,Independent Valuers Ltd,440400.00
+HSBC_****5678,2023-09-15,3500.00,GBP,credit,Investment Return - ISA Withdrawal,Vanguard Investments,443900.00
+HSBC_****5678,2023-09-25,2500.00,GBP,debit,Insurance Broker Fee,Business Shield Brokers,441400.00
+HSBC_****5678,2023-10-01,8000.00,GBP,credit,Bonus Payment,ABC Manufacturing Ltd,449400.00
+HSBC_****5678,2023-10-05,1000.00,GBP,debit,Tax Advisor Consultation,Grant & Partners Tax,448400.00
+HSBC_****5678,2023-10-15,500000.00,GBP,debit,PAYMENT - TARGET BUSINESS ACQUISITION,Target Industries Ltd,0.00
+HSBC_****5678,2023-10-15,51600.00,GBP,credit,Refund - Overpayment Adjustment,Target Industries Ltd,51600.00
+HSBC_****5678,2023-10-16,3200.00,GBP,debit,Stamp Duty Land Tax,HM Revenue & Customs,48400.00

@@ -1,0 +1,8 @@
+account_id,date,amount,currency,direction,description,counterparty_name,balance
+CurrentAccount_1234,2023-06-01,250000.00,GBP,credit,Inheritance from Estate of Mary Smith,Probate Registry,250000.00
+CurrentAccount_1234,2023-06-05,300.00,GBP,debit,Monthly Bank Fee,,249700.00
+CurrentAccount_1234,2023-06-10,50000.00,GBP,debit,Transfer to Savings Account,My Savings Account,199700.00
+CurrentAccount_1234,2023-07-01,3000.00,GBP,credit,Monthly Salary,My Employer Ltd,202700.00
+CurrentAccount_1234,2023-08-01,300000.00,GBP,credit,Property Sale - 123 High Street,Property Solicitors,502700.00
+CurrentAccount_1234,2023-08-02,2000.00,GBP,debit,Property Sale Legal Fees,Property Solicitors,500700.00
+CurrentAccount_1234,2023-08-15,500000.00,GBP,debit,Purchase of Target Business,Target Business Ltd,700.00
