@@ -701,30 +701,60 @@ class SoFAssessmentEngine:
         else:
             status = "insufficient"
         
-        # Build rationale
+        # Build rationale with clear, non-contradictory messaging
         rationale_parts = []
         
-        # Claims verification
-        if verification_rate == 1.0:
-            rationale_parts.append(f"All {total_claims} SoF claim(s) verified by bank statement evidence.")
-        elif verification_rate > 0:
-            rationale_parts.append(
-                f"{verified_claims}/{total_claims} SoF claims verified. "
-                f"{total_claims - verified_claims} claim(s) lack supporting evidence."
-            )
-        else:
-            rationale_parts.append("No claims could be verified against bank statements.")
-        
-        # Funding tracing
+        # START WITH OVERALL FUNDING POSITION (most important)
         if best_coverage >= 90:
-            rationale_parts.append(f"Funding path traced with {best_coverage}% coverage to purchase amount.")
+            rationale_parts.append(
+                f"✅ FUNDING VERIFIED: Sufficient funds traced to cover purchase amount "
+                f"({best_coverage}% coverage)."
+            )
         elif best_coverage >= 70:
             rationale_parts.append(
-                f"Partial funding trace achieved ({best_coverage}% coverage). "
-                f"Some gaps in transaction flow."
+                f"⚠️ PARTIAL FUNDING: {best_coverage}% of purchase amount traced. "
+                f"Some funding gaps identified."
             )
         else:
-            rationale_parts.append("Unable to trace clear funding path from sources to purchase.")
+            rationale_parts.append(
+                f"❌ INSUFFICIENT FUNDING: Only {best_coverage}% of purchase amount traced. "
+                f"Material funding gaps exist."
+            )
+        
+        # THEN EXPLAIN CLAIM-BY-CLAIM VERIFICATION
+        if verification_rate == 1.0:
+            rationale_parts.append(
+                f"All {total_claims} SoF claims fully verified with direct bank statement matches."
+            )
+        elif verification_rate > 0:
+            # Provide detail about which claims verified
+            verified_list = [e['claim_source'] for e in evidence_matches if e['verified']]
+            unverified_list = [e['claim_source'] for e in evidence_matches if not e['verified']]
+            
+            rationale_parts.append(
+                f"Claim verification: {verified_claims}/{total_claims} claims have direct evidence. "
+                f"Verified: {', '.join(verified_list)}. "
+            )
+            
+            if unverified_list:
+                if best_coverage >= 90:
+                    # If funding is complete, frame unverified claims as missing documentation, not missing funds
+                    rationale_parts.append(
+                        f"Claims lacking direct evidence ({', '.join(unverified_list)}) - however, "
+                        f"alternative credits identified provide equivalent funding coverage. "
+                        f"Direct documentation recommended for audit trail."
+                    )
+                else:
+                    # If funding is incomplete, this is a real gap
+                    rationale_parts.append(
+                        f"Claims lacking evidence ({', '.join(unverified_list)}) represent material gaps. "
+                        f"Supporting documentation required."
+                    )
+        else:
+            rationale_parts.append(
+                "⚠️ No claims could be directly verified against bank statements. "
+                "This is a significant documentation gap."
+            )
         
         # Transaction Review integration - CRITICAL
         if tr_critical > 0 or tr_high > 0:
@@ -897,28 +927,51 @@ class SoFAssessmentEngine:
                 f"- {claim['source_type']}: £{claim['expected_amount']:,.2f} [{verified}]"
             )
         
-        # Evidence
-        note_parts.append("\nEVIDENCE REVIEW:")
+        # Evidence review with clear distinction
+        note_parts.append("\nEVIDENCE REVIEW (Claim-by-Claim):")
+        verified_count = sum(1 for e in evidence_matches if e['verified'])
+        note_parts.append(
+            f"Direct verification: {verified_count}/{len(claims)} claims matched to bank statement entries.\n"
+        )
+        
         for evidence in evidence_matches:
             if evidence['verified']:
                 txns = evidence['transactions']
                 note_parts.append(
-                    f"Claim {evidence['claim_id']}: Supported by {len(txns)} transaction(s). "
+                    f"✅ Claim {evidence['claim_id']} ({evidence['claim_source']}): "
+                    f"VERIFIED - Supported by {len(txns)} transaction(s). "
                     f"Match quality: {evidence['match_quality']}."
                 )
             else:
                 note_parts.append(
-                    f"Claim {evidence['claim_id']}: No supporting evidence found in bank statements."
+                    f"⚠️ Claim {evidence['claim_id']} ({evidence['claim_source']}): "
+                    f"NOT VERIFIED - No direct matching transaction found in statements provided."
                 )
         
-        # Funding trace
-        note_parts.append("\nFUNDING TRACE:")
-        for path in funding_paths:
+        # Funding trace with interpretation
+        note_parts.append("\nFUNDING ANALYSIS (Overall Position):")
+        best_path = max(funding_paths, key=lambda p: p['coverage'], default=None)
+        if best_path:
             note_parts.append(
-                f"Path {path['path_id']}: {path['coverage']}% coverage. "
-                f"{'PLAUSIBLE' if path['plausible'] else 'INCOMPLETE'}."
+                f"Total funding traced: {best_path['coverage']}% of purchase amount.\n"
             )
-            for step in path['steps'][:3]:
+            
+            if best_path['coverage'] >= 90 and verified_count < len(claims):
+                note_parts.append(
+                    "INTERPRETATION: While not all individual claims have direct evidence in the "
+                    "provided statements, sufficient aggregate funding has been traced to cover the "
+                    "full purchase amount. This may indicate:"
+                )
+                note_parts.append("  • Some source transactions occurred before the statement period")
+                note_parts.append("  • Funds arrived via intermediate accounts not yet documented")
+                note_parts.append("  • Alternative credits provide equivalent funding coverage")
+                note_parts.append(
+                    "\nRecommendation: Request specific documentation for unverified claims to "
+                    "complete the audit trail, even though funding is mathematically sufficient.\n"
+                )
+            
+            note_parts.append(f"Funding path analysis:")
+            for step in best_path['steps'][:5]:
                 note_parts.append(f"  • {step}")
         
         # Transaction Review - CRITICAL SECTION
