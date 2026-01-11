@@ -785,20 +785,21 @@ class SoFAssessmentEngine:
             else:
                 evidence_text = "❌ No matching transaction"
             
-            # Outreach questions
-            if not evidence['verified']:
-                if 'inheritance' in evidence['claim_source'].lower():
-                    outreach = "Request probate grant"
-                elif 'property' in evidence['claim_source'].lower():
-                    outreach = "Request completion statement"
-                elif 'loan' in evidence['claim_source'].lower():
-                    outreach = "Request loan agreement"
-                elif 'business' in evidence['claim_source'].lower():
-                    outreach = "Request sale agreement"
-                else:
-                    outreach = "Request documentation"
+            # Outreach questions - ALWAYS require source documents
+            if 'inheritance' in evidence['claim_source'].lower():
+                outreach = "Request probate grant"
+            elif 'property' in evidence['claim_source'].lower():
+                outreach = "Request completion statement"
+            elif 'loan' in evidence['claim_source'].lower():
+                outreach = "Request loan agreement"
+            elif 'business' in evidence['claim_source'].lower():
+                outreach = "Request sale agreement"
+            elif 'savings' in evidence['claim_source'].lower():
+                outreach = "Request historical statements"
+            elif 'investment' in evidence['claim_source'].lower():
+                outreach = "Request investment statements"
             else:
-                outreach = "✓ Verified"
+                outreach = "Request source documentation"
             
             # Summary
             if evidence['verified']:
@@ -817,20 +818,28 @@ class SoFAssessmentEngine:
         sof_section.append("\nSOURCE OF FUNDS SUMMARY:\n")
         if verified_claims == total_claims:
             sof_section.append(
-                f"✅ All {total_claims} SoF claims fully verified with direct bank statement evidence. "
-                f"Each claimed source has been matched to corresponding incoming payments with appropriate "
-                f"descriptions and amounts. The funding trail is complete and defensible.\n"
+                f"✅ All {total_claims} SoF claims have matching bank statement evidence. "
+                f"However, bank statements alone are INSUFFICIENT for regulatory compliance.\n\n"
+                f"⚠️ IMPORTANT: Incoming payments verify that funds were received, but do NOT prove "
+                f"the legitimacy or lawful origin of those funds. Source documentation (e.g., probate "
+                f"grants, completion statements, loan agreements) is REQUIRED to demonstrate:\n"
+                f"  • The stated source is genuine and legitimate\n"
+                f"  • The client has lawful entitlement to the funds\n"
+                f"  • There is an audit trail connecting the funds to their claimed origin\n\n"
+                f"The matter CANNOT proceed until appropriate corroborating documents are provided.\n"
             )
         elif verified_claims > 0:
             verified_list = [e['claim_source'] for e in evidence_matches if e['verified']]
             unverified_list = [e['claim_source'] for e in evidence_matches if not e['verified']]
             
             sof_section.append(
-                f"⚠️ Partial verification achieved: {verified_claims}/{total_claims} claims have direct evidence.\n\n"
-                f"VERIFIED CLAIMS: {', '.join(verified_list)}\n"
-                f"These claims have been matched to specific bank transactions with appropriate descriptions "
-                f"and amounts. The evidence is sufficient to support these funding sources.\n\n"
-                f"UNVERIFIED CLAIMS: {', '.join(unverified_list)}\n"
+                f"⚠️ Partial verification achieved: {verified_claims}/{total_claims} claims have matching bank transactions.\n\n"
+                f"⚠️ IMPORTANT: Bank statements show incoming payments but do NOT prove legitimacy. "
+                f"Source documents are REQUIRED for all claims to demonstrate lawful origin.\n\n"
+                f"VERIFIED CLAIMS (bank payments found): {', '.join(verified_list)}\n"
+                f"These claims have matching bank transactions, but still require corroborating documents "
+                f"(e.g., probate grants, completion statements) to prove legitimacy and lawful entitlement.\n\n"
+                f"UNVERIFIED CLAIMS (no bank payments found): {', '.join(unverified_list)}\n"
             )
             
             if best_coverage >= 90:
@@ -1030,31 +1039,41 @@ class SoFAssessmentEngine:
                 f"Please review Transaction Review tab and provide explanations."
             )
         
-        # 2. Unverified claims
+        # 2. Document requirements for ALL claims (verified and unverified)
+        # Bank payments alone are insufficient - we need source documents
         for i, evidence in enumerate(evidence_matches):
+            claim = claims[i]
+            source_lower = claim['source_type'].lower()
+            
+            # Add questions for unverified claims
             if not evidence['verified']:
-                claim = claims[i]
                 questions.append(
                     f"No bank statement evidence found for your claimed {claim['source_type']} "
                     f"of £{claim['expected_amount']:,.2f}. Please provide supporting documentation."
                 )
-                
-                # Source-specific documents
-                source_lower = claim['source_type'].lower()
-                if 'inheritance' in source_lower:
-                    documents.append("Probate grant or letters of administration")
-                    documents.append("Estate account summary showing distribution")
-                elif 'property' in source_lower:
-                    documents.append("Property completion statement")
-                    documents.append("Solicitor's statement of account")
-                elif 'loan' in source_lower:
-                    documents.append("Loan offer letter and agreement")
-                    documents.append("Evidence of loan drawdown")
-                elif 'business' in source_lower:
-                    documents.append("Share purchase agreement")
-                    documents.append("Completion accounts")
-                elif 'savings' in source_lower:
-                    documents.append("Historical bank statements showing savings accumulation")
+            
+            # Source-specific documents required for ALL claims to prove legitimacy
+            if 'inheritance' in source_lower:
+                if "Probate grant" not in ' '.join(known_documents):
+                    documents.append(f"Probate grant or letters of administration (for {claim['source_type']} claim of £{claim['expected_amount']:,.2f})")
+                if "Estate account" not in ' '.join(known_documents):
+                    documents.append(f"Estate account summary showing distribution (for {claim['source_type']} claim)")
+            elif 'property' in source_lower or 'sale' in source_lower:
+                if "completion statement" not in ' '.join(known_documents).lower():
+                    documents.append(f"Property completion statement (for {claim['source_type']} claim of £{claim['expected_amount']:,.2f})")
+                if "Solicitor's statement" not in ' '.join(known_documents):
+                    documents.append(f"Solicitor's statement of account showing sale proceeds (for {claim['source_type']} claim)")
+            elif 'loan' in source_lower:
+                if "Loan" not in ' '.join(known_documents):
+                    documents.append(f"Loan offer letter and agreement (for {claim['source_type']} claim of £{claim['expected_amount']:,.2f})")
+                    documents.append(f"Evidence of loan drawdown")
+            elif 'business' in source_lower:
+                if "Share purchase" not in ' '.join(known_documents):
+                    documents.append(f"Share purchase agreement (for {claim['source_type']} claim of £{claim['expected_amount']:,.2f})")
+                    documents.append(f"Completion accounts")
+            elif 'savings' in source_lower:
+                if "Historical" not in ' '.join(known_documents):
+                    documents.append(f"Historical bank statements showing savings accumulation (for {claim['source_type']} claim)")
         
         # 3. Red flags from analysis
         for flag in red_flags:
@@ -1130,16 +1149,33 @@ class SoFAssessmentEngine:
         note_parts.append("\nEVIDENCE REVIEW (Claim-by-Claim):")
         verified_count = sum(1 for e in evidence_matches if e['verified'])
         note_parts.append(
-            f"Direct verification: {verified_count}/{len(claims)} claims matched to bank statement entries.\n"
+            f"Direct verification: {verified_count}/{len(claims)} claims matched to bank statement entries."
+        )
+        note_parts.append(
+            f"⚠️ NOTE: Bank statements alone are insufficient. Corroborating source documents "
+            f"(e.g., probate grants, completion statements) are required to prove legitimacy.\n"
         )
         
         for evidence in evidence_matches:
             if evidence['verified']:
                 txns = evidence['transactions']
+                first_txn = txns[0]
                 note_parts.append(
                     f"✅ Claim {evidence['claim_id']} ({evidence['claim_source']}): "
                     f"VERIFIED - Supported by {len(txns)} transaction(s). "
                     f"Match quality: {evidence['match_quality']}."
+                )
+                note_parts.append(
+                    f"   • Amount: £{first_txn['amount']:,.2f} on {first_txn['date']}"
+                )
+                note_parts.append(
+                    f"   • Transaction Type: {first_txn['description']}"
+                )
+                note_parts.append(
+                    f"   • Counterparty: {first_txn.get('counterparty', 'Not specified')}"
+                )
+                note_parts.append(
+                    f"   • ⚠️ REQUIRES: Source documentation to prove legitimacy (see Documents Required section)"
                 )
             else:
                 note_parts.append(
