@@ -703,99 +703,296 @@ class SoFAssessmentEngine:
         else:
             status = "insufficient"
         
-        # Build rationale with clear, non-contradictory messaging
-        rationale_parts = []
-        
-        # START WITH OVERALL FUNDING POSITION (most important)
-        if best_coverage >= 90:
-            rationale_parts.append(
-                f"✅ FUNDING VERIFIED: Sufficient funds traced to cover purchase amount "
-                f"({best_coverage}% coverage)."
-            )
-        elif best_coverage >= 70:
-            rationale_parts.append(
-                f"⚠️ PARTIAL FUNDING: {best_coverage}% of purchase amount traced. "
-                f"Some funding gaps identified."
-            )
-        else:
-            rationale_parts.append(
-                f"❌ INSUFFICIENT FUNDING: Only {best_coverage}% of purchase amount traced. "
-                f"Material funding gaps exist."
-            )
-        
-        # THEN EXPLAIN CLAIM-BY-CLAIM VERIFICATION
-        if verification_rate == 1.0:
-            rationale_parts.append(
-                f"All {total_claims} SoF claims fully verified with direct bank statement matches."
-            )
-        elif verification_rate > 0:
-            # Provide detail about which claims verified
-            verified_list = [e['claim_source'] for e in evidence_matches if e['verified']]
-            unverified_list = [e['claim_source'] for e in evidence_matches if not e['verified']]
-            
-            rationale_parts.append(
-                f"Claim verification: {verified_claims}/{total_claims} claims have direct evidence. "
-                f"Verified: {', '.join(verified_list)}. "
-            )
-            
-            if unverified_list:
-                if best_coverage >= 90:
-                    # If funding is complete, frame unverified claims as missing documentation, not missing funds
-                    rationale_parts.append(
-                        f"Claims lacking direct evidence ({', '.join(unverified_list)}) - however, "
-                        f"alternative credits identified provide equivalent funding coverage. "
-                        f"Direct documentation recommended for audit trail."
-                    )
-                else:
-                    # If funding is incomplete, this is a real gap
-                    rationale_parts.append(
-                        f"Claims lacking evidence ({', '.join(unverified_list)}) represent material gaps. "
-                        f"Supporting documentation required."
-                    )
-        else:
-            rationale_parts.append(
-                "⚠️ No claims could be directly verified against bank statements. "
-                "This is a significant documentation gap."
-            )
-        
-        # Transaction Review integration - CRITICAL
-        if tr_critical > 0 or tr_high > 0:
-            rationale_parts.append(
-                f"CRITICAL: Automated Transaction Review has identified {tr_critical} CRITICAL "
-                f"and {tr_high} HIGH risk alerts that materially impact this assessment. "
-                f"{', '.join(tr_summary.get('key_concerns', []))}. "
-                f"These AML concerns must be resolved before proceeding."
-            )
-        
-        # Red flags
-        if critical_flags > 0:
-            rationale_parts.append(
-                f"{critical_flags} CRITICAL red flag(s) identified requiring immediate resolution."
-            )
-        elif high_flags > 0:
-            rationale_parts.append(
-                f"{high_flags} HIGH priority issue(s) require attention."
-            )
-        
-        # Final statement
-        if status == "sufficient":
-            rationale_parts.append(
-                "Documentation appears sufficient for a risk-based SoF assessment."
-            )
-        elif status == "borderline":
-            rationale_parts.append(
-                "Additional documentation recommended to strengthen SoF case."
-            )
-        else:
-            rationale_parts.append(
-                "Current evidence is insufficient to proceed. Material gaps must be addressed."
-            )
+        # Build structured, detailed rationale
+        rationale = self._build_detailed_rationale(
+            verified_claims=verified_claims,
+            total_claims=total_claims,
+            best_coverage=best_coverage,
+            evidence_matches=evidence_matches,
+            claims=claims,
+            funding_paths=funding_paths,
+            tr_summary=tr_summary,
+            tr_critical=tr_critical,
+            tr_high=tr_high,
+            critical_flags=critical_flags,
+            high_flags=high_flags,
+            status=status,
+            red_flags=red_flags
+        )
         
         return {
             "status": status,
             "confidence": confidence,
-            "rationale": " ".join(rationale_parts)
+            "rationale": rationale
         }
+    
+    def _build_detailed_rationale(
+        self,
+        verified_claims: int,
+        total_claims: int,
+        best_coverage: int,
+        evidence_matches: List[Dict[str, Any]],
+        claims: List[Dict[str, Any]],
+        funding_paths: List[Dict[str, Any]],
+        tr_summary: Dict[str, Any],
+        tr_critical: int,
+        tr_high: int,
+        critical_flags: int,
+        high_flags: int,
+        status: str,
+        red_flags: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Build detailed, structured rationale with sections and tables
+        """
+        sections = []
+        
+        # ============================================================
+        # SECTION 1: SOURCE OF FUNDS ANALYSIS
+        # ============================================================
+        sof_section = ["=== SOURCE OF FUNDS ANALYSIS ===\n"]
+        
+        # Overall funding status
+        if best_coverage >= 90:
+            sof_section.append(
+                f"✅ OVERALL STATUS: Sufficient incoming payments found to cover purchase amount ({best_coverage}% coverage).\n"
+            )
+        elif best_coverage >= 70:
+            sof_section.append(
+                f"⚠️ OVERALL STATUS: Partial funding traced ({best_coverage}% coverage). Some gaps identified.\n"
+            )
+        else:
+            sof_section.append(
+                f"❌ OVERALL STATUS: Insufficient funding traced ({best_coverage}% coverage). Material gaps exist.\n"
+            )
+        
+        # Claim-by-claim table
+        sof_section.append("\nCLAIM-BY-CLAIM ANALYSIS:\n")
+        sof_section.append("-" * 120 + "\n")
+        sof_section.append(f"{'CLAIM':<25} | {'EVIDENCE FOUND':<35} | {'OUTREACH QUESTIONS':<30} | {'SUMMARY':<20}\n")
+        sof_section.append("-" * 120 + "\n")
+        
+        for i, evidence in enumerate(evidence_matches):
+            claim = claims[i]
+            claim_name = f"{evidence['claim_source']} £{evidence['expected_amount']:,.0f}"
+            
+            # Evidence found
+            if evidence['verified'] and evidence['transactions']:
+                txn = evidence['transactions'][0]
+                evidence_text = f"✅ {txn['date']}: £{txn['amount']:,.0f}"
+                if len(evidence['transactions']) > 1:
+                    evidence_text += f" (+{len(evidence['transactions'])-1} more)"
+            else:
+                evidence_text = "❌ No matching transaction"
+            
+            # Outreach questions
+            if not evidence['verified']:
+                if 'inheritance' in evidence['claim_source'].lower():
+                    outreach = "Request probate grant"
+                elif 'property' in evidence['claim_source'].lower():
+                    outreach = "Request completion statement"
+                elif 'loan' in evidence['claim_source'].lower():
+                    outreach = "Request loan agreement"
+                elif 'business' in evidence['claim_source'].lower():
+                    outreach = "Request sale agreement"
+                else:
+                    outreach = "Request documentation"
+            else:
+                outreach = "✓ Verified"
+            
+            # Summary
+            if evidence['verified']:
+                summary = "✅ VERIFIED"
+            else:
+                if best_coverage >= 90:
+                    summary = "⚠️ Needs docs"
+                else:
+                    summary = "❌ MISSING"
+            
+            sof_section.append(f"{claim_name:<25} | {evidence_text:<35} | {outreach:<30} | {summary:<20}\n")
+        
+        sof_section.append("-" * 120 + "\n")
+        
+        # SoF Summary
+        sof_section.append("\nSOURCE OF FUNDS SUMMARY:\n")
+        if verified_claims == total_claims:
+            sof_section.append(
+                f"✅ All {total_claims} SoF claims fully verified with direct bank statement evidence. "
+                f"Each claimed source has been matched to corresponding incoming payments with appropriate "
+                f"descriptions and amounts. The funding trail is complete and defensible.\n"
+            )
+        elif verified_claims > 0:
+            verified_list = [e['claim_source'] for e in evidence_matches if e['verified']]
+            unverified_list = [e['claim_source'] for e in evidence_matches if not e['verified']]
+            
+            sof_section.append(
+                f"⚠️ Partial verification achieved: {verified_claims}/{total_claims} claims have direct evidence.\n\n"
+                f"VERIFIED CLAIMS: {', '.join(verified_list)}\n"
+                f"These claims have been matched to specific bank transactions with appropriate descriptions "
+                f"and amounts. The evidence is sufficient to support these funding sources.\n\n"
+                f"UNVERIFIED CLAIMS: {', '.join(unverified_list)}\n"
+            )
+            
+            if best_coverage >= 90:
+                sof_section.append(
+                    f"While these claims lack direct transaction evidence, sufficient alternative incoming "
+                    f"payments have been identified to cover the full purchase amount. This suggests the "
+                    f"unverified sources may have been received before the statement period or through "
+                    f"different accounts. Direct documentation is recommended to complete the audit trail, "
+                    f"though the overall funding position is mathematically sufficient.\n"
+                )
+            else:
+                sof_section.append(
+                    f"These unverified claims represent material funding gaps. Without supporting evidence, "
+                    f"we cannot confirm the source of approximately £{(evidence_matches[0]['expected_amount'] * (total_claims - verified_claims)):,.0f}. "
+                    f"This is a regulatory compliance concern that must be addressed before proceeding.\n"
+                )
+        else:
+            sof_section.append(
+                f"❌ CRITICAL: No claims could be directly verified against the bank statements provided. "
+                f"This represents a complete absence of documentary evidence for the stated funding sources. "
+                f"Without bank statement evidence showing the receipt of these funds, we cannot proceed "
+                f"under UK AML regulations. Immediate action required.\n"
+            )
+        
+        # Add funding path detail
+        if funding_paths:
+            best_path = max(funding_paths, key=lambda p: p['coverage'])
+            sof_section.append(f"\nFUNDING PATH TRACED:\n")
+            for step in best_path['steps'][:5]:
+                sof_section.append(f"  • {step}\n")
+        
+        sections.append("".join(sof_section))
+        
+        # ============================================================
+        # SECTION 2: TRANSACTION REVIEW INTEGRATION
+        # ============================================================
+        tr_section = ["\n=== AUTOMATED TRANSACTION REVIEW ===\n"]
+        
+        if tr_summary.get('total_alerts', 0) > 0:
+            tr_section.append(
+                f"\n⚠️ OVERALL STATUS: {tr_summary['total_alerts']} alert(s) identified by automated monitoring:\n"
+                f"  • {tr_critical} CRITICAL severity\n"
+                f"  • {tr_high} HIGH severity\n"
+                f"  • {tr_summary.get('medium_alerts', 0)} MEDIUM severity\n\n"
+            )
+            
+            # Transaction Review table header
+            tr_section.append("ALERT ANALYSIS:\n")
+            tr_section.append("-" * 120 + "\n")
+            tr_section.append(f"{'SEVERITY':<12} | {'ISSUE IDENTIFIED':<45} | {'OUTREACH QUESTIONS':<35} | {'SUMMARY':<20}\n")
+            tr_section.append("-" * 120 + "\n")
+            
+            # Group alerts by type for table
+            alert_rows = []
+            
+            if tr_critical > 0:
+                key_concerns = tr_summary.get('key_concerns', [])
+                for concern in key_concerns[:3]:  # Top 3 concerns
+                    if 'sanctioned' in concern.lower() or 'prohibited' in concern.lower():
+                        alert_rows.append({
+                            'severity': '🔴 CRITICAL',
+                            'issue': concern[:45],
+                            'outreach': 'Explain all sanctioned transactions',
+                            'summary': '❌ BLOCKS COMPLETION'
+                        })
+                    elif 'cash deposit' in concern.lower():
+                        alert_rows.append({
+                            'severity': '🔴 CRITICAL',
+                            'issue': concern[:45],
+                            'outreach': 'Provide cash source documentation',
+                            'summary': '❌ HIGH RISK'
+                        })
+            
+            if tr_high > 0:
+                alert_rows.append({
+                    'severity': '🟠 HIGH',
+                    'issue': f'{tr_high} high-risk jurisdiction transaction(s)',
+                    'outreach': 'Explain business purpose and parties',
+                    'summary': '⚠️ REQUIRES REVIEW'
+                })
+            
+            # Populate table
+            for row in alert_rows[:5]:  # Max 5 rows
+                tr_section.append(
+                    f"{row['severity']:<12} | {row['issue']:<45} | {row['outreach']:<35} | {row['summary']:<20}\n"
+                )
+            
+            tr_section.append("-" * 120 + "\n")
+            
+            # Transaction Review summary
+            tr_section.append("\nTRANSACTION REVIEW SUMMARY:\n")
+            
+            if tr_critical > 0:
+                tr_section.append(
+                    f"❌ CRITICAL AML CONCERNS: The automated transaction monitoring has identified {tr_critical} "
+                    f"CRITICAL-severity alerts that represent material AML/CTF risks. These include:\n"
+                )
+                for concern in tr_summary.get('key_concerns', [])[:3]:
+                    tr_section.append(f"  • {concern}\n")
+                
+                tr_section.append(
+                    f"\nThese findings materially impact the overall assessment. Even with complete SoF documentation, "
+                    f"CRITICAL transaction alerts indicate potential sanctions violations, terrorism financing, "
+                    f"or other prohibited activities. Under UK AML regulations, we cannot proceed until these "
+                    f"concerns are fully investigated and resolved. The matter must be escalated to the MLRO "
+                    f"for review.\n"
+                )
+            elif tr_high > 0:
+                tr_section.append(
+                    f"⚠️ HIGH-RISK TRANSACTIONS: {tr_high} transaction(s) flagged as HIGH severity require "
+                    f"enhanced due diligence. While not immediately blocking, these alerts indicate elevated "
+                    f"AML risk that must be addressed through additional client outreach and documentation.\n"
+                )
+            
+            # Red flags
+            if critical_flags > 0 or high_flags > 0:
+                tr_section.append(f"\nADDITIONAL RED FLAGS:\n")
+                for flag in red_flags[:5]:
+                    tr_section.append(f"  • [{flag['severity']}] {flag['flag']}\n")
+        else:
+            tr_section.append(
+                "✅ OVERALL STATUS: No transaction alerts identified.\n\n"
+                "TRANSACTION REVIEW SUMMARY:\n"
+                "The automated transaction monitoring has not identified any AML/CTF concerns in the "
+                "transaction data reviewed. This is a positive indicator, though it does not replace "
+                "the requirement for proper SoF documentation.\n"
+            )
+        
+        sections.append("".join(tr_section))
+        
+        # ============================================================
+        # SECTION 3: FINAL ASSESSMENT
+        # ============================================================
+        final_section = ["\n=== FINAL ASSESSMENT ===\n\n"]
+        
+        if status == "sufficient":
+            final_section.append(
+                "✅ DECISION: SUFFICIENT\n\n"
+                "The Source of Funds documentation and transaction review findings are sufficient to "
+                "proceed under a risk-based approach. All material funding sources have been verified, "
+                "no critical AML concerns exist, and the matter can proceed to completion subject to "
+                "standard ongoing monitoring.\n"
+            )
+        elif status == "borderline":
+            final_section.append(
+                "⚠️ DECISION: BORDERLINE\n\n"
+                "The current evidence is borderline sufficient. While core funding has been traced and "
+                "no critical AML alerts exist, some documentation gaps or medium-priority concerns should "
+                "be addressed to strengthen the file. The matter may proceed with enhanced monitoring, or "
+                "additional documentation can be requested to achieve a 'sufficient' rating.\n"
+            )
+        else:
+            final_section.append(
+                "❌ DECISION: INSUFFICIENT\n\n"
+                "The current evidence is insufficient to proceed. Material gaps in SoF documentation "
+                "and/or critical AML concerns prevent completion under UK regulatory requirements. "
+                "The specific issues identified above must be resolved before the matter can proceed.\n"
+            )
+        
+        sections.append("".join(final_section))
+        
+        return "\n".join(sections)
     
     def generate_next_actions(
         self,
