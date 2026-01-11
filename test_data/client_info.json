@@ -1,0 +1,27 @@
+{
+  "client_info": {
+    "client_name": "ACME001 Limited",
+    "client_risk_rating": "medium",
+    "pep_status": false,
+    "business_sector": "Manufacturing"
+  },
+  "purchase": {
+    "amount": 500000,
+    "currency": "GBP",
+    "expected_payment_date": "2024-02-15",
+    "description": "Acquisition of Target Manufacturing Ltd - working capital and equipment"
+  },
+  "sof_explanation": "I inherited £250,000 from my grandmother Mary Smith in June 2023. The probate was granted in May 2023 and funds were transferred to my Barclays account on June 15, 2023. Additionally, I sold my property at 123 High Street, London for £300,000 in August 2023. The completion statement shows the sale proceeds were paid into my HSBC account on August 20, 2023. I then transferred £500,000 from these combined sources to my business account in January 2024 to fund the acquisition.",
+  "known_documents": [
+    "Probate grant",
+    "Property completion statement"
+  ],
+  "flags": {
+    "pep": false,
+    "high_risk_jurisdictions": []
+  },
+  "constraints": {
+    "statement_start_date": "2023-05-01",
+    "statement_end_date": "2024-01-31"
+  }
+}

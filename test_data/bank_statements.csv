@@ -1,0 +1,10 @@
+account_id,date,amount,currency,direction,description,counterparty_name,balance
+Barclays_****1234,2023-06-15,250000,GBP,credit,Estate of Mary Smith - Probate Distribution,Smith Estate Executors,250000
+Barclays_****1234,2023-06-20,50,GBP,debit,Bank Charges,,249950
+Barclays_****1234,2023-07-10,5000,GBP,debit,Transfer to HSBC,,244950
+HSBC_****5678,2023-07-10,5000,GBP,credit,Transfer from Barclays,Barclays Bank,5000
+HSBC_****5678,2023-08-20,300000,GBP,credit,Property Sale - 123 High Street,London Property Solicitors,305000
+HSBC_****5678,2023-08-21,1500,GBP,debit,Solicitor Fees,London Property Solicitors,303500
+HSBC_****5678,2023-09-01,2000,GBP,debit,Various expenses,,301500
+HSBC_****5678,2024-01-10,244950,GBP,credit,Transfer from Barclays,Barclays Bank,546450
+HSBC_****5678,2024-01-15,500000,GBP,debit,Transfer to Business Account - Purchase Funding,ACME001 Business Account,46450
