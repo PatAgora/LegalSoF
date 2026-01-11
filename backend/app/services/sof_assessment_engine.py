@@ -315,6 +315,8 @@ class SoFAssessmentEngine:
             
             evidence_matches.append({
                 "claim_id": claim['claim_id'],
+                "claim_source": claim.get('source_type', 'Unknown'),
+                "expected_amount": claim.get('expected_amount', 0),
                 "match_quality": "strong" if any(m['match_quality'] == 'strong' for m in matches) else 
                                 "exact" if matches else "none",
                 "transactions": matches,
