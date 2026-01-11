@@ -29,7 +29,7 @@ export default function TransactionUpload({ matterId, onUploadSuccess }: Transac
     formData.append('customer_id', customerId);
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('access_token');
       const response = await fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transactions/upload`, {
         method: 'POST',
         headers: {

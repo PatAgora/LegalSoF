@@ -28,7 +28,7 @@ export default function TransactionDashboard({ matterId }: TransactionDashboardP
   const fetchDashboard = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('access_token');
       const response = await fetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transaction-dashboard`, {
         headers: {
           'Authorization': `Bearer ${token}`,
