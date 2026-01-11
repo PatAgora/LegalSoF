@@ -281,8 +281,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const getStatusColor = (status: string) => {
-    // Use cream/beige color for all statuses to match Forbes branding
-    return 'bg-[#F5DEB3]';
+    // Use cream/tan color to match the screenshot
+    return 'bg-[#EAD8C0]';
   };
 
   const getSeverityColor = (severity: string) => {
