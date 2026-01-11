@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        .info {
+            color: blue;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Transaction Review API Test</h1>
+    
+    <div class="section">
+        <h2>Configuration</h2>
+        <label>API Base URL: 
+            <input type="text" id="apiBaseUrl" value="https://8000-iuy1pmhbm169wep8nogbw-b32ec7bb.sandbox.novita.ai" style="width: 500px;">
+        </label>
+        <br>
+        <label>Matter ID: 
+            <input type="number" id="matterId" value="1">
+        </label>
+        <button onclick="updateConfig()">Update Config</button>
+    </div>
+
+    <div class="section">
+        <h2>Quick Tests</h2>
+        <button onclick="testHealth()">Test Health</button>
+        <button onclick="testTransactions()">Test Transactions</button>
+        <button onclick="testAlerts()">Test Alerts</button>
+        <button onclick="testDashboard()">Test Dashboard</button>
+        <button onclick="testAll()">Test All</button>
+        <button onclick="clearResults()">Clear Results</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        let config = {
+            apiBaseUrl: 'https://8000-iuy1pmhbm169wep8nogbw-b32ec7bb.sandbox.novita.ai',
+            matterId: 1
+        };
+
+        function updateConfig() {
+            config.apiBaseUrl = document.getElementById('apiBaseUrl').value;
+            config.matterId = document.getElementById('matterId').value;
+            addResult('info', 'Configuration updated', config);
+        }
+
+        function addResult(type, title, content) {
+            const resultsDiv = document.getElementById('results');
+            const section = document.createElement('div');
+            section.className = 'section';
+            
+            const titleElement = document.createElement('h3');
+            titleElement.className = type;
+            titleElement.textContent = `${new Date().toLocaleTimeString()} - ${title}`;
+            section.appendChild(titleElement);
+            
+            const pre = document.createElement('pre');
+            pre.textContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+            section.appendChild(pre);
+            
+            resultsDiv.insertBefore(section, resultsDiv.firstChild);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testHealth() {
+            try {
+                const url = `${config.apiBaseUrl}/health`;
+                console.log('Testing health:', url);
+                const response = await fetch(url);
+                const data = await response.json();
+                if (response.ok) {
+                    addResult('success', '✅ Health Check Passed', data);
+                } else {
+                    addResult('error', '❌ Health Check Failed', {status: response.status, data});
+                }
+            } catch (error) {
+                addResult('error', '❌ Health Check Error', error.message);
+            }
+        }
+
+        async function testTransactions() {
+            try {
+                const url = `${config.apiBaseUrl}/api/v1/matters/${config.matterId}/transactions`;
+                console.log('Testing transactions:', url);
+                const response = await fetch(url);
+                const data = await response.json();
+                if (response.ok) {
+                    addResult('success', `✅ Transactions Loaded (${data.length} items)`, {
+                        count: data.length,
+                        sample: data.slice(0, 3)
+                    });
+                } else {
+                    addResult('error', '❌ Transactions Failed', {status: response.status, data});
+                }
+            } catch (error) {
+                addResult('error', '❌ Transactions Error', error.message);
+            }
+        }
+
+        async function testAlerts() {
+            try {
+                const url = `${config.apiBaseUrl}/api/v1/matters/${config.matterId}/transaction-alerts`;
+                console.log('Testing alerts:', url);
+                const response = await fetch(url);
+                const data = await response.json();
+                if (response.ok) {
+                    // Count by severity
+                    const severityCounts = data.reduce((acc, alert) => {
+                        acc[alert.severity] = (acc[alert.severity] || 0) + 1;
+                        return acc;
+                    }, {});
+                    
+                    addResult('success', `✅ Alerts Loaded (${data.length} items)`, {
+                        count: data.length,
+                        severityCounts,
+                        sample: data.slice(0, 3)
+                    });
+                } else {
+                    addResult('error', '❌ Alerts Failed', {status: response.status, data});
+                }
+            } catch (error) {
+                addResult('error', '❌ Alerts Error', error.message);
+            }
+        }
+
+        async function testDashboard() {
+            try {
+                const url = `${config.apiBaseUrl}/api/v1/matters/${config.matterId}/transaction-dashboard`;
+                console.log('Testing dashboard:', url);
+                const response = await fetch(url);
+                const data = await response.json();
+                if (response.ok) {
+                    addResult('success', '✅ Dashboard Loaded', data);
+                } else {
+                    addResult('error', '❌ Dashboard Failed', {status: response.status, data});
+                }
+            } catch (error) {
+                addResult('error', '❌ Dashboard Error', error.message);
+            }
+        }
+
+        async function testAll() {
+            clearResults();
+            addResult('info', '🚀 Running All Tests', `Testing against ${config.apiBaseUrl}`);
+            await testHealth();
+            await testTransactions();
+            await testAlerts();
+            await testDashboard();
+        }
+
+        // Run tests on load
+        window.addEventListener('load', () => {
+            console.log('Page loaded, running initial tests...');
+            testAll();
+        });
+    </script>
+</body>
+</html>
