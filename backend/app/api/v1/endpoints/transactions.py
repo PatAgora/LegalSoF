@@ -214,11 +214,15 @@ async def get_transaction_alerts(
     matter_id: int,
     severity: Optional[str] = None,
     status: Optional[str] = None,
+    include_context: bool = True,
     db: Session = Depends(get_sync_db)
 ):
     """
     Get transaction alerts for a matter with optional filters
+    Includes context-aware AI analysis by default (100% local, no external API calls)
     """
+    from app.services.transaction_context_analyzer import TransactionContextAnalyzer
+    
     query = db.query(TransactionAlert).join(Transaction).filter(
         TransactionAlert.matter_id == matter_id
     )
@@ -231,7 +235,14 @@ async def get_transaction_alerts(
     
     alerts = query.order_by(desc(TransactionAlert.created_at)).all()
     
-    # Enrich alerts with transaction data
+    # Initialize context analyzer (once for all alerts)
+    context = None
+    analyzer = None
+    if include_context:
+        analyzer = TransactionContextAnalyzer(db)
+        context = analyzer.gather_matter_context(matter_id)
+    
+    # Enrich alerts with transaction data and context-aware AI
     result = []
     for alert in alerts:
         alert_dict = {
@@ -254,6 +265,44 @@ async def get_transaction_alerts(
             alert_dict['amount'] = txn.base_amount
             alert_dict['currency'] = txn.currency
             alert_dict['country_iso2'] = txn.country_iso2
+            
+            # Generate context-aware AI analysis (100% local)
+            if include_context and analyzer and context:
+                txn_dict = {
+                    "id": txn.id,
+                    "customer_id": txn.customer_id,
+                    "txn_date": txn.txn_date.isoformat(),
+                    "direction": txn.direction,
+                    "amount": txn.amount,
+                    "currency": txn.currency,
+                    "country_iso2": txn.country_iso2,
+                    "narrative": txn.narrative
+                }
+                
+                # Analyze documentation sufficiency
+                assessment = analyzer.analyze_documentation_sufficiency(
+                    context=context,
+                    alert_severity=alert.severity,
+                    alert_reasons=alert.reasons if isinstance(alert.reasons, list) else [],
+                    transaction=txn_dict
+                )
+                
+                # Generate context-aware AI rationale
+                alert_dict['ai_rationale'] = analyzer.generate_context_aware_rationale(
+                    context=context,
+                    alert_severity=alert.severity,
+                    alert_reasons=alert.reasons if isinstance(alert.reasons, list) else [],
+                    transaction=txn_dict,
+                    assessment=assessment
+                )
+                
+                # Generate context-aware AI outreach
+                alert_dict['ai_outreach'] = analyzer.generate_context_aware_outreach(
+                    context=context,
+                    alert_severity=alert.severity,
+                    transaction=txn_dict,
+                    assessment=assessment
+                )
         
         result.append(TransactionAlertResponse(**alert_dict))
     
@@ -436,3 +485,95 @@ async def update_transaction_config(
     db.commit()
     
     return {"success": True, "message": "Configuration updated"}
+
+@router.get("/matters/{matter_id}/transaction-alerts/{alert_id}/context-analysis")
+def get_alert_context_analysis(
+    matter_id: int,
+    alert_id: int,
+    db: Session = Depends(get_sync_db)
+):
+    """
+    Get context-aware AI analysis for a specific alert
+    Reviews ALL available documentation and provides regulatory sufficiency assessment
+    
+    100% LOCAL - No external API calls, no data leaves the platform
+    """
+    from app.models import TransactionAlert, Transaction
+    from app.services.transaction_context_analyzer import TransactionContextAnalyzer
+    
+    # Get the alert
+    alert = db.query(TransactionAlert).filter(
+        TransactionAlert.id == alert_id,
+        TransactionAlert.matter_id == matter_id
+    ).first()
+    
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    # Get the transaction
+    transaction = db.query(Transaction).filter(
+        Transaction.id == alert.txn_id,
+        Transaction.matter_id == matter_id
+    ).first()
+    
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    # Initialize context analyzer
+    analyzer = TransactionContextAnalyzer(db)
+    
+    # Gather comprehensive context from all sources
+    context = analyzer.gather_matter_context(matter_id)
+    
+    # Build transaction dict
+    txn_dict = {
+        "id": transaction.id,
+        "customer_id": transaction.customer_id,
+        "txn_date": transaction.txn_date.isoformat(),
+        "direction": transaction.direction,
+        "amount": transaction.amount,
+        "currency": transaction.currency,
+        "country_iso2": transaction.country_iso2,
+        "narrative": transaction.narrative
+    }
+    
+    # Analyze documentation sufficiency
+    assessment = analyzer.analyze_documentation_sufficiency(
+        context=context,
+        alert_severity=alert.severity,
+        alert_reasons=alert.reasons,
+        transaction=txn_dict
+    )
+    
+    # Generate context-aware AI rationale
+    ai_rationale = analyzer.generate_context_aware_rationale(
+        context=context,
+        alert_severity=alert.severity,
+        alert_reasons=alert.reasons,
+        transaction=txn_dict,
+        assessment=assessment
+    )
+    
+    # Generate context-aware AI outreach
+    ai_outreach = analyzer.generate_context_aware_outreach(
+        context=context,
+        alert_severity=alert.severity,
+        transaction=txn_dict,
+        assessment=assessment
+    )
+    
+    # Return comprehensive analysis
+    return {
+        "alert_id": alert_id,
+        "transaction_id": transaction.id,
+        "severity": alert.severity,
+        "score": alert.score,
+        "context_summary": context["summary"],
+        "assessment": assessment,
+        "ai_rationale": ai_rationale,
+        "ai_outreach": ai_outreach,
+        "generated_at": datetime.utcnow().isoformat(),
+        "analysis_method": "LOCAL_RULE_BASED",
+        "data_security": "ALL_DATA_REMAINS_ON_PLATFORM"
+    }
+
