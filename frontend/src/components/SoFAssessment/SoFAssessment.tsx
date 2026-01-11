@@ -295,20 +295,138 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const extractFinalAssessmentText = (rationale: string): string[] => {
-    // Extract the Final Assessment section
-    const finalMatch = rationale.match(/=== FINAL ASSESSMENT ===([\s\S]*?)(?:$)/);
-    if (!finalMatch) return ['Assessment details not available.'];
+    // This function is no longer used - we'll build from result data directly
+    return [];
+  };
+
+  const buildComprehensiveSummary = (result: AssessmentResult): JSX.Element => {
+    const verified_count = result.evidence_matches.filter(e => e.verified).length;
+    const total_claims = result.claims.length;
+    const best_path = result.funding_paths && result.funding_paths.length > 0 
+      ? result.funding_paths.reduce((max, p) => p.coverage > max.coverage ? p : max, result.funding_paths[0])
+      : null;
     
-    const content = finalMatch[1].trim();
-    // Remove the DECISION: line and get the explanation
-    const lines = content.split('\n').filter(line => 
-      line.trim() && 
-      !line.includes('DECISION:') && 
-      !line.includes('===')
+    return (
+      <div className="space-y-4">
+        {/* Claims Overview */}
+        <div>
+          <h5 className="font-semibold text-white mb-2">Client's SoF Explanation:</h5>
+          <ul className="space-y-1 text-sm">
+            {result.claims.map((claim, idx) => {
+              const evidence = result.evidence_matches[idx];
+              const verified = evidence?.verified || false;
+              return (
+                <li key={idx} className="flex items-center space-x-2">
+                  <span>{verified ? '✅' : '⚠️'}</span>
+                  <span>
+                    {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
+                    <span className="ml-2 font-semibold">[{verified ? 'VERIFIED' : 'NOT VERIFIED'}]</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        {/* Evidence Summary */}
+        <div>
+          <h5 className="font-semibold text-white mb-2">Evidence Review:</h5>
+          <p className="text-sm mb-2">
+            Direct verification: {verified_count}/{total_claims} claims matched to bank statement entries.
+          </p>
+          <ul className="space-y-1 text-sm">
+            {result.evidence_matches.map((evidence, idx) => (
+              <li key={idx}>
+                {evidence.verified ? (
+                  <>✅ Claim {idx + 1} ({evidence.claim_source}): VERIFIED - Supported by {evidence.transactions.length} transaction(s). Match quality: {evidence.match_quality}.</>
+                ) : (
+                  <>⚠️ Claim {idx + 1} ({evidence.claim_source}): NOT VERIFIED - No direct matching transaction found in statements provided.</>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Funding Analysis */}
+        {best_path && (
+          <div>
+            <h5 className="font-semibold text-white mb-2">Funding Analysis:</h5>
+            <p className="text-sm mb-2">
+              Total funding traced: {best_path.coverage}% of purchase amount.
+            </p>
+            {best_path.coverage >= 90 && verified_count < total_claims && (
+              <div className="text-sm space-y-1 mb-2">
+                <p className="font-medium">INTERPRETATION:</p>
+                <p>While not all individual claims have direct evidence in the provided statements, sufficient aggregate funding has been traced to cover the full purchase amount. This may indicate:</p>
+                <ul className="ml-4 space-y-1">
+                  <li>• Some source transactions occurred before the statement period</li>
+                  <li>• Funds arrived via intermediate accounts not yet documented</li>
+                  <li>• Alternative credits provide equivalent funding coverage</li>
+                </ul>
+                <p className="mt-2 italic">Recommendation: Request specific documentation for unverified claims to complete the audit trail, even though funding is mathematically sufficient.</p>
+              </div>
+            )}
+            {best_path.steps && best_path.steps.length > 0 && (
+              <div className="text-sm">
+                <p className="font-medium mb-1">Funding path analysis:</p>
+                <ul className="ml-4 space-y-1">
+                  {best_path.steps.slice(0, 5).map((step, idx) => (
+                    <li key={idx}>• {step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Transaction Review Summary */}
+        {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
+          <div>
+            <h5 className="font-semibold text-white mb-2">Automated Transaction Monitoring:</h5>
+            <p className="text-sm mb-2">
+              System identified {result.transaction_review_summary.total_alerts} alert(s): 
+              {' '}{result.transaction_review_summary.critical_alerts} CRITICAL, 
+              {' '}{result.transaction_review_summary.high_alerts} HIGH, 
+              {' '}{result.transaction_review_summary.medium_alerts} MEDIUM.
+            </p>
+            {result.transaction_review_summary.key_concerns && result.transaction_review_summary.key_concerns.length > 0 && (
+              <>
+                <p className="text-sm font-medium mb-1">Key concerns:</p>
+                <ul className="ml-4 space-y-1 text-sm mb-2">
+                  {result.transaction_review_summary.key_concerns.map((concern, idx) => (
+                    <li key={idx}>• {concern}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <p className="text-sm italic">Full alert details available in Transaction Review tab. These findings materially impact the SoF assessment.</p>
+          </div>
+        )}
+
+        {/* Red Flags */}
+        {result.red_flags && result.red_flags.length > 0 && (
+          <div>
+            <h5 className="font-semibold text-white mb-2">Red Flags Identified ({result.red_flags.length}):</h5>
+            <ul className="space-y-1 text-sm">
+              {result.red_flags.slice(0, 5).map((flag, idx) => (
+                <li key={idx}>• [{flag.severity}] {flag.flag}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Final Decision Statement */}
+        <div className="pt-3 border-t border-white/30">
+          <p className="text-sm font-medium">
+            Status: {result.outcome.status.toUpperCase()} (Confidence: {result.outcome.confidence}%)
+          </p>
+          <p className="text-sm mt-2 italic">
+            This assessment was conducted using a risk-based approach in accordance with UK AML regulations. 
+            The matter {result.outcome.status === 'sufficient' ? 'CAN' : 'CANNOT'} proceed to completion in its current state.
+          </p>
+        </div>
+      </div>
     );
-    
-    // Group into paragraphs (non-empty lines)
-    return lines.map(line => line.trim()).filter(line => line.length > 0);
   };
 
   const renderStructuredRationale = (result: AssessmentResult) => {
@@ -911,7 +1029,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Results Step */}
       {activeStep === 'results' && result && (
         <div className="space-y-6">
-          {/* Overall Decision Badge with Full Summary */}
+          {/* Overall Decision Badge with Comprehensive Summary */}
           <div className={`rounded-lg p-6 text-white ${getStatusColor(result.outcome.status)}`}>
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -926,13 +1044,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </div>
             </div>
             
-            {/* Final Assessment Summary */}
+            {/* Comprehensive Assessment Summary */}
             <div className="mt-4 pt-4 border-t border-white/20">
               <h4 className="text-lg font-semibold mb-3">Assessment Summary</h4>
-              <div className="space-y-2 text-white/95 text-sm leading-relaxed">
-                {extractFinalAssessmentText(result.outcome.rationale).map((paragraph, idx) => (
-                  <p key={idx}>{paragraph}</p>
-                ))}
+              <div className="text-white/95 text-sm leading-relaxed">
+                {buildComprehensiveSummary(result)}
               </div>
             </div>
           </div>
