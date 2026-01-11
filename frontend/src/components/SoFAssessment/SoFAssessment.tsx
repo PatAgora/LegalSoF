@@ -294,6 +294,274 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     }
   };
 
+  const renderStructuredRationale = (result: AssessmentResult) => {
+    // Parse the rationale into sections
+    const rationale = result.outcome.rationale;
+    const sections = rationale.split('===').filter(s => s.trim());
+    
+    return (
+      <div className="space-y-6">
+        {sections.map((section, idx) => {
+          const lines = section.trim().split('\n');
+          const title = lines[0].trim();
+          const content = lines.slice(1).join('\n');
+          
+          // Determine section type
+          if (title.includes('SOURCE OF FUNDS')) {
+            return renderSoFSection(content, result);
+          } else if (title.includes('TRANSACTION REVIEW')) {
+            return renderTransactionReviewSection(content, result);
+          } else if (title.includes('FINAL ASSESSMENT')) {
+            return renderFinalAssessmentSection(content);
+          }
+          return null;
+        })}
+      </div>
+    );
+  };
+
+  const renderSoFSection = (content: string, result: AssessmentResult) => {
+    // Extract overall status
+    const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/);
+    const overallStatus = overallMatch ? overallMatch[1].trim() : '';
+    
+    const isGood = overallStatus.includes('✅') || overallStatus.includes('Sufficient');
+    const isPartial = overallStatus.includes('⚠️') || overallStatus.includes('Partial');
+    
+    return (
+      <div key="sof" className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {/* Header */}
+        <div className="bg-blue-50 border-b border-blue-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-blue-900">📊 Source of Funds Analysis</h3>
+        </div>
+        
+        {/* Overall Status */}
+        <div className={`px-6 py-4 border-b ${isGood ? 'bg-green-50 border-green-200' : isPartial ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`}>
+          <p className={`font-semibold ${isGood ? 'text-green-900' : isPartial ? 'text-yellow-900' : 'text-red-900'}`}>
+            {overallStatus}
+          </p>
+        </div>
+        
+        {/* Claims Table */}
+        <div className="px-6 py-4">
+          <h4 className="text-sm font-bold text-gray-700 mb-3">Claim-by-Claim Analysis</h4>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Claim</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Evidence Found</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Outreach Questions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {result.claims.map((claim, idx) => {
+                  const evidence = result.evidence_matches[idx];
+                  const verified = evidence?.verified || false;
+                  const transactions = evidence?.transactions || [];
+                  
+                  return (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900 font-medium">
+                        {claim.source_type} £{claim.expected_amount.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {verified && transactions.length > 0 ? (
+                          <div className="text-green-700">
+                            ✅ {transactions[0].date}: £{transactions[0].amount.toLocaleString()}
+                            {transactions.length > 1 && <span className="text-gray-500 ml-1">(+{transactions.length - 1} more)</span>}
+                          </div>
+                        ) : (
+                          <div className="text-red-700">❌ No matching transaction</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {verified ? (
+                          <span className="text-green-700">✓ Verified</span>
+                        ) : (
+                          <span className="text-orange-700">
+                            Request {
+                              claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
+                              claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
+                              claim.source_type.toLowerCase().includes('loan') ? 'loan agreement' :
+                              claim.source_type.toLowerCase().includes('business') ? 'sale agreement' :
+                              'documentation'
+                            }
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {verified ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            ✅ VERIFIED
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            ❌ MISSING
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        {/* Summary */}
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+          <h4 className="text-sm font-bold text-gray-700 mb-2">Summary</h4>
+          <div className="text-sm text-gray-700 space-y-2">
+            {content.split('SOURCE OF FUNDS SUMMARY:')[1]?.split('FUNDING PATH')[0]?.split('\n').filter(line => line.trim()).map((line, idx) => (
+              <p key={idx}>{line.trim()}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTransactionReviewSection = (content: string, result: AssessmentResult) => {
+    const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/);
+    const overallStatus = overallMatch ? overallMatch[1].trim() : '';
+    
+    const hasCritical = overallStatus.includes('CRITICAL') || content.includes('CRITICAL');
+    
+    return (
+      <div key="tr" className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {/* Header */}
+        <div className="bg-orange-50 border-b border-orange-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-orange-900">🚨 Automated Transaction Review</h3>
+        </div>
+        
+        {/* Overall Status */}
+        <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+          <p className={`font-semibold ${hasCritical ? 'text-red-900' : 'text-green-900'}`}>
+            {overallStatus}
+          </p>
+        </div>
+        
+        {/* Alert Stats */}
+        {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="grid grid-cols-4 gap-4">
+              <div className="bg-gray-100 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-gray-900">{result.transaction_review_summary.total_alerts}</div>
+                <div className="text-xs text-gray-600 mt-1">Total Alerts</div>
+              </div>
+              <div className="bg-red-100 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-red-600">{result.transaction_review_summary.critical_alerts}</div>
+                <div className="text-xs text-red-800 mt-1">Critical</div>
+              </div>
+              <div className="bg-orange-100 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-orange-600">{result.transaction_review_summary.high_alerts}</div>
+                <div className="text-xs text-orange-800 mt-1">High</div>
+              </div>
+              <div className="bg-yellow-100 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-yellow-600">{result.transaction_review_summary.medium_alerts}</div>
+                <div className="text-xs text-yellow-800 mt-1">Medium</div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Alert Table */}
+        {result.transaction_review_summary && result.transaction_review_summary.key_concerns.length > 0 && (
+          <div className="px-6 py-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-3">Alert Analysis</h4>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Severity</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Identified</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Outreach Questions</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {result.transaction_review_summary.key_concerns.slice(0, 5).map((concern, idx) => {
+                    const isSanctioned = concern.toLowerCase().includes('sanctioned') || concern.toLowerCase().includes('prohibited');
+                    const isCash = concern.toLowerCase().includes('cash');
+                    const severity = isSanctioned || isCash ? 'CRITICAL' : 'HIGH';
+                    
+                    return (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            severity === 'CRITICAL' ? 'bg-red-600 text-white' : 'bg-orange-600 text-white'
+                          }`}>
+                            {severity === 'CRITICAL' ? '🔴 CRITICAL' : '🟠 HIGH'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{concern}</td>
+                        <td className="px-4 py-3 text-sm text-orange-700">
+                          {isSanctioned ? 'Explain all sanctioned transactions' :
+                           isCash ? 'Provide cash source documentation' :
+                           'Explain business purpose and parties'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            severity === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'
+                          }`}>
+                            {severity === 'CRITICAL' ? '❌ BLOCKS COMPLETION' : '⚠️ REQUIRES REVIEW'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        
+        {/* Summary */}
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+          <h4 className="text-sm font-bold text-gray-700 mb-2">Summary</h4>
+          <div className="text-sm text-gray-700 space-y-2">
+            {content.split('TRANSACTION REVIEW SUMMARY:')[1]?.split('ADDITIONAL RED FLAGS')[0]?.split('\n').filter(line => line.trim()).map((line, idx) => (
+              <p key={idx}>{line.trim()}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderFinalAssessmentSection = (content: string) => {
+    const decisionMatch = content.match(/DECISION: (\w+)/);
+    const decision = decisionMatch ? decisionMatch[1] : 'UNKNOWN';
+    
+    const explanation = content.split('\n\n').slice(1).join('\n\n').trim();
+    
+    const isGood = decision === 'SUFFICIENT';
+    const isBorderline = decision === 'BORDERLINE';
+    
+    return (
+      <div key="final" className={`border-2 rounded-lg overflow-hidden ${
+        isGood ? 'border-green-500 bg-green-50' :
+        isBorderline ? 'border-yellow-500 bg-yellow-50' :
+        'border-red-500 bg-red-50'
+      }`}>
+        <div className="px-6 py-4">
+          <h3 className="text-lg font-bold mb-3">
+            {isGood ? '✅' : isBorderline ? '⚠️' : '❌'} Final Assessment: {decision}
+          </h3>
+          <div className="text-sm space-y-2">
+            {explanation.split('\n').filter(line => line.trim()).map((line, idx) => (
+              <p key={idx} className={isGood ? 'text-green-900' : isBorderline ? 'text-yellow-900' : 'text-red-900'}>
+                {line.trim()}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -657,7 +925,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Results Step */}
       {activeStep === 'results' && result && (
         <div className="space-y-6">
-          {/* Overall Decision */}
+          {/* Overall Decision Badge */}
           <div className={`rounded-lg p-6 text-white ${getStatusColor(result.outcome.status)}`}>
             <div className="flex items-center justify-between">
               <div>
@@ -671,75 +939,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                  result.outcome.status === 'borderline' ? '⚠️' : '❌'}
               </div>
             </div>
-            <p className="mt-4 text-white/90">{result.outcome.rationale}</p>
           </div>
 
-          {/* Transaction Review Integration */}
-          {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
-            <div className="bg-red-50 border-l-4 border-red-600 rounded-lg p-6">
-              <h3 className="text-lg font-bold text-red-900 mb-3">
-                🚨 Transaction Review Alerts
-              </h3>
-              <div className="grid grid-cols-4 gap-4 mb-4">
-                <div className="bg-white rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-gray-900">
-                    {result.transaction_review_summary.total_alerts}
-                  </div>
-                  <div className="text-sm text-gray-600">Total Alerts</div>
-                </div>
-                <div className="bg-red-100 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-red-600">
-                    {result.transaction_review_summary.critical_alerts}
-                  </div>
-                  <div className="text-sm text-red-800">Critical</div>
-                </div>
-                <div className="bg-orange-100 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-orange-600">
-                    {result.transaction_review_summary.high_alerts}
-                  </div>
-                  <div className="text-sm text-orange-800">High</div>
-                </div>
-                <div className="bg-yellow-100 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-yellow-600">
-                    {result.transaction_review_summary.medium_alerts}
-                  </div>
-                  <div className="text-sm text-yellow-800">Medium</div>
-                </div>
-              </div>
-              {result.transaction_review_summary.key_concerns.length > 0 && (
-                <div>
-                  <h4 className="font-semibold text-red-900 mb-2">Key Concerns:</h4>
-                  <ul className="list-disc list-inside space-y-1">
-                    {result.transaction_review_summary.key_concerns.map((concern, idx) => (
-                      <li key={idx} className="text-red-800">{concern}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Red Flags */}
-          {result.red_flags && result.red_flags.length > 0 && (
-            <div className="bg-white border border-gray-200 rounded-lg p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">
-                🚩 Red Flags ({result.red_flags.length})
-              </h3>
-              <div className="space-y-3">
-                {result.red_flags.slice(0, 10).map((flag, idx) => (
-                  <div key={idx} className="flex items-start space-x-3 p-3 bg-gray-50 rounded">
-                    <span className={`px-2 py-1 rounded text-xs font-bold text-white ${getSeverityColor(flag.severity)}`}>
-                      {flag.severity}
-                    </span>
-                    <div className="flex-1">
-                      <p className="text-sm text-gray-900">{flag.flag}</p>
-                      <p className="text-xs text-gray-600 mt-1">Source: {flag.source}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Parsed Rationale Sections */}
+          {renderStructuredRationale(result)}
 
           {/* Next Actions */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
