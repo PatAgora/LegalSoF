@@ -368,12 +368,59 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             )}
             {best_path.steps && best_path.steps.length > 0 && (
               <div className="text-sm">
-                <p className="font-medium mb-1">Funding path analysis:</p>
-                <ul className="ml-4 space-y-1">
-                  {best_path.steps.slice(0, 5).map((step, idx) => (
-                    <li key={idx}>• {step}</li>
-                  ))}
-                </ul>
+                {(() => {
+                  // Separate claimed vs other funding sources
+                  const claimedSources = new Set(
+                    result.evidence_matches
+                      .filter(e => e.verified && e.transactions.length > 0)
+                      .flatMap(e => e.transactions.map(t => t.date + t.amount))
+                  );
+                  
+                  const claimedSteps: string[] = [];
+                  const otherSteps: string[] = [];
+                  
+                  best_path.steps.forEach(step => {
+                    // Check if this step matches a verified claim transaction
+                    const isClaimedSource = result.evidence_matches.some(evidence => {
+                      if (!evidence.verified) return false;
+                      return evidence.transactions.some(txn => {
+                        return step.includes(txn.date) && step.includes(txn.amount.toString());
+                      });
+                    });
+                    
+                    if (isClaimedSource) {
+                      claimedSteps.push(step);
+                    } else {
+                      otherSteps.push(step);
+                    }
+                  });
+                  
+                  return (
+                    <>
+                      {claimedSteps.length > 0 && (
+                        <div className="mb-3">
+                          <p className="font-medium mb-1">Funding pathway (from client explanation):</p>
+                          <ul className="ml-4 space-y-1">
+                            {claimedSteps.map((step, idx) => (
+                              <li key={idx}>• {step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {otherSteps.length > 0 && (
+                        <div>
+                          <p className="font-medium mb-1">Other potential funding pathway:</p>
+                          <ul className="ml-4 space-y-1">
+                            {otherSteps.map((step, idx) => (
+                              <li key={idx}>• {step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
