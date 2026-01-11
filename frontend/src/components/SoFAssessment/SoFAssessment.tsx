@@ -281,16 +281,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'sufficient':
-        return 'bg-green-600';
-      case 'borderline':
-        return 'bg-yellow-600';
-      case 'insufficient':
-        return 'bg-red-600';
-      default:
-        return 'bg-gray-600';
-    }
+    // Use cream/beige color for all statuses to match Forbes branding
+    return 'bg-[#F5DEB3]';
   };
 
   const getSeverityColor = (severity: string) => {
@@ -1193,13 +1185,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {activeStep === 'results' && result && (
         <div className="space-y-6">
           {/* Overall Decision Badge with Comprehensive Summary */}
-          <div className={`rounded-lg p-6 text-white ${getStatusColor(result.outcome.status)}`}>
+          <div className={`rounded-lg p-6 ${getStatusColor(result.outcome.status)}`}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-2xl font-bold mb-2">
+                <h3 className="text-2xl font-bold mb-2 text-gray-900">
                   {result.outcome.status.toUpperCase()}
                 </h3>
-                <p className="text-lg opacity-90">Confidence: {result.outcome.confidence}%</p>
+                <p className="text-lg text-gray-700">Confidence: {result.outcome.confidence}%</p>
               </div>
               <div className="text-5xl">
                 {result.outcome.status === 'sufficient' ? '✅' :
@@ -1208,9 +1200,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
             
             {/* Comprehensive Assessment Summary */}
-            <div className="mt-4 pt-4 border-t border-white/20">
-              <h4 className="text-lg font-semibold mb-3">Assessment Summary</h4>
-              <div className="text-white/95 text-sm leading-relaxed">
+            <div className="mt-4 pt-4 border-t border-gray-300">
+              <h4 className="text-lg font-semibold mb-3 text-gray-900">Assessment Summary</h4>
+              <div className="text-gray-800 text-sm leading-relaxed">
                 {buildComprehensiveSummary(result)}
               </div>
             </div>
