@@ -14,7 +14,7 @@ interface AssessmentStatus {
   matter_id: number;
   status: string;
   uploaded_files: UploadedFile[];
-  files_summary: {
+  files_summary?: {
     client_info: string;
     bank_statements_count: number;
     supporting_docs_count: number;
@@ -279,7 +279,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     {uploadingFiles.client_info ? 'Uploading...' : 'Choose JSON File'}
                   </span>
                 </label>
-                {status && status.files_summary.client_info === 'uploaded' && (
+                {status && status.files_summary && status.files_summary.client_info === 'uploaded' && (
                   <div className="mt-3 text-green-600 text-sm font-medium">✓ Uploaded</div>
                 )}
                 {errors.client_info && (
@@ -339,7 +339,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     {uploadingFiles.supporting_doc ? 'Uploading...' : 'Choose PDF'}
                   </span>
                 </label>
-                {status && status.files_summary.supporting_docs_count > 0 && (
+                {status && status.files_summary && status.files_summary.supporting_docs_count > 0 && (
                   <div className="mt-3 text-green-600 text-sm font-medium">
                     ✓ {status.files_summary.supporting_docs_count} doc(s)
                   </div>
