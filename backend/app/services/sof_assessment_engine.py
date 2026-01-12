@@ -30,6 +30,7 @@ class SoFAssessmentEngine:
         sof_explanation: str,
         bank_statements: List[Dict[str, Any]],
         known_documents: List[str] = None,
+        supporting_docs_data: List[Dict[str, Any]] = None,
         constraints: Dict[str, Any] = None,
         flags: Dict[str, Any] = None
     ) -> Dict[str, Any]:
@@ -37,6 +38,7 @@ class SoFAssessmentEngine:
         Main assessment method
         Returns structured JSON with claims, evidence, decision, and actions
         """
+        from app.services.document_verifier import document_verifier
         
         # Extract client risk rating
         risk_rating = client_info.get('client_risk_rating', 'medium').lower()
@@ -46,6 +48,22 @@ class SoFAssessmentEngine:
         
         # Step 2: Find evidence in bank statements
         evidence_matches = self.match_evidence(claims, bank_statements)
+        
+        # Step 2.5: Verify supporting documents against claims (NEW!)
+        document_verification = None
+        if supporting_docs_data:
+            document_verification = document_verifier.verify_documents_against_claims(
+                claims=claims,
+                supporting_docs=supporting_docs_data,
+                bank_statements=bank_statements
+            )
+            
+            # Enhance evidence_matches with document verification data
+            for verification in document_verification.get('verifications', []):
+                claim_id = verification['claim_id']
+                if claim_id < len(evidence_matches):
+                    evidence_matches[claim_id]['document_verified'] = verification['verified']
+                    evidence_matches[claim_id]['document_verification'] = verification
         
         # Step 3: Trace funding paths
         funding_paths = self.trace_funding_paths(
@@ -113,6 +131,7 @@ class SoFAssessmentEngine:
             "purchase": purchase,
             "claims": claims,
             "evidence_matches": evidence_matches,
+            "document_verification": document_verification,  # NEW: Document verification results
             "funding_paths": funding_paths,
             "date_alignment": date_alignment,
             "red_flags": red_flags,

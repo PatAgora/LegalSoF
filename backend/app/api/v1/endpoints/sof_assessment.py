@@ -240,6 +240,7 @@ async def run_sof_assessment(
     sof_explanation = storage['client_info']['sof_explanation']
     bank_statements = storage['bank_statements']
     known_documents = storage['client_info'].get('known_documents', [])
+    supporting_docs_data = storage['supporting_docs']  # Full document data with extracted info
     
     # Add uploaded supporting docs to known documents
     for doc in storage['supporting_docs']:
@@ -260,6 +261,7 @@ async def run_sof_assessment(
             sof_explanation=sof_explanation,
             bank_statements=bank_statements,
             known_documents=known_documents,
+            supporting_docs_data=supporting_docs_data,  # Pass full document data
             constraints=constraints,
             flags=flags
         )

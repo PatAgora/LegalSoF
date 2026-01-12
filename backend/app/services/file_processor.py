@@ -313,9 +313,11 @@ class FileProcessor:
     async def process_pdf_document(self, content: bytes) -> Dict[str, Any]:
         """
         Process PDF supporting document (not a bank statement)
-        Extracts text for document type identification
+        Extracts text for document type identification AND structured data
         """
         try:
+            from app.services.pdf_extractor import pdf_extractor
+            
             text_content = []
             
             with pdfplumber.open(io.BytesIO(content)) as pdf:
@@ -329,11 +331,16 @@ class FileProcessor:
             # Identify document type
             doc_type = self._identify_document_type(full_text)
             
+            # Extract structured data from the PDF
+            extraction_result = pdf_extractor.extract_document_data(content, doc_type)
+            
             return {
                 "success": True,
                 "data": {
                     "document_type": doc_type,
-                    "text_preview": full_text[:500],  # First 500 chars
+                    "extracted_data": extraction_result['extracted_data'],
+                    "extraction_confidence": extraction_result['confidence'],
+                    "text_preview": extraction_result['raw_text'][:500],
                     "page_count": len(text_content)
                 },
                 "file_type": "pdf_document"
