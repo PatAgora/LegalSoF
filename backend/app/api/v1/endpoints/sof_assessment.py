@@ -35,9 +35,34 @@ def get_sync_db():
         db.close()
 
 
-# In-memory storage for assessment data (per matter)
-# In production, this would be stored in database
-assessment_storage: Dict[int, Dict[str, Any]] = {}
+import json
+import os
+from pathlib import Path
+
+# Persistent storage using JSON file (survives backend restarts)
+STORAGE_FILE = Path("/tmp/sof_assessment_storage.json")
+
+def load_storage() -> Dict[int, Dict[str, Any]]:
+    """Load storage from file"""
+    if STORAGE_FILE.exists():
+        try:
+            with open(STORAGE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_storage(storage: Dict[int, Dict[str, Any]]):
+    """Save storage to file"""
+    # Convert matter_id keys to strings for JSON
+    storage_str_keys = {str(k): v for k, v in storage.items()}
+    with open(STORAGE_FILE, 'w') as f:
+        json.dump(storage_str_keys, f)
+
+# Load storage on module import
+assessment_storage = load_storage()
+# Convert string keys back to ints
+assessment_storage = {int(k): v for k, v in assessment_storage.items()}
 
 
 @router.post("/matters/{matter_id}/sof-assessment/upload")
@@ -142,6 +167,9 @@ async def upload_sof_files(
     
     storage['last_updated'] = datetime.utcnow().isoformat()
     storage['status'] = 'files_uploaded'
+    
+    # Persist storage to file
+    save_storage(assessment_storage)
     
     return {
         "success": True,
@@ -285,6 +313,9 @@ async def run_sof_assessment(
         storage['status'] = 'completed'
         storage['last_updated'] = datetime.utcnow().isoformat()
         
+        # Persist storage to file
+        save_storage(assessment_storage)
+        
         return {
             "success": True,
             "matter_id": matter_id,
@@ -400,6 +431,9 @@ async def reset_sof_assessment(
     # Clear storage
     if matter_id in assessment_storage:
         del assessment_storage[matter_id]
+    
+    # Persist storage to file
+    save_storage(assessment_storage)
     
     return {
         "success": True,
