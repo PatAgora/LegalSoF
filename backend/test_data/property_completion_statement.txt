@@ -1,0 +1,271 @@
+COMPLETION STATEMENT
+
+Taylor & Brown Solicitors
+12 Market Square
+London
+EC1A 4NP
+
+Tel: 020 7123 4567
+Email: completions@taylorbrown.co.uk
+Reference: TB/2023/7821
+
+---
+
+Date: 1st July 2023
+
+PROPERTY SALE COMPLETION STATEMENT
+
+VENDOR: John David Smith
+PROPERTY: 45 Oak Street, London, SW18 3QR
+TITLE NUMBER: TGL123456
+PURCHASER: Williams Property Investment Ltd
+COMPLETION DATE: 1st July 2023
+
+---
+
+CONTRACT DETAILS
+
+Contract Date:              15th June 2023
+Contract Price:             £450,000.00
+Deposit Paid (10%):         £45,000.00
+    Paid to: Taylor & Brown Solicitors Client Account
+    Date Received: 15th June 2023
+    Receipt Reference: TB/DEP/7821
+
+---
+
+FINANCIAL STATEMENT
+
+SALE PROCEEDS
+
+Contract Price:                                          £450,000.00
+Less: Deposit Already Received:                         (£45,000.00)
+                                                         -----------
+Balance Due on Completion:                               £405,000.00
+
+RECEIVED ON COMPLETION (1st July 2023):
+  Bank Transfer from: Williams Property Investment Ltd
+  Via: Stevenson & Co Solicitors
+  Amount Received:                                       £405,000.00
+  Reference: PROP-45-OAK-STREET
+  Receipt Time: 13:42 BST
+
+TOTAL SALE PROCEEDS:                                     £450,000.00
+
+---
+
+DEDUCTIONS FROM SALE PROCEEDS
+
+Estate Agent Fees:
+  Prime Properties London
+  Commission (1.5% + VAT):                               £8,100.00
+  Invoice Reference: PP-2023-4521
+
+Legal Fees:
+  Taylor & Brown Solicitors
+  Professional Fees:                                     £1,800.00
+  VAT (20%):                                            £360.00
+  Disbursements:                                        £450.00
+  Land Registry Fees:                                   £295.00
+  Search Fees:                                          £180.00
+  Bank Transfer Fees:                                   £35.00
+                                                         -----------
+Total Legal Costs:                                       £3,120.00
+
+Outstanding Mortgage:
+  Halifax Bank PLC
+  Account: ****8642
+  Capital Outstanding:                                   £138,037.00
+  Interest to Completion:                               £342.18
+  Early Redemption Fee:                                 £0.00
+                                                         -----------
+Total Mortgage Redemption:                               £138,379.18
+
+Service Charges:
+  Oak Street Management Company
+  Outstanding Service Charge (Jan-Jul 2023):            £420.00
+  
+Ground Rent:
+  Freehold Management Ltd
+  Annual Ground Rent (paid to Jul 2023):                £0.00
+
+Utilities Final Bills:
+  Council Tax (refund due to vendor):                   (£145.00)
+  Water (Thames Water - final bill):                    £67.00
+  Electricity (British Gas - final bill):               £89.00
+                                                         -----------
+Total Utilities:                                         £11.00
+
+Forwarding Address Service:
+  Royal Mail Redirection (12 months):                   £52.00
+
+                                                         -----------
+TOTAL DEDUCTIONS:                                        £149,999.18
+
+---
+
+NET PROCEEDS CALCULATION
+
+Total Sale Proceeds:                                     £450,000.00
+Less: Total Deductions:                                 (£149,999.18)
+                                                         -----------
+NET PROCEEDS TO VENDOR:                                  £300,000.82
+
+---
+
+PAYMENT TO VENDOR
+
+Vendor Bank Details:
+  Account Name:     John David Smith
+  Bank:            HSBC Bank PLC
+  Account Number:  ****5678
+  Sort Code:       40-XX-XX
+
+Payment Details:
+  Amount Transferred:                                    £300,000.82
+  Transfer Date:                                         1st July 2023
+  Transfer Time:                                         16:15 BST
+  Transfer Reference:                                    45-OAK-ST-SALE-PROCEEDS
+  Payment Method:                                        CHAPS
+  CHAPS Reference:                                       TB230701-7821
+
+CONFIRMATION: Payment of £300,000.82 has been successfully transferred to the vendor's account.
+
+---
+
+COMPLETION CONFIRMATION
+
+Property Keys:
+  Released to Purchaser:                                 1st July 2023, 16:30
+  Location:                                              Taylor & Brown Offices
+  Received by:                                           Marcus Williams (Director)
+
+Vacant Possession:
+  Property vacated by vendor:                            30th June 2023
+  Final inspection completed:                            1st July 2023, 10:00
+  Property condition:                                    Satisfactory - as per contract
+
+Land Registry:
+  Title Transfer:                                        Submitted 1st July 2023
+  Expected Registration:                                 15th July 2023
+  Form AP1 Reference:                                    TGL123456-2023-07
+
+---
+
+DOCUMENTS ENCLOSED WITH THIS STATEMENT
+
+1. ✓ Completed Transfer Deed (TR1)
+2. ✓ Copy of Purchaser's Solicitor's Payment Confirmation
+3. ✓ Mortgage Redemption Statement from Halifax
+4. ✓ Estate Agent's Final Invoice and Receipt
+5. ✓ Our Invoice for Legal Services
+6. ✓ Land Registry Form AP1 (Application to Register)
+7. ✓ Service Charge Clearance Certificate
+8. ✓ EPC Certificate (copy for records)
+9. ✓ Building Insurance Cancellation Confirmation
+10. ✓ Utility Final Bills and Readings
+
+---
+
+VENDOR UNDERTAKINGS FULFILLED
+
+✓ Property vacant and cleaned
+✓ All keys handed over (3 sets front door, 2 sets rear door)
+✓ Instruction manuals for appliances left in property
+✓ All fixtures and fittings as per fixtures list included
+✓ Boiler service certificate provided (dated May 2023)
+✓ Warranties for kitchen and bathroom transferred
+✓ Parking permit canceled and returned to council
+
+---
+
+IMPORTANT NOTES FOR VENDOR
+
+1. Capital Gains Tax: This property was your main residence for the entire period of ownership. No CGT is due.
+
+2. The mortgage with Halifax has been fully redeemed. You will receive a confirmation letter from Halifax within 10 working days.
+
+3. We recommend keeping this completion statement and all supporting documents for at least 6 years for tax purposes.
+
+4. Your mail redirection service with Royal Mail is now active for 12 months.
+
+5. Remember to notify the following of your new address:
+   - HMRC
+   - Electoral Register
+   - DVLA
+   - Banks and credit card companies
+   - Insurance companies
+   - Subscriptions and memberships
+
+---
+
+BREAKDOWN OF RECEIVED FUNDS
+
+FROM PURCHASER'S SOLICITORS:
+Received:       1st July 2023, 13:42
+From:           Stevenson & Co Solicitors (for Williams Property Investment Ltd)
+Amount:         £405,000.00
+Method:         CHAPS Transfer
+Reference:      PROP-45-OAK-STREET
+
+FROM DEPOSIT ACCOUNT:
+Held since:     15th June 2023
+Amount:         £45,000.00
+Total:          £450,000.00
+
+TOTAL FUNDS RECEIVED AND RECONCILED: £450,000.00 ✓
+
+---
+
+SOLICITOR'S CERTIFICATION
+
+I hereby certify that:
+
+• The sale of 45 Oak Street, London, SW18 3QR has been completed in accordance with the contract dated 15th June 2023
+
+• All monies have been received and properly accounted for
+
+• The net proceeds of £300,000.82 have been transferred to the vendor as instructed
+
+• All legal requirements have been satisfied
+
+• The property has been legally transferred to the purchaser
+
+Signed:     _______________________
+            Amanda Brown
+            Senior Partner
+            Taylor & Brown Solicitors
+
+Date:       1st July 2023
+
+---
+
+CONTACT INFORMATION
+
+For any queries regarding this completion statement, please contact:
+
+Amanda Brown, Senior Partner
+Taylor & Brown Solicitors
+12 Market Square
+London, EC1A 4NP
+
+Direct Line: 020 7123 4571
+Email: abrown@taylorbrown.co.uk
+Reference: TB/2023/7821
+
+Office Hours: Monday-Friday, 9:00 AM - 5:30 PM
+
+---
+
+This completion statement has been prepared in accordance with the Solicitors Regulation Authority requirements and the Law Society's Conveyancing Protocol.
+
+Taylor & Brown Solicitors is a partnership regulated by the Solicitors Regulation Authority.
+SRA Number: 123456
+VAT Registration Number: GB 123 4567 89
+
+---
+
+END OF COMPLETION STATEMENT
+
+Note: This is a final statement. Please retain for your records.
+If you note any discrepancies, please contact us immediately.

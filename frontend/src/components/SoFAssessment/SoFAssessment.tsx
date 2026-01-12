@@ -1242,8 +1242,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             )}
           </div>
 
-          {/* Download File Note */}
-          <div className="flex justify-center">
+          {/* Action Buttons */}
+          <div className="flex justify-center gap-4">
+            <button
+              onClick={() => setActiveStep('upload')}
+              className="px-6 py-3 bg-[#F5EBE0] text-gray-900 border-2 border-[#A8D5BA] rounded-lg hover:bg-[#E8D5C4] font-semibold shadow-lg"
+            >
+              📎 Add Further Documentation
+            </button>
             <button
               onClick={downloadFileNote}
               className="px-6 py-3 bg-[#A8D5BA] text-gray-900 rounded-lg hover:bg-[#8BC5A0] font-semibold shadow-lg"
