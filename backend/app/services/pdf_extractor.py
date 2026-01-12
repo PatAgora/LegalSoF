@@ -142,13 +142,27 @@ class PDFDocumentExtractor:
                 break
         
         # Distribution amounts - look for beneficiary distributions
-        distribution_pattern = r'(?:Primary Beneficiary|Beneficiary)[:\s]*([A-Z][a-z\s]+)\s*[:-]\s*£?([0-9,]+(?:\.\d{2})?)'
+        # Pattern 1: Name and amount on same line (e.g., "Primary Beneficiary: John Smith - £250,000")
+        distribution_pattern1 = r'(?:Primary Beneficiary|Beneficiary)[:\s]*([A-Z][a-z\s]+)\s*[:-]\s*£?([0-9,]+(?:\.\d{2})?)'
+        # Pattern 2: Name and amount on separate lines (e.g., "Primary Beneficiary:\nJohn Smith (Son) - £250,000")
+        distribution_pattern2 = r'(?:Primary Beneficiary|Beneficiary):\s*\n([A-Z][a-z\s]+(?:\([^)]+\))?)\s*-\s*£?([0-9,]+(?:\.\d{2})?)'
+        
         distributions = []
-        for match in re.finditer(distribution_pattern, text, re.IGNORECASE):
+        
+        # Try pattern 1
+        for match in re.finditer(distribution_pattern1, text, re.IGNORECASE):
             distributions.append({
                 'beneficiary': match.group(1).strip(),
                 'amount': self._parse_amount(match.group(2))
             })
+        
+        # Try pattern 2
+        for match in re.finditer(distribution_pattern2, text, re.IGNORECASE):
+            distributions.append({
+                'beneficiary': match.group(1).strip(),
+                'amount': self._parse_amount(match.group(2))
+            })
+        
         if distributions:
             data['distributions'] = distributions
         

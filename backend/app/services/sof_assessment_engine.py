@@ -52,11 +52,24 @@ class SoFAssessmentEngine:
         # Step 2.5: Verify supporting documents against claims (NEW!)
         document_verification = None
         if supporting_docs_data:
+            print(f"\n=== DOCUMENT VERIFICATION DEBUG ===")
+            print(f"Supporting docs received: {len(supporting_docs_data)}")
+            for idx, doc in enumerate(supporting_docs_data):
+                print(f"  Doc {idx}: {doc.get('document_type')} - extracted_data keys: {list(doc.get('extracted_data', {}).keys())}")
+            print(f"Claims to verify: {len(claims)}")
+            for idx, claim in enumerate(claims):
+                print(f"  Claim {idx}: {claim['source_type']} £{claim['expected_amount']:,.0f}")
+            
             document_verification = document_verifier.verify_documents_against_claims(
                 claims=claims,
                 supporting_docs=supporting_docs_data,
                 bank_statements=bank_statements
             )
+            
+            print(f"Verification results: {len(document_verification.get('verifications', []))} verifications")
+            for ver in document_verification.get('verifications', []):
+                print(f"  Claim {ver['claim_id']}: verified={ver['verified']}, confidence={ver.get('confidence', 0):.2f}")
+            print(f"====================================\n")
             
             # Enhance evidence_matches with document verification data
             for verification in document_verification.get('verifications', []):

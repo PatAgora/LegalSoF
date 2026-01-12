@@ -251,6 +251,17 @@ async def run_sof_assessment(
     flags = storage['client_info'].get('flags', {})
     constraints = storage['client_info'].get('constraints', {})
     
+    # DEBUG LOGGING
+    print(f"\n=== SoF ASSESSMENT DEBUG ===")
+    print(f"Matter ID: {matter_id}")
+    print(f"Supporting docs uploaded: {len(supporting_docs_data)}")
+    for idx, doc in enumerate(supporting_docs_data):
+        print(f"  Doc {idx}: Type={doc.get('document_type')}, Has extracted_data={bool(doc.get('extracted_data'))}")
+        if doc.get('extracted_data'):
+            print(f"    Extracted fields: {list(doc.get('extracted_data', {}).keys())}")
+    print(f"Known documents: {known_documents}")
+    print(f"===========================\n")
+    
     # Run assessment engine
     engine = SoFAssessmentEngine(matter_id=matter_id, db=db)
     
