@@ -687,9 +687,13 @@ class SoFAssessmentEngine:
     ) -> Dict[str, Any]:
         """
         Make overall risk decision considering all factors
+        Now properly considers BOTH bank transaction matches AND document verification
         """
-        # Count verified claims
-        verified_claims = sum(1 for e in evidence_matches if e['verified'])
+        # Count verified claims - must have BOTH bank match AND document verification
+        verified_claims = sum(
+            1 for e in evidence_matches 
+            if e.get('verified', False) and e.get('document_verified', False)
+        )
         total_claims = len(claims)
         verification_rate = verified_claims / total_claims if total_claims > 0 else 0
         
@@ -1230,20 +1234,39 @@ class SoFAssessmentEngine:
         # Claims summary
         note_parts.append("\nCLIENT'S SoF EXPLANATION:")
         for claim in claims:
-            verified = "VERIFIED" if evidence_matches[claim['claim_id']-1]['verified'] else "NOT VERIFIED"
+            evidence = evidence_matches[claim['claim_id']-1]
+            has_bank = evidence.get('verified', False)
+            has_doc = evidence.get('document_verified', False)
+            
+            if has_bank and has_doc:
+                status = "VERIFIED"
+            elif has_bank:
+                status = "REQUIRES DOCUMENTATION"
+            elif has_doc:
+                status = "REQUIRES BANK EVIDENCE"
+            else:
+                status = "NOT VERIFIED"
+            
             note_parts.append(
-                f"- {claim['source_type']}: £{claim['expected_amount']:,.2f} [{verified}]"
+                f"- {claim['source_type']}: £{claim['expected_amount']:,.2f} [{status}]"
             )
         
         # Evidence review with clear distinction
         note_parts.append("\nEVIDENCE REVIEW (Claim-by-Claim):")
-        verified_count = sum(1 for e in evidence_matches if e['verified'])
+        bank_verified_count = sum(1 for e in evidence_matches if e.get('verified', False))
         doc_verified_count = sum(1 for e in evidence_matches if e.get('document_verified', False))
+        fully_verified_count = sum(
+            1 for e in evidence_matches 
+            if e.get('verified', False) and e.get('document_verified', False)
+        )
         note_parts.append(
-            f"Bank transactions: {verified_count}/{len(claims)} claims matched."
+            f"Bank transactions: {bank_verified_count}/{len(claims)} claims matched."
         )
         note_parts.append(
             f"Supporting documents: {doc_verified_count}/{len(claims)} claims verified with source documentation."
+        )
+        note_parts.append(
+            f"FULLY VERIFIED (both bank + docs): {fully_verified_count}/{len(claims)} claims."
         )
         note_parts.append("")
         
@@ -1300,7 +1323,7 @@ class SoFAssessmentEngine:
                 f"Total funding traced: {best_path['coverage']}% of purchase amount.\n"
             )
             
-            if best_path['coverage'] >= 90 and verified_count < len(claims):
+            if best_path['coverage'] >= 90 and fully_verified_count < len(claims):
                 note_parts.append(
                     "INTERPRETATION: While not all individual claims have direct evidence in the "
                     "provided statements, sufficient aggregate funding has been traced to cover the "
