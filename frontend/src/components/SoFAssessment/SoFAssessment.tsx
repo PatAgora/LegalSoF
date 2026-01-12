@@ -236,7 +236,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/run`,
-        { method: 'POST' }
+        { 
+          method: 'POST',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        }
       );
 
       if (!response.ok) {
@@ -245,6 +251,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       }
 
       const data = await response.json();
+      console.log('Assessment result received:', data.assessment);
+      console.log('Evidence matches:', data.assessment.evidence_matches);
       setResult(data.assessment);
       setActiveStep('results');
       await fetchStatus();
