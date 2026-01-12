@@ -824,39 +824,68 @@ class SoFAssessmentEngine:
             claim = claims[i]
             claim_name = f"{evidence['claim_source']} £{evidence['expected_amount']:,.0f}"
             
-            # Evidence found
+            # Check for document verification first
+            doc_verified = evidence.get('document_verified', False)
+            doc_verification = evidence.get('document_verification', {})
+            
+            # Evidence found - check both bank transactions AND document verification
+            evidence_parts = []
+            
+            # Bank transaction evidence
             if evidence['verified'] and evidence['transactions']:
                 txn = evidence['transactions'][0]
-                evidence_text = f"✅ {txn['date']}: £{txn['amount']:,.0f}"
+                evidence_parts.append(f"✅ Bank: {txn['date']}: £{txn['amount']:,.0f}")
                 if len(evidence['transactions']) > 1:
-                    evidence_text += f" (+{len(evidence['transactions'])-1} more)"
+                    evidence_parts[-1] += f" (+{len(evidence['transactions'])-1})"
             else:
-                evidence_text = "❌ No matching transaction"
+                evidence_parts.append("❌ No bank transaction")
             
-            # Outreach questions - ALWAYS require source documents
-            if 'inheritance' in evidence['claim_source'].lower():
-                outreach = "Request probate grant"
-            elif 'property' in evidence['claim_source'].lower():
-                outreach = "Request completion statement"
-            elif 'loan' in evidence['claim_source'].lower():
-                outreach = "Request loan agreement"
-            elif 'business' in evidence['claim_source'].lower():
-                outreach = "Request sale agreement"
-            elif 'savings' in evidence['claim_source'].lower():
-                outreach = "Request historical statements"
-            elif 'investment' in evidence['claim_source'].lower():
-                outreach = "Request investment statements"
-            else:
-                outreach = "Request source documentation"
-            
-            # Summary
-            if evidence['verified']:
-                summary = "⚠️ Payment found, docs req'd"
-            else:
-                if best_coverage >= 90:
-                    summary = "❌ No payment, docs req'd"
+            # Document verification evidence
+            if doc_verified:
+                doc_type = doc_verification.get('verification_details', {}).get('extracted_data', {})
+                if doc_type:
+                    evidence_parts.append(f"✅ Doc verified")
                 else:
-                    summary = "❌ MISSING"
+                    evidence_parts.append(f"✅ Doc provided")
+            else:
+                evidence_parts.append("❌ No doc")
+            
+            evidence_text = " | ".join(evidence_parts)
+            
+            # Outreach questions - based on verification status
+            if doc_verified:
+                # Document is verified, check what else might be needed
+                issues = doc_verification.get('issues', [])
+                if issues:
+                    outreach = f"Clarify: {issues[0][:25]}"
+                else:
+                    outreach = "✅ Verified"
+            else:
+                # Still need documents
+                if 'inheritance' in evidence['claim_source'].lower():
+                    outreach = "Request probate grant"
+                elif 'property' in evidence['claim_source'].lower():
+                    outreach = "Request completion statement"
+                elif 'loan' in evidence['claim_source'].lower():
+                    outreach = "Request loan agreement"
+                elif 'business' in evidence['claim_source'].lower():
+                    outreach = "Request sale agreement"
+                elif 'savings' in evidence['claim_source'].lower():
+                    outreach = "Request historical statements"
+                elif 'investment' in evidence['claim_source'].lower():
+                    outreach = "Request investment statements"
+                else:
+                    outreach = "Request source documentation"
+            
+            # Summary - more accurate based on verification
+            if doc_verified and evidence['verified']:
+                summary = "✅ VERIFIED"
+            elif doc_verified and not evidence['verified']:
+                summary = "⚠️ Doc OK, no bank txn"
+            elif evidence['verified'] and not doc_verified:
+                summary = "⚠️ Bank txn, need doc"
+            else:
+                summary = "❌ MISSING"
             
             sof_section.append(f"{claim_name:<25} | {evidence_text:<35} | {outreach:<30} | {summary:<20}\n")
         
@@ -1196,40 +1225,59 @@ class SoFAssessmentEngine:
         # Evidence review with clear distinction
         note_parts.append("\nEVIDENCE REVIEW (Claim-by-Claim):")
         verified_count = sum(1 for e in evidence_matches if e['verified'])
+        doc_verified_count = sum(1 for e in evidence_matches if e.get('document_verified', False))
         note_parts.append(
-            f"Direct verification: {verified_count}/{len(claims)} claims matched to bank statement entries."
+            f"Bank transactions: {verified_count}/{len(claims)} claims matched."
         )
         note_parts.append(
-            f"⚠️ NOTE: Bank statements alone are insufficient. Corroborating source documents "
-            f"(e.g., probate grants, completion statements) are required to prove legitimacy.\n"
+            f"Supporting documents: {doc_verified_count}/{len(claims)} claims verified with source documentation."
         )
+        note_parts.append("")
         
         for evidence in evidence_matches:
+            doc_verified = evidence.get('document_verified', False)
+            doc_verification = evidence.get('document_verification', {})
+            
+            # Show bank transaction status
             if evidence['verified']:
                 txns = evidence['transactions']
                 first_txn = txns[0]
                 note_parts.append(
-                    f"✅ Claim {evidence['claim_id']} ({evidence['claim_source']}): "
-                    f"VERIFIED - Supported by {len(txns)} transaction(s). "
-                    f"Match quality: {evidence['match_quality']}."
+                    f"{'✅' if doc_verified else '⚠️'} Claim {evidence['claim_id']} ({evidence['claim_source']}): "
+                    f"£{evidence['expected_amount']:,.2f}"
                 )
                 note_parts.append(
-                    f"   • Amount: £{first_txn['amount']:,.2f} on {first_txn['date']}"
+                    f"   • Bank Transaction: £{first_txn['amount']:,.2f} on {first_txn['date']}"
                 )
                 note_parts.append(
-                    f"   • Transaction Type: {first_txn['description']}"
+                    f"   • Description: {first_txn['description']}"
                 )
                 note_parts.append(
                     f"   • Counterparty: {first_txn.get('counterparty', 'Not specified')}"
                 )
-                note_parts.append(
-                    f"   • ⚠️ REQUIRES: Source documentation to prove legitimacy (see Documents Required section)"
-                )
+                
+                # Show document verification status
+                if doc_verified:
+                    verification_details = doc_verification.get('verification_details', {})
+                    checks_passed = verification_details.get('checks_passed', [])
+                    note_parts.append(f"   • ✅ SUPPORTING DOCUMENT VERIFIED:")
+                    for check in checks_passed[:3]:  # Show first 3 checks
+                        note_parts.append(f"      - {check}")
+                    if doc_verification.get('confidence'):
+                        note_parts.append(f"      - Verification confidence: {doc_verification['confidence']*100:.0f}%")
+                else:
+                    note_parts.append(
+                        f"   • ⚠️ REQUIRES: Source documentation to prove legitimacy"
+                    )
             else:
                 note_parts.append(
-                    f"⚠️ Claim {evidence['claim_id']} ({evidence['claim_source']}): "
-                    f"NOT VERIFIED - No direct matching transaction found in statements provided."
+                    f"❌ Claim {evidence['claim_id']} ({evidence['claim_source']}): "
+                    f"NOT VERIFIED - No matching transaction found in statements."
                 )
+                if doc_verified:
+                    note_parts.append(f"   • Note: Supporting document provided but no bank transaction found")
+            
+            note_parts.append("")  # Empty line between claims
         
         # Funding trace with interpretation
         note_parts.append("\nFUNDING ANALYSIS (Overall Position):")

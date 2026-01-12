@@ -1137,19 +1137,37 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
           {/* Uploaded Files List */}
           {status && status.uploaded_files.length > 0 && (
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Uploaded Files</h3>
-              <div className="space-y-2">
+            <div className="bg-white border-2 border-[#A8D5BA] rounded-lg p-6 shadow-md">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">📎 Uploaded Documents</h3>
+              <div className="space-y-3">
                 {status.uploaded_files.map((file, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-green-600">✓</span>
-                      <span className="font-medium text-gray-900">{file.filename}</span>
-                      <span className="text-gray-500">({file.category.replace('_', ' ')})</span>
+                  <div key={idx} className="flex items-center justify-between p-3 bg-[#F5EBE0] rounded-lg border border-[#D4C4B0]">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-2xl text-green-600">✓</span>
+                      <div>
+                        <div className="font-semibold text-gray-900">{file.filename}</div>
+                        <div className="text-sm text-gray-600">
+                          {file.category.replace('_', ' ')} • {file.records_count} record(s)
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-gray-600">{file.records_count} record(s)</span>
+                    <button
+                      onClick={async () => {
+                        if (confirm(`Remove "${file.filename}"?`)) {
+                          // TODO: Implement file removal
+                          // For now, we'll need to add a backend endpoint to remove individual files
+                          alert('File removal will be implemented. For now, use Reset Assessment to clear all files.');
+                        }
+                      }}
+                      className="px-3 py-1 text-sm text-red-600 hover:text-red-800 border border-red-300 rounded hover:bg-red-50"
+                    >
+                      ✕ Remove
+                    </button>
                   </div>
                 ))}
+              </div>
+              <div className="mt-4 text-sm text-gray-600">
+                💡 Tip: You can add more documents below. All uploaded files will be used in the assessment.
               </div>
             </div>
           )}
