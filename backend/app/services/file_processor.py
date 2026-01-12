@@ -386,16 +386,17 @@ class FileProcessor:
     def _identify_document_type(self, text: str) -> str:
         """
         Identify document type from text content
+        Returns document names that match assessment engine expectations
         """
         doc_types = {
-            'probate': ['probate', 'grant of probate', 'letters of administration', 'estate'],
-            'property_completion': ['completion statement', 'property purchase', 'land registry'],
-            'loan_agreement': ['loan agreement', 'loan offer', 'facility letter', 'lender'],
-            'share_purchase': ['share purchase', 'spa', 'business sale', 'acquisition'],
-            'solicitor_statement': ['solicitor', 'client account', 'statement of account'],
-            'bank_confirmation': ['bank confirmation', 'account confirmation'],
-            'id_verification': ['passport', 'driving licence', 'identity', 'proof of address'],
-            'company_accounts': ['financial statements', 'balance sheet', 'profit and loss', 'company accounts']
+            'Probate grant': ['probate', 'grant of probate', 'letters of administration', 'estate'],
+            'completion statement': ['completion statement', 'property purchase', 'land registry', 'property sale'],
+            'Loan': ['loan agreement', 'loan offer', 'facility letter', 'lender'],
+            'Share purchase': ['share purchase', 'spa', 'business sale', 'acquisition'],
+            "Solicitor's statement": ['solicitor', 'client account', 'statement of account'],
+            'Bank confirmation': ['bank confirmation', 'account confirmation'],
+            'ID verification': ['passport', 'driving licence', 'identity', 'proof of address'],
+            'Company accounts': ['financial statements', 'balance sheet', 'profit and loss', 'company accounts']
         }
         
         for doc_type, keywords in doc_types.items():
