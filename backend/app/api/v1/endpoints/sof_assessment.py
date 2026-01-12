@@ -239,7 +239,10 @@ async def run_sof_assessment(
     purchase = storage['client_info']['purchase']
     sof_explanation = storage['client_info']['sof_explanation']
     bank_statements = storage['bank_statements']
-    known_documents = storage['client_info'].get('known_documents', [])
+    
+    # IMPORTANT: Build fresh known_documents list from current uploads only
+    # Do NOT accumulate from previous assessments
+    known_documents = []
     supporting_docs_data = storage['supporting_docs']  # Full document data with extracted info
     
     # Add uploaded supporting docs to known documents

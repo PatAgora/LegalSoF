@@ -394,21 +394,41 @@ class FileProcessor:
         """
         Identify document type from text content
         Returns document names that match assessment engine expectations
-        """
-        doc_types = {
-            'Probate grant': ['probate', 'grant of probate', 'letters of administration', 'estate'],
-            'completion statement': ['completion statement', 'property purchase', 'land registry', 'property sale'],
-            'Loan': ['loan agreement', 'loan offer', 'facility letter', 'lender'],
-            'Share purchase': ['share purchase', 'spa', 'business sale', 'acquisition'],
-            "Solicitor's statement": ['solicitor', 'client account', 'statement of account'],
-            'Bank confirmation': ['bank confirmation', 'account confirmation'],
-            'ID verification': ['passport', 'driving licence', 'identity', 'proof of address'],
-            'Company accounts': ['financial statements', 'balance sheet', 'profit and loss', 'company accounts']
-        }
         
-        for doc_type, keywords in doc_types.items():
-            if any(kw in text for kw in keywords):
-                return doc_type
+        IMPORTANT: Check more specific types first to avoid false positives
+        Order matters! 'estate' in probate can match property docs mentioning 'real estate'
+        """
+        text_lower = text.lower()
+        
+        # Check in order of specificity (most specific first)
+        # Property completion - check FIRST before probate
+        completion_keywords = ['completion statement', 'completion date', 'contract price', 'net proceeds', 'property sale proceeds', 'vendor', 'purchaser', 'title number', 'land registry', 'completion accounts', 'property purchase']
+        if any(kw in text_lower for kw in completion_keywords):
+            return 'completion statement'
+        
+        # Probate - check AFTER completion (be more specific with keywords)
+        probate_keywords = ['grant of probate', 'letters of administration', 'probate registry', 'grant in respect of', 'deceased estate', 'estate of the late', 'executor', 'beneficiary distribution', 'probate reference', 'date of death']
+        if any(kw in text_lower for kw in probate_keywords):
+            return 'Probate grant'
+        
+        # Other document types
+        if any(kw in text_lower for kw in ['loan agreement', 'loan offer', 'facility letter', 'lender', 'borrower', 'credit agreement']):
+            return 'Loan'
+        
+        if any(kw in text_lower for kw in ['share purchase agreement', 'spa', 'business sale', 'acquisition agreement', 'share transfer']):
+            return 'Share purchase'
+        
+        if any(kw in text_lower for kw in ['client account statement', 'solicitor client account', 'statement of account']):
+            return "Solicitor's statement"
+        
+        if any(kw in text_lower for kw in ['bank confirmation letter', 'account confirmation', 'balance confirmation']):
+            return 'Bank confirmation'
+        
+        if any(kw in text_lower for kw in ['passport', 'driving licence', 'identity document', 'proof of address']):
+            return 'ID verification'
+        
+        if any(kw in text_lower for kw in ['financial statements', 'balance sheet', 'profit and loss', 'company accounts', 'directors report']):
+            return 'Company accounts'
         
         return 'unknown'
     
