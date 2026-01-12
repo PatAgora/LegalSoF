@@ -356,7 +356,9 @@ class SoFAssessmentEngine:
                 "match_quality": "strong" if any(m['match_quality'] == 'strong' for m in matches) else 
                                 "exact" if matches else "none",
                 "transactions": matches,
-                "verified": len(matches) > 0
+                "verified": len(matches) > 0,
+                "document_verified": False,  # Initialize to False, will be set to True if docs verify
+                "document_verification": None  # Will be populated if docs are provided
             })
         
         return evidence_matches
