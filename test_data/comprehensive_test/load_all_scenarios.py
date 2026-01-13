@@ -172,9 +172,9 @@ def load_scenario(scenario_name, scenario_dir, matter_id, use_matching_bank=True
     
     time.sleep(0.3)
     
-    # 3. Upload bank statement
+    # 3. Upload bank statement (CSV)
     print_info("Uploading bank statement...")
-    bank_statement = "bank_statement_matching.pdf" if use_matching_bank else "bank_statement_non_matching.pdf"
+    bank_statement = "bank_statement.csv"
     bank_statement_path = os.path.join(scenario_path, bank_statement)
     if not upload_file(matter_id, bank_statement_path, "bank_statement"):
         return False
