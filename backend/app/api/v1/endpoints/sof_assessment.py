@@ -142,6 +142,14 @@ async def upload_sof_files(
             detail=f"File processing failed: {result['error']}"
         )
     
+    # Validate result based on file category
+    if file_category == 'bank_statement':
+        if 'bank_statements' not in result.get('data', {}):
+            raise HTTPException(
+                status_code=400,
+                detail="PDF file does not contain valid bank statement data. No transactions could be extracted."
+            )
+    
     # Store the processed data
     storage = assessment_storage[matter_id]
     

@@ -2,56 +2,55 @@
   "client_info": {
     "client_name": "Residential Property Ltd",
     "client_id": "TEST-001",
-    "matter_id": "MAT-2024-001",
     "client_risk_rating": "medium",
     "is_pep": false,
     "business_sector": "Real Estate Investment",
-    "high_risk_jurisdictions": [],
-    "purchase": {
-      "description": "Purchase of commercial property / business acquisition",
-      "amount": 450000,
-      "currency": "GBP",
-      "expected_payment_date": "2024-01-15"
-    },
-    "sof_explanation": {
-      "total_funds": 450000,
-      "currency": "GBP",
-      "sources": [
-        {
-          "source_type": "inheritance",
-          "amount": 250000,
-          "currency": "GBP",
-          "description": "Inheritance from Estate of Margaret Elizabeth Thompson",
-          "deceased_name": "Margaret Elizabeth Thompson",
-          "probate_reference": "2023/8765",
-          "date_of_death": "2023-03-15",
-          "distribution_date": "2023-08-20"
-        },
-        {
-          "source_type": "property_sale",
-          "amount": 200000,
-          "currency": "GBP",
-          "description": "Sale of residential property at 78 Victoria Road, Brighton",
-          "property_address": "78 Victoria Road, Brighton, BN1 3FS",
-          "title_number": "ESX234567",
-          "completion_date": "2023-09-10",
-          "solicitor_firm": "Brighton Conveyancing LLP"
-        }
-      ]
-    },
-    "bank_statement_period": {
-      "start_date": "2023-01-01",
-      "end_date": "2023-12-31"
-    },
-    "known_documents": [
+    "high_risk_jurisdictions": []
+  },
+  "purchase": {
+    "description": "Purchase of commercial property / business acquisition",
+    "amount": 450000,
+    "currency": "GBP",
+    "expected_payment_date": "2024-01-15"
+  },
+  "sof_explanation": {
+    "total_funds": 450000,
+    "currency": "GBP",
+    "sources": [
       {
-        "type": "probate_grant",
-        "description": "Probate Grant for Margaret Elizabeth Thompson"
+        "source_type": "inheritance",
+        "amount": 250000,
+        "currency": "GBP",
+        "description": "Inheritance from Estate of Margaret Elizabeth Thompson",
+        "deceased_name": "Margaret Elizabeth Thompson",
+        "probate_reference": "2023/8765",
+        "date_of_death": "2023-03-15",
+        "distribution_date": "2023-08-20"
       },
       {
-        "type": "completion_statement",
-        "description": "Completion Statement for 78 Victoria Road, Brighton, BN1 3FS"
+        "source_type": "property_sale",
+        "amount": 200000,
+        "currency": "GBP",
+        "description": "Sale of residential property at 78 Victoria Road, Brighton",
+        "property_address": "78 Victoria Road, Brighton, BN1 3FS",
+        "title_number": "ESX234567",
+        "completion_date": "2023-09-10",
+        "solicitor_firm": "Brighton Conveyancing LLP"
       }
     ]
-  }
+  },
+  "bank_statement_period": {
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31"
+  },
+  "known_documents": [
+    {
+      "type": "probate_grant",
+      "description": "Probate Grant for Margaret Elizabeth Thompson"
+    },
+    {
+      "type": "completion_statement",
+      "description": "Completion Statement for 78 Victoria Road, Brighton, BN1 3FS"
+    }
+  ]
 }
