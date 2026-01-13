@@ -1,0 +1,55 @@
+{
+  "client_info": {
+    "client_name": "Property Investors Group",
+    "client_id": "TEST-003",
+    "matter_id": "MAT-2024-003",
+    "client_risk_rating": "medium",
+    "is_pep": false,
+    "business_sector": "Real Estate Investment",
+    "high_risk_jurisdictions": [],
+    "purchase": {
+      "description": "Purchase of commercial property / business acquisition",
+      "amount": 620000,
+      "currency": "GBP",
+      "expected_payment_date": "2024-01-15"
+    },
+    "sof_explanation": {
+      "total_funds": 620000,
+      "currency": "GBP",
+      "sources": [
+        {
+          "source_type": "property_sale",
+          "amount": 400000,
+          "currency": "GBP",
+          "description": "Sale of flat at 15A Kensington Gardens",
+          "property_address": "15A Kensington Gardens, London, W2 4RU",
+          "title_number": "NGL456789",
+          "completion_date": "2023-07-22",
+          "solicitor_firm": null
+        },
+        {
+          "source_type": "savings",
+          "amount": 220000,
+          "currency": "GBP",
+          "description": "Personal savings accumulated over 15 years",
+          "bank": "Santander UK",
+          "account_number": "****3456"
+        }
+      ]
+    },
+    "bank_statement_period": {
+      "start_date": "2023-01-01",
+      "end_date": "2023-12-31"
+    },
+    "known_documents": [
+      {
+        "type": "completion_statement",
+        "description": "Completion Statement for 15A Kensington Gardens, London, W2 4RU"
+      },
+      {
+        "type": "bank_statements",
+        "description": "Bank statements from Santander UK"
+      }
+    ]
+  }
+}
