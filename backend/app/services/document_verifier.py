@@ -217,6 +217,34 @@ class DocumentVerifier:
         result['verification_details']['extracted_data'] = extracted
         result['issues'] = issues
         
+        # BUILD COMPARISON: Customer Claim vs Document Evidence
+        result['verification_details']['comparison'] = {
+            'customer_claim': {
+                'source_type': claim.get('source_type', 'Unknown'),
+                'claimed_amount': expected_amount,
+                'description': claim.get('description', 'Not provided'),
+            },
+            'document_evidence': {
+                'deceased_name': extracted.get('deceased_name'),
+                'date_of_death': extracted.get('date_of_death'),
+                'executor': extracted.get('executor_beneficiary'),
+                'distribution_amount': matching_distribution.get('amount') if matching_distribution else None,
+                'beneficiary': matching_distribution.get('beneficiary') if matching_distribution else None,
+                'payment_date': extracted.get('payment_date'),
+                'bank_account': f"{bank_name} ****{account_last_4}" if bank_name and account_last_4 else None,
+                'probate_reference': probate_ref,
+                'gross_estate': extracted.get('gross_estate'),
+                'net_estate': extracted.get('net_estate'),
+            },
+            'matches': {
+                'amount_matches': matching_distribution is not None,
+                'amount_difference': abs(matching_distribution.get('amount', 0) - expected_amount) if matching_distribution else None,
+                'has_bank_details': bank_name is not None and account_last_4 is not None,
+                'has_probate_reference': probate_ref is not None,
+                'has_payment_date': payment_date is not None,
+            }
+        }
+        
         return result
     
     def _verify_property_claim(
@@ -332,6 +360,35 @@ class DocumentVerifier:
         result['verification_details']['checks_passed'] = checks_passed
         result['verification_details']['extracted_data'] = extracted
         result['issues'] = issues
+        
+        # BUILD COMPARISON: Customer Claim vs Document Evidence
+        result['verification_details']['comparison'] = {
+            'customer_claim': {
+                'source_type': claim.get('source_type', 'Unknown'),
+                'claimed_amount': expected_amount,
+                'description': claim.get('description', 'Not provided'),
+            },
+            'document_evidence': {
+                'property_address': property_address,
+                'vendor_name': extracted.get('vendor_name'),
+                'completion_date': completion_date,
+                'contract_price': extracted.get('contract_price'),
+                'net_proceeds': net_proceeds,
+                'bank_account': f"{bank_name} ****{account_last_4}" if bank_name and account_last_4 else None,
+                'title_number': extracted.get('title_number'),
+                'solicitor_firm': solicitor,
+                'transfer_reference': extracted.get('transfer_reference'),
+            },
+            'matches': {
+                'amount_matches': net_proceeds is not None and abs(net_proceeds - expected_amount) / expected_amount < 0.01,
+                'amount_difference': abs(net_proceeds - expected_amount) if net_proceeds else None,
+                'has_property_address': property_address is not None,
+                'has_completion_date': completion_date is not None,
+                'has_bank_details': bank_name is not None and account_last_4 is not None,
+                'has_solicitor': solicitor is not None,
+                'has_title_number': extracted.get('title_number') is not None,
+            }
+        }
         
         return result
     

@@ -209,6 +209,15 @@ class SoFAssessmentEngine:
                             expected_account = bank.title()
                             break
                     
+                    # Extract broader context (±150 chars around match)
+                    start_pos = max(0, match.start() - 150)
+                    end_pos = min(len(sof_explanation), match.end() + 150)
+                    claim_context = sof_explanation[start_pos:end_pos].strip()
+                    if start_pos > 0:
+                        claim_context = "..." + claim_context
+                    if end_pos < len(sof_explanation):
+                        claim_context = claim_context + "..."
+                    
                     claims.append({
                         "claim_id": claim_id,
                         "source_type": source_type.replace('_', ' ').title(),
@@ -217,7 +226,8 @@ class SoFAssessmentEngine:
                         "expected_date_range": date_range,
                         "expected_payer": counterparty,
                         "expected_account": expected_account,
-                        "claim_text": match.group(0)
+                        "claim_text": match.group(0),
+                        "description": claim_context  # Full context snippet
                     })
                     claim_id += 1
                 except ValueError:
@@ -1319,6 +1329,55 @@ class SoFAssessmentEngine:
                         note_parts.append(f"      - {check}")
                     if doc_verification.get('confidence'):
                         note_parts.append(f"      - Verification confidence: {doc_verification['confidence']*100:.0f}%")
+                    
+                    # ADD COMPARISON: Customer Claim vs Document Evidence
+                    comparison = verification_details.get('comparison', {})
+                    if comparison:
+                        note_parts.append(f"\n   • 📊 EVIDENCE COMPARISON:")
+                        
+                        customer_claim = comparison.get('customer_claim', {})
+                        doc_evidence = comparison.get('document_evidence', {})
+                        matches = comparison.get('matches', {})
+                        
+                        # Customer's claim
+                        note_parts.append(f"      👤 Customer stated:")
+                        note_parts.append(f"         • Source: {customer_claim.get('source_type')}")
+                        note_parts.append(f"         • Amount: £{customer_claim.get('claimed_amount', 0):,.2f}")
+                        if customer_claim.get('description') and customer_claim['description'] != 'Not provided':
+                            desc = customer_claim['description']
+                            # Limit to 200 chars for readability
+                            if len(desc) > 200:
+                                desc = desc[:197] + "..."
+                            note_parts.append(f"         • Explanation: \"{desc}\"")
+                        
+                        # Document confirms
+                        note_parts.append(f"      ✅ Document confirms:")
+                        if doc_evidence.get('deceased_name'):
+                            note_parts.append(f"         • Estate of: {doc_evidence['deceased_name']}")
+                        if doc_evidence.get('executor'):
+                            note_parts.append(f"         • Executor/Beneficiary: {doc_evidence['executor']}")
+                        if doc_evidence.get('distribution_amount'):
+                            note_parts.append(f"         • Distribution: £{doc_evidence['distribution_amount']:,.2f}")
+                        if doc_evidence.get('payment_date'):
+                            note_parts.append(f"         • Payment date: {doc_evidence['payment_date']}")
+                        if doc_evidence.get('property_address'):
+                            note_parts.append(f"         • Property: {doc_evidence['property_address']}")
+                        if doc_evidence.get('vendor_name'):
+                            note_parts.append(f"         • Vendor: {doc_evidence['vendor_name']}")
+                        if doc_evidence.get('net_proceeds'):
+                            note_parts.append(f"         • Net proceeds: £{doc_evidence['net_proceeds']:,.2f}")
+                        if doc_evidence.get('completion_date'):
+                            note_parts.append(f"         • Completion: {doc_evidence['completion_date']}")
+                        
+                        # Match status
+                        if matches.get('amount_matches'):
+                            diff = matches.get('amount_difference', 0)
+                            if diff < 100:
+                                note_parts.append(f"      ✅ Amount matches exactly")
+                            else:
+                                note_parts.append(f"      ✅ Amount matches (difference: £{diff:,.2f})")
+                        else:
+                            note_parts.append(f"      ⚠️ Amount mismatch detected")
                 else:
                     note_parts.append(
                         f"   • ⚠️ REQUIRES: Source documentation to prove legitimacy"
