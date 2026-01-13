@@ -503,14 +503,106 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 ⚠️ DOCUMENT VERIFICATION INCOMPLETE (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
                               </div>
                               {evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
-                                <div className="text-xs text-red-700 space-y-0.5">
+                                <div className="text-xs text-red-700 space-y-0.5 mb-2">
                                   <div className="font-semibold">Issues Found:</div>
                                   {evidence.document_verification.issues.map((issue: string, iidx: number) => (
                                     <div key={iidx}>❌ {issue}</div>
                                   ))}
                                 </div>
                               )}
-                              {evidence.document_verification.verification_details && (
+                              
+                              {/* DETAILED DIFFERENCES SECTION */}
+                              {evidence.document_verification.differences && evidence.document_verification.differences.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-amber-900 mb-1">📋 Specific Differences Identified:</div>
+                                  <div className="space-y-1">
+                                    {evidence.document_verification.differences.map((diff: any, didx: number) => (
+                                      <div key={didx} className="text-xs bg-white rounded p-1 border border-amber-100">
+                                        <div className="font-semibold text-amber-800">
+                                          {diff.severity === 'missing' ? '🔴 Missing' : '⚠️ Mismatch'}: {diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                        </div>
+                                        <div className="text-gray-700 ml-3">{diff.issue}</div>
+                                        {diff.accepted && (
+                                          <div className="text-green-700 ml-3 mt-1">
+                                            ✅ Accepted by {diff.accepted_by} on {new Date(diff.accepted_at).toLocaleDateString()}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* MANUAL REVIEW STATUS */}
+                              {evidence.document_verification.manual_review_status && (
+                                <div className="bg-blue-50 border border-blue-200 rounded p-2 mb-2">
+                                  <div className="text-xs">
+                                    <div className="font-semibold text-blue-900">Manual Review Status:</div>
+                                    <div className="ml-2">
+                                      {evidence.document_verification.manual_review_status === 'accepted' ? (
+                                        <>
+                                          <div className="text-green-700">✅ Differences Accepted</div>
+                                          {evidence.document_verification.manually_accepted_by && (
+                                            <div className="text-gray-700">By: {evidence.document_verification.manually_accepted_by}</div>
+                                          )}
+                                          {evidence.document_verification.manually_accepted_at && (
+                                            <div className="text-gray-700">Date: {new Date(evidence.document_verification.manually_accepted_at).toLocaleString()}</div>
+                                          )}
+                                          {evidence.document_verification.acceptance_reason && (
+                                            <div className="text-gray-700 italic mt-1">Reason: {evidence.document_verification.acceptance_reason}</div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <div className="text-amber-700">⏳ Pending Manual Review</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* ACCEPT DIFFERENCE BUTTON */}
+                              {evidence.document_verification.manual_review_status === 'pending' && (
+                                <div className="mt-2">
+                                  <button
+                                    onClick={async () => {
+                                      const reason = prompt('Please provide a reason for accepting these differences (optional):');
+                                      if (reason !== null) { // null means cancelled
+                                        try {
+                                          const response = await fetch(`/api/v1/matters/${result.matter_id}/sof-assessment/accept-differences`, {
+                                            method: 'POST',
+                                            headers: {
+                                              'Content-Type': 'application/json',
+                                            },
+                                            body: JSON.stringify({
+                                              claim_index: idx,
+                                              accepted_by: 'Current User', // TODO: Get from auth context
+                                              reason: reason || 'Manual review completed - differences accepted'
+                                            })
+                                          });
+                                          
+                                          if (response.ok) {
+                                            alert('Differences accepted successfully!');
+                                            // Refresh the assessment data
+                                            window.location.reload();
+                                          } else {
+                                            const error = await response.json();
+                                            alert(`Error: ${error.detail || 'Failed to accept differences'}`);
+                                          }
+                                        } catch (err) {
+                                          alert(`Error: ${err}`);
+                                        }
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded transition-colors"
+                                  >
+                                    ✓ Accept Differences
+                                  </button>
+                                  <p className="text-xs text-gray-600 mt-1 italic">
+                                    Review the differences above and click to accept if satisfied upon manual review
+                                  </p>
+                                </div>
+                              )}
+                                                            {evidence.document_verification.verification_details && (
                                 <div className="text-xs text-gray-700 space-y-0.5">
                                   {evidence.document_verification.verification_details.document_used && (
                                     <>

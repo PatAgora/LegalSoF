@@ -227,6 +227,23 @@ class DocumentVerifier:
         if result['requires_review']:
             result['review_reason'] = issues[0] if issues else "Verification incomplete"
         
+        # TRACK SPECIFIC DIFFERENCES: What exactly differs between claim and document?
+        differences = []
+        for issue in issues:
+            differences.append({
+                'field': self._extract_field_name(issue),
+                'issue': issue,
+                'severity': 'missing' if 'not found' in issue.lower() or 'no ' in issue.lower() else 'mismatch',
+                'customer_value': None,  # Customer didn't specify these fields
+                'document_value': None   # Document missing this field
+            })
+        
+        result['differences'] = differences
+        result['manual_review_status'] = 'pending' if result['requires_review'] else 'not_required'
+        result['manually_accepted_by'] = None
+        result['manually_accepted_at'] = None
+        result['acceptance_reason'] = None
+        
         # BUILD COMPARISON: Customer Claim vs Document Evidence
         result['verification_details']['comparison'] = {
             'customer_claim': {
@@ -381,6 +398,23 @@ class DocumentVerifier:
         if result['requires_review']:
             result['review_reason'] = issues[0] if issues else "Verification incomplete"
         
+        # TRACK SPECIFIC DIFFERENCES: What exactly differs between claim and document?
+        differences = []
+        for issue in issues:
+            differences.append({
+                'field': self._extract_field_name(issue),
+                'issue': issue,
+                'severity': 'missing' if 'not found' in issue.lower() or 'no ' in issue.lower() else 'mismatch',
+                'customer_value': None,  # Customer didn't specify these fields
+                'document_value': None   # Document missing this field
+            })
+        
+        result['differences'] = differences
+        result['manual_review_status'] = 'pending' if result['requires_review'] else 'not_required'
+        result['manually_accepted_by'] = None
+        result['manually_accepted_at'] = None
+        result['acceptance_reason'] = None
+        
         # BUILD COMPARISON: Customer Claim vs Document Evidence
         result['verification_details']['comparison'] = {
             'customer_claim': {
@@ -499,6 +533,30 @@ class DocumentVerifier:
                 return txn
         
         return None
+    
+    def _extract_field_name(self, issue: str) -> str:
+        """Extract the field name from an issue description"""
+        # Map common issue patterns to field names
+        if 'solicitor' in issue.lower():
+            return 'solicitor_firm'
+        elif 'probate reference' in issue.lower():
+            return 'probate_reference'
+        elif 'bank details' in issue.lower() or 'bank account' in issue.lower():
+            return 'bank_details'
+        elif 'payment date' in issue.lower():
+            return 'payment_date'
+        elif 'completion date' in issue.lower():
+            return 'completion_date'
+        elif 'property address' in issue.lower():
+            return 'property_address'
+        elif 'net proceeds' in issue.lower() or 'amount' in issue.lower():
+            return 'amount'
+        elif 'title number' in issue.lower():
+            return 'title_number'
+        elif 'vendor' in issue.lower():
+            return 'vendor_name'
+        else:
+            return 'unknown_field'
 
 
 # Singleton

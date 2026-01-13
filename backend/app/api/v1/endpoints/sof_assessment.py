@@ -418,6 +418,98 @@ async def download_file_note(
     )
 
 
+@router.post("/matters/{matter_id}/sof-assessment/accept-differences")
+async def accept_claim_differences(
+    matter_id: int,
+    request: dict,
+    db: Session = Depends(get_sync_db)
+):
+    """
+    Manually accept differences for a specific claim after manual review
+    
+    Body:
+        {
+            "claim_index": int,
+            "accepted_by": str,
+            "reason": str (optional)
+        }
+    """
+    from datetime import datetime
+    
+    # Verify matter exists
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    
+    # Get assessment data
+    if matter_id not in assessment_storage:
+        raise HTTPException(
+            status_code=404,
+            detail="No assessment data found for this matter"
+        )
+    
+    storage = assessment_storage[matter_id]
+    
+    if storage['status'] != 'completed':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Assessment not completed (status: {storage['status']})"
+        )
+    
+    claim_index = request.get('claim_index')
+    accepted_by = request.get('accepted_by', 'User')
+    reason = request.get('reason', 'Manual review completed - differences accepted')
+    
+    if claim_index is None:
+        raise HTTPException(status_code=400, detail="claim_index is required")
+    
+    # Get the evidence match for this claim
+    evidence_matches = storage['assessment_result']['evidence_matches']
+    
+    if claim_index < 0 or claim_index >= len(evidence_matches):
+        raise HTTPException(status_code=400, detail="Invalid claim_index")
+    
+    evidence = evidence_matches[claim_index]
+    
+    # Check if this claim requires review
+    if not evidence.get('document_verification', {}).get('requires_review', False):
+        raise HTTPException(
+            status_code=400,
+            detail="This claim does not require review (already at 100% confidence)"
+        )
+    
+    # Update the manual review status
+    doc_verification = evidence['document_verification']
+    doc_verification['manual_review_status'] = 'accepted'
+    doc_verification['manually_accepted_by'] = accepted_by
+    doc_verification['manually_accepted_at'] = datetime.utcnow().isoformat()
+    doc_verification['acceptance_reason'] = reason
+    
+    # Mark all differences as accepted
+    if 'differences' in doc_verification:
+        for diff in doc_verification['differences']:
+            diff['accepted'] = True
+            diff['accepted_by'] = accepted_by
+            diff['accepted_at'] = datetime.utcnow().isoformat()
+    
+    # Persist the updated storage
+    _persist_storage()
+    
+    return {
+        "success": True,
+        "message": f"Differences accepted for claim {claim_index + 1}",
+        "claim_index": claim_index,
+        "accepted_by": accepted_by,
+        "accepted_at": doc_verification['manually_accepted_at'],
+        "reason": reason,
+        "updated_status": {
+            "requires_review": doc_verification.get('requires_review', False),
+            "manual_review_status": doc_verification.get('manual_review_status'),
+            "confidence": doc_verification.get('confidence', 0)
+        }
+    }
+
+
 @router.delete("/matters/{matter_id}/sof-assessment/reset")
 async def reset_sof_assessment(
     matter_id: int,
