@@ -132,6 +132,13 @@ class DocumentVerifier:
             result['issues'] = issues
             return result
         
+        # AUDIT TRAIL: Record which document was used for verification
+        result['verification_details']['document_used'] = {
+            'filename': probate_doc.get('filename', 'Unknown'),
+            'document_type': probate_doc.get('document_type'),
+            'uploaded_at': probate_doc.get('uploaded_at'),
+        }
+        
         extracted = probate_doc.get('extracted_data', {})
         
         # Check 1: Distribution amount matches claim
@@ -188,6 +195,10 @@ class DocumentVerifier:
         probate_ref = extracted.get('probate_reference')
         if probate_ref:
             checks_passed.append(f"Probate reference: {probate_ref}")
+            result['verification_details']['document_used']['probate_reference'] = probate_ref
+        probate_ref = extracted.get('probate_reference')
+        if probate_ref:
+            checks_passed.append(f"Probate reference: {probate_ref}")
         else:
             issues.append("No probate reference number found")
         
@@ -234,6 +245,13 @@ class DocumentVerifier:
             result['verified'] = False
             result['issues'] = issues
             return result
+        
+        # AUDIT TRAIL: Record which document was used for verification
+        result['verification_details']['document_used'] = {
+            'filename': completion_doc.get('filename', 'Unknown'),
+            'document_type': completion_doc.get('document_type'),
+            'uploaded_at': completion_doc.get('uploaded_at'),
+        }
         
         extracted = completion_doc.get('extracted_data', {})
         
@@ -290,8 +308,15 @@ class DocumentVerifier:
         solicitor = extracted.get('solicitor_firm')
         if solicitor:
             checks_passed.append(f"Solicitor: {solicitor}")
+            result['verification_details']['document_used']['solicitor_firm'] = solicitor
         else:
             issues.append("No solicitor details found")
+        
+        # Check 7: Title number (if available)
+        title_number = extracted.get('title_number')
+        if title_number:
+            checks_passed.append(f"Title number: {title_number}")
+            result['verification_details']['document_used']['title_number'] = title_number
         
         # Calculate confidence
         confidence = len(checks_passed) / (len(checks_passed) + len(issues)) if (checks_passed or issues) else 0.0
@@ -335,6 +360,13 @@ class DocumentVerifier:
             result['verified'] = False
             result['issues'] = issues
             return result
+        
+        # AUDIT TRAIL: Record which document was used for verification
+        result['verification_details']['document_used'] = {
+            'filename': loan_doc.get('filename', 'Unknown'),
+            'document_type': loan_doc.get('document_type'),
+            'uploaded_at': loan_doc.get('uploaded_at'),
+        }
         
         # Additional checks can be added here
         result['issues'] = issues

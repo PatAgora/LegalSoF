@@ -154,7 +154,11 @@ async def upload_sof_files(
         storage['bank_statements'].extend(new_transactions)
     
     elif file_category == 'supporting_doc':
-        storage['supporting_docs'].append(result['data'])
+        # Add filename and upload timestamp to the document data for audit trail
+        doc_data = result['data'].copy()
+        doc_data['filename'] = file.filename
+        doc_data['uploaded_at'] = datetime.utcnow().isoformat()
+        storage['supporting_docs'].append(doc_data)
     
     # Track uploaded file
     storage['uploaded_files'].append({

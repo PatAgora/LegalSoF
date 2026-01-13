@@ -861,11 +861,13 @@ class SoFAssessmentEngine:
             
             # Document verification evidence
             if doc_verified:
-                doc_type = doc_verification.get('verification_details', {}).get('extracted_data', {})
-                if doc_type:
-                    evidence_parts.append(f"✅ Doc verified")
-                else:
-                    evidence_parts.append(f"✅ Doc provided")
+                doc_details = doc_verification.get('verification_details', {})
+                document_used = doc_details.get('document_used', {})
+                doc_filename = document_used.get('filename', 'Doc')
+                # Shorten filename for display (show first 20 chars + extension)
+                if len(doc_filename) > 25:
+                    doc_filename = doc_filename[:20] + '...' + doc_filename[-5:]
+                evidence_parts.append(f"✅ Doc: {doc_filename}")
             else:
                 evidence_parts.append("❌ No doc")
             
@@ -1298,7 +1300,21 @@ class SoFAssessmentEngine:
                 if doc_verified:
                     verification_details = doc_verification.get('verification_details', {})
                     checks_passed = verification_details.get('checks_passed', [])
+                    document_used = verification_details.get('document_used', {})
+                    
                     note_parts.append(f"   • ✅ SUPPORTING DOCUMENT VERIFIED:")
+                    
+                    # AUDIT TRAIL: Show which document was used
+                    if document_used:
+                        note_parts.append(f"      📄 Document: {document_used.get('filename', 'Unknown')}")
+                        note_parts.append(f"      📋 Type: {document_used.get('document_type', 'Unknown')}")
+                        if document_used.get('probate_reference'):
+                            note_parts.append(f"      🔖 Reference: {document_used['probate_reference']}")
+                        if document_used.get('title_number'):
+                            note_parts.append(f"      🔖 Title Number: {document_used['title_number']}")
+                        if document_used.get('solicitor_firm'):
+                            note_parts.append(f"      ⚖️ Solicitor: {document_used['solicitor_firm']}")
+                    
                     for check in checks_passed[:3]:  # Show first 3 checks
                         note_parts.append(f"      - {check}")
                     if doc_verification.get('confidence'):
