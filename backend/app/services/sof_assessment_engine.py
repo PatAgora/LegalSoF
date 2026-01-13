@@ -44,7 +44,13 @@ class SoFAssessmentEngine:
         risk_rating = client_info.get('client_risk_rating', 'medium').lower()
         
         # Step 1: Parse SoF explanation into testable claims
-        claims = self.parse_sof_claims(sof_explanation, purchase)
+        # Handle both string and structured dict formats
+        if isinstance(sof_explanation, dict):
+            # New structured format with sources array
+            claims = self.parse_structured_sof(sof_explanation, purchase)
+        else:
+            # Legacy text format
+            claims = self.parse_sof_claims(sof_explanation, purchase)
         
         # Step 2: Find evidence in bank statements
         evidence_matches = self.match_evidence(claims, bank_statements)
@@ -250,6 +256,82 @@ class SoFAssessmentEngine:
                 "expected_account": None,
                 "claim_text": "Source not clearly specified in explanation"
             })
+        
+        return claims
+    
+    def parse_structured_sof(
+        self,
+        sof_explanation: Dict[str, Any],
+        purchase: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Parse structured SoF explanation (new format with sources array)
+        """
+        claims = []
+        sources = sof_explanation.get('sources', [])
+        
+        for idx, source in enumerate(sources, start=1):
+            claim = {
+                "claim_id": idx,
+                "source_type": source.get('source_type', 'unknown'),
+                "expected_amount": float(source.get('amount', 0)),
+                "currency": source.get('currency', 'GBP'),
+                "description": source.get('description', ''),
+                "expected_date_range": {},
+                "expected_payer": None,
+                "expected_account": None,
+                "claim_text": source.get('description', '')
+            }
+            
+            # Extract type-specific fields
+            if source.get('source_type') == 'inheritance':
+                claim['expected_payer'] = source.get('deceased_name')
+                claim['probate_reference'] = source.get('probate_reference')
+                if source.get('distribution_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['distribution_date'],
+                        'end': source['distribution_date']
+                    }
+            
+            elif source.get('source_type') == 'property_sale':
+                claim['property_address'] = source.get('property_address')
+                claim['title_number'] = source.get('title_number')
+                claim['solicitor_firm'] = source.get('solicitor_firm')
+                if source.get('completion_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['completion_date'],
+                        'end': source['completion_date']
+                    }
+            
+            elif source.get('source_type') == 'business_sale':
+                claim['company_name'] = source.get('company_name')
+                claim['company_number'] = source.get('company_number')
+                claim['solicitor_firm'] = source.get('solicitor_firm')
+                if source.get('completion_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['completion_date'],
+                        'end': source['completion_date']
+                    }
+            
+            elif source.get('source_type') == 'business_loan':
+                claim['expected_payer'] = source.get('lender')
+                claim['loan_date'] = source.get('loan_date')
+                if source.get('loan_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['loan_date'],
+                        'end': source['loan_date']
+                    }
+            
+            elif source.get('source_type') == 'gift':
+                claim['expected_payer'] = source.get('donor_name')
+                claim['gift_date'] = source.get('gift_date')
+                if source.get('gift_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['gift_date'],
+                        'end': source['gift_date']
+                    }
+            
+            claims.append(claim)
         
         return claims
     
