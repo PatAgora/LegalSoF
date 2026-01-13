@@ -172,10 +172,11 @@ class DocumentVerifier:
         bank_name = extracted.get('bank_name')
         account_last_4 = extracted.get('account_last_4')
         
+        matching_transaction = None
         if bank_name and account_last_4:
             checks_passed.append(f"Bank details present: {bank_name} ****{account_last_4}")
             
-            # Check 4: Match against bank statements
+            # Check 4: Match against bank statements (INFORMATIONAL ONLY - doesn't affect document confidence)
             matching_transaction = self._find_matching_transaction(
                 bank_statements,
                 expected_amount,
@@ -184,10 +185,11 @@ class DocumentVerifier:
             )
             
             if matching_transaction:
-                checks_passed.append(f"Transaction found in bank statement: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
+                # INFORMATIONAL: Bank transaction found (doesn't affect document verification)
+                checks_passed.append(f"Bank transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
                 result['verification_details']['matching_transaction'] = matching_transaction
-            else:
-                issues.append("No matching transaction found in bank statements")
+            # NOTE: We don't add an issue if no bank match - that's handled by the assessment engine
+            # The document itself is valid regardless of bank statement matching
         else:
             issues.append("Bank account details incomplete in probate document")
         
@@ -205,17 +207,25 @@ class DocumentVerifier:
         # Calculate confidence
         confidence = len(checks_passed) / (len(checks_passed) + len(issues)) if (checks_passed or issues) else 0.0
         
-        # Mark as verified if critical checks passed
+        # Mark as verified ONLY if:
+        # 1. Critical checks passed (distribution, bank details)
+        # 2. Confidence is 100% (no issues found)
         result['verified'] = (
             matching_distribution is not None and
             bank_name is not None and
-            account_last_4 is not None
+            account_last_4 is not None and
+            confidence >= 0.999  # Require 100% confidence (99.9%+ for floating point tolerance)
         )
         
         result['confidence'] = confidence
         result['verification_details']['checks_passed'] = checks_passed
         result['verification_details']['extracted_data'] = extracted
         result['issues'] = issues
+        
+        # Flag for review if confidence is not 100%
+        result['requires_review'] = confidence < 0.999 or len(issues) > 0
+        if result['requires_review']:
+            result['review_reason'] = issues[0] if issues else "Verification incomplete"
         
         # BUILD COMPARISON: Customer Claim vs Document Evidence
         result['verification_details']['comparison'] = {
@@ -313,10 +323,11 @@ class DocumentVerifier:
         bank_name = extracted.get('bank_name')
         account_last_4 = extracted.get('account_last_4')
         
+        matching_transaction = None
         if bank_name and account_last_4:
             checks_passed.append(f"Bank details: {bank_name} ****{account_last_4}")
             
-            # Check 5: Match against bank statements
+            # Check 5: Match against bank statements (INFORMATIONAL ONLY - doesn't affect document confidence)
             matching_transaction = self._find_matching_transaction(
                 bank_statements,
                 net_proceeds or expected_amount,
@@ -325,10 +336,11 @@ class DocumentVerifier:
             )
             
             if matching_transaction:
-                checks_passed.append(f"Transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
+                # INFORMATIONAL: Bank transaction found (doesn't affect document verification)
+                checks_passed.append(f"Bank transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
                 result['verification_details']['matching_transaction'] = matching_transaction
-            else:
-                issues.append("No matching transaction in bank statements")
+            # NOTE: We don't add an issue if no bank match - that's handled by the assessment engine
+            # The document itself is valid regardless of bank statement matching
         else:
             issues.append("Bank details incomplete in completion statement")
         
@@ -349,17 +361,25 @@ class DocumentVerifier:
         # Calculate confidence
         confidence = len(checks_passed) / (len(checks_passed) + len(issues)) if (checks_passed or issues) else 0.0
         
-        # Mark as verified if critical checks passed
+        # Mark as verified ONLY if:
+        # 1. Critical checks passed (amount match, bank details)
+        # 2. Confidence is 100% (no issues found)
         result['verified'] = (
             net_proceeds is not None and
             abs(net_proceeds - expected_amount) / expected_amount < 0.01 and
-            bank_name is not None
+            bank_name is not None and
+            confidence >= 0.999  # Require 100% confidence (99.9%+ for floating point tolerance)
         )
         
         result['confidence'] = confidence
         result['verification_details']['checks_passed'] = checks_passed
         result['verification_details']['extracted_data'] = extracted
         result['issues'] = issues
+        
+        # Flag for review if confidence is not 100%
+        result['requires_review'] = confidence < 0.999 or len(issues) > 0
+        if result['requires_review']:
+            result['review_reason'] = issues[0] if issues else "Verification incomplete"
         
         # BUILD COMPARISON: Customer Claim vs Document Evidence
         result['verification_details']['comparison'] = {

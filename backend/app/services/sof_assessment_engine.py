@@ -76,6 +76,11 @@ class SoFAssessmentEngine:
                 claim_id = verification['claim_id']
                 if claim_id < len(evidence_matches):
                     evidence_matches[claim_id]['document_verified'] = verification['verified']
+                    evidence_matches[claim_id]['confidence'] = verification.get('confidence', 0.0)
+                    evidence_matches[claim_id]['verification_details'] = verification.get('verification_details', {})
+                    evidence_matches[claim_id]['issues'] = verification.get('issues', [])
+                    evidence_matches[claim_id]['requires_review'] = verification.get('requires_review', False)
+                    evidence_matches[claim_id]['review_reason'] = verification.get('review_reason')
                     evidence_matches[claim_id]['document_verification'] = verification
         
         # Step 3: Trace funding paths
@@ -700,11 +705,17 @@ class SoFAssessmentEngine:
         """
         Make overall risk decision considering all factors
         Now properly considers BOTH bank transaction matches AND document verification
+        AND requires 100% confidence for full verification
         """
-        # Count verified claims - must have BOTH bank match AND document verification
+        # Count verified claims - must have:
+        # 1. Bank match (verified=True)
+        # 2. Document verification (document_verified=True)  
+        # 3. 100% confidence (no issues found)
         verified_claims = sum(
             1 for e in evidence_matches 
-            if e.get('verified', False) and e.get('document_verified', False)
+            if e.get('verified', False) 
+            and e.get('document_verified', False)
+            and e.get('document_verification', {}).get('confidence', 0) >= 1.0
         )
         total_claims = len(claims)
         verification_rate = verified_claims / total_claims if total_claims > 0 else 0
@@ -826,8 +837,13 @@ class SoFAssessmentEngine:
         sof_section = ["=== SOURCE OF FUNDS ANALYSIS ===\n"]
         
         # Overall funding status
-        # Count how many claims have BOTH bank and document verification
-        fully_verified = sum(1 for e in evidence_matches if e.get('verified') and e.get('document_verified'))
+        # Count how many claims have BOTH bank and document verification AND 100% confidence
+        fully_verified = sum(
+            1 for e in evidence_matches 
+            if e.get('verified') 
+            and e.get('document_verified')
+            and e.get('confidence', 0) >= 0.999  # Require 100% confidence
+        )
         total_claims = len(claims)
         
         if best_coverage >= 90:
@@ -946,7 +962,12 @@ class SoFAssessmentEngine:
         sof_section.append("\nSOURCE OF FUNDS SUMMARY:\n")
         
         # Count fully verified claims (both bank + docs)
-        fully_verified_count = sum(1 for e in evidence_matches if e.get('verified') and e.get('document_verified'))
+        fully_verified_count = sum(
+            1 for e in evidence_matches 
+            if e.get('verified') 
+            and e.get('document_verified')
+            and e.get('confidence', 0) >= 0.999  # Require 100% confidence
+        )
         
         if fully_verified_count == total_claims:
             # ALL claims have both bank AND documents
@@ -1306,10 +1327,15 @@ class SoFAssessmentEngine:
         note_parts.append("\nEVIDENCE REVIEW (Claim-by-Claim):")
         bank_verified_count = sum(1 for e in evidence_matches if e.get('verified', False))
         doc_verified_count = sum(1 for e in evidence_matches if e.get('document_verified', False))
+        
+        # FULLY VERIFIED requires: bank + docs + 100% confidence
         fully_verified_count = sum(
             1 for e in evidence_matches 
-            if e.get('verified', False) and e.get('document_verified', False)
+            if e.get('verified', False) 
+            and e.get('document_verified', False)
+            and e.get('document_verification', {}).get('confidence', 0) >= 1.0
         )
+        
         note_parts.append(
             f"Bank transactions: {bank_verified_count}/{len(claims)} claims matched."
         )
@@ -1317,8 +1343,21 @@ class SoFAssessmentEngine:
             f"Supporting documents: {doc_verified_count}/{len(claims)} claims verified with source documentation."
         )
         note_parts.append(
-            f"FULLY VERIFIED (both bank + docs): {fully_verified_count}/{len(claims)} claims."
+            f"FULLY VERIFIED (bank + docs + 100% confidence): {fully_verified_count}/{len(claims)} claims."
         )
+        
+        # Show warning if any claims have less than 100% confidence
+        partial_verified = sum(
+            1 for e in evidence_matches 
+            if e.get('verified', False) 
+            and e.get('document_verified', False)
+            and e.get('document_verification', {}).get('confidence', 0) < 1.0
+        )
+        if partial_verified > 0:
+            note_parts.append(
+                f"⚠️ REQUIRES REVIEW: {partial_verified} claim(s) have document issues (confidence < 100%)."
+            )
+        
         note_parts.append("")
         
         for evidence in evidence_matches:
@@ -1329,9 +1368,17 @@ class SoFAssessmentEngine:
             if evidence['verified']:
                 txns = evidence['transactions']
                 first_txn = txns[0]
+                
+                # Determine status based on confidence
+                confidence = doc_verification.get('confidence', 0)
+                is_fully_verified = doc_verified and confidence >= 1.0
+                
+                status_icon = '✅' if is_fully_verified else '⚠️'
+                status_text = 'FULLY VERIFIED' if is_fully_verified else 'REQUIRES REVIEW'
+                
                 note_parts.append(
-                    f"{'✅' if doc_verified else '⚠️'} Claim {evidence['claim_id']} ({evidence['claim_source']}): "
-                    f"£{evidence['expected_amount']:,.2f}"
+                    f"{status_icon} Claim {evidence['claim_id']} ({evidence['claim_source']}): "
+                    f"£{evidence['expected_amount']:,.2f} - {status_text}"
                 )
                 note_parts.append(
                     f"   • Bank Transaction: £{first_txn['amount']:,.2f} on {first_txn['date']}"
@@ -1365,7 +1412,17 @@ class SoFAssessmentEngine:
                     for check in checks_passed[:3]:  # Show first 3 checks
                         note_parts.append(f"      - {check}")
                     if doc_verification.get('confidence'):
-                        note_parts.append(f"      - Verification confidence: {doc_verification['confidence']*100:.0f}%")
+                        confidence_pct = doc_verification['confidence']*100
+                        note_parts.append(f"      - Verification confidence: {confidence_pct:.0f}%")
+                        
+                        # FLAG if confidence < 100%
+                        if confidence_pct < 100:
+                            note_parts.append(f"      ⚠️ ATTENTION: Confidence below 100% - review required")
+                            issues = doc_verification.get('issues', [])
+                            if issues:
+                                note_parts.append(f"      📋 Issues found:")
+                                for issue in issues:
+                                    note_parts.append(f"         • {issue}")
                     
                     # ADD COMPARISON: Customer Claim vs Document Evidence
                     comparison = verification_details.get('comparison', {})
