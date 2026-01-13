@@ -370,11 +370,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             Supporting documents: {result.evidence_matches.filter(e => e.document_verified).length}/{total_claims} claims verified with source documentation.
           </p>
           <p className="text-sm mb-2 text-gray-900 font-semibold">
-            FULLY VERIFIED (both bank + docs): {result.evidence_matches.filter(e => e.verified && e.document_verified).length}/{total_claims} claims.
+            FULLY VERIFIED (bank + docs + 100% confidence): {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length}/{total_claims} claims.
           </p>
           
+          {/* Show requires review count if any */}
+          {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length > 0 && (
+            <p className="text-sm mb-2 text-amber-700 font-semibold">
+              ⚠️ REQUIRES REVIEW: {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length}/{total_claims} claims (confidence {'<'} 100%).
+            </p>
+          )}
+          
           {/* Only show warning if NOT all claims are fully verified */}
-          {result.evidence_matches.filter(e => e.verified && e.document_verified).length < total_claims && (
+          {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length < total_claims && (
             <div className="bg-[#D4C4B0] border border-[#C4B4A0] rounded p-3 mb-3 text-sm">
               <p className="font-semibold text-gray-800 mb-1">⚠️ IMPORTANT:</p>
               <p className="text-gray-900">
@@ -384,12 +391,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
           )}
           
-          {/* Show positive message if ALL claims are fully verified */}
-          {result.evidence_matches.filter(e => e.verified && e.document_verified).length === total_claims && total_claims > 0 && (
+          {/* Show positive message if ALL claims are fully verified with 100% confidence */}
+          {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length === total_claims && total_claims > 0 && (
             <div className="bg-green-50 border border-green-200 rounded p-3 mb-3 text-sm">
               <p className="font-semibold text-green-800 mb-1">✅ VERIFICATION COMPLETE:</p>
               <p className="text-green-900">
-                All claims have been fully verified with both bank statement evidence and supporting documents. 
+                All claims have been fully verified with both bank statement evidence and supporting documents at 100% confidence. 
                 AML compliance requirements for source documentation have been met.
               </p>
             </div>
@@ -398,12 +405,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             {result.evidence_matches.map((evidence, idx) => {
               const hasBank = evidence.verified;
               const hasDocs = evidence.document_verified;
+              const confidence = evidence.document_verification?.confidence || 0;
+              const fullyVerified = hasBank && hasDocs && confidence >= 0.999;
+              const requiresReview = hasDocs && confidence < 0.999;
               
               return (
                 <li key={idx}>
-                  {hasBank && hasDocs ? (
+                  {fullyVerified ? (
                     <div>
-                      <div className="font-medium text-green-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED</div>
+                      <div className="font-medium text-green-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED (100%)</div>
                       {evidence.transactions.length > 0 && (
                         <div className="ml-6 mt-1 space-y-1">
                           {evidence.transactions.map((txn: any, tidx: number) => (
@@ -468,6 +478,59 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                       </div>
                                     </div>
                                   )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : requiresReview ? (
+                    <div>
+                      <div className="font-medium text-amber-700">⚠️ Claim {idx + 1} ({evidence.claim_source}): REQUIRES REVIEW ({Math.round(confidence * 100)}% confidence)</div>
+                      {evidence.transactions.length > 0 && (
+                        <div className="ml-6 mt-1 space-y-1">
+                          {evidence.transactions.map((txn: any, tidx: number) => (
+                            <div key={tidx} className="text-xs">
+                              <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
+                              <div>• Transaction: {txn.description || 'N/A'}</div>
+                              <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
+                            </div>
+                          ))}
+                          {evidence.document_verification && (
+                            <div className="ml-2 mt-2 space-y-1">
+                              <div className="text-amber-800 font-semibold">
+                                ⚠️ DOCUMENT VERIFICATION INCOMPLETE (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
+                              </div>
+                              {evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
+                                <div className="text-xs text-red-700 space-y-0.5">
+                                  <div className="font-semibold">Issues Found:</div>
+                                  {evidence.document_verification.issues.map((issue: string, iidx: number) => (
+                                    <div key={iidx}>❌ {issue}</div>
+                                  ))}
+                                </div>
+                              )}
+                              {evidence.document_verification.verification_details && (
+                                <div className="text-xs text-gray-700 space-y-0.5">
+                                  {evidence.document_verification.verification_details.document_used && (
+                                    <>
+                                      <div>📄 Document: {evidence.document_verification.verification_details.document_used.filename}</div>
+                                      <div>📋 Type: {evidence.document_verification.verification_details.document_used.document_type}</div>
+                                      {evidence.document_verification.verification_details.document_used.probate_reference && (
+                                        <div>🔖 Reference: {evidence.document_verification.verification_details.document_used.probate_reference}</div>
+                                      )}
+                                      {evidence.document_verification.verification_details.document_used.title_number && (
+                                        <div>🔖 Title: {evidence.document_verification.verification_details.document_used.title_number}</div>
+                                      )}
+                                      {evidence.document_verification.verification_details.document_used.solicitor_firm && (
+                                        <div>⚖️ Solicitor: {evidence.document_verification.verification_details.document_used.solicitor_firm}</div>
+                                      )}
+                                    </>
+                                  )}
+                                  {evidence.document_verification.verification_details.checks_passed && 
+                                   evidence.document_verification.verification_details.checks_passed.slice(0, 5).map((check: string, cidx: number) => (
+                                    <div key={cidx} className="text-xs">✓ {check}</div>
+                                  ))}
                                 </div>
                               )}
                             </div>
@@ -749,7 +812,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const verified = evidence?.verified || false;
                   const document_verified = evidence?.document_verified || false;
                   const transactions = evidence?.transactions || [];
-                  const fullyVerified = verified && document_verified;
+                  const confidence = evidence?.document_verification?.confidence || 0;
+                  // Only show as FULLY VERIFIED if confidence is 100% (>= 0.999 to account for floating point)
+                  const fullyVerified = verified && document_verified && confidence >= 0.999;
+                  const requiresReview = document_verified && confidence < 0.999;
                   
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
@@ -794,7 +860,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       <td className="px-4 py-3">
                         {fullyVerified ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            ✅ FULLY VERIFIED
+                            ✅ FULLY VERIFIED (100%)
+                          </span>
+                        ) : requiresReview ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                            ⚠️ REQUIRES REVIEW ({Math.round(confidence * 100)}%)
                           </span>
                         ) : verified ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#D4C4B0] text-gray-900">
