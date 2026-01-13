@@ -826,12 +826,32 @@ class SoFAssessmentEngine:
         sof_section = ["=== SOURCE OF FUNDS ANALYSIS ===\n"]
         
         # Overall funding status
+        # Count how many claims have BOTH bank and document verification
+        fully_verified = sum(1 for e in evidence_matches if e.get('verified') and e.get('document_verified'))
+        total_claims = len(claims)
+        
         if best_coverage >= 90:
-            sof_section.append(
-                f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
-                f"⚠️ DOCUMENTATION STATUS: Corroborating source documents REQUIRED to prove legitimacy.\n"
-                f"   Bank payments alone are INSUFFICIENT for AML compliance.\n"
-            )
+            if fully_verified == total_claims:
+                # ALL claims have both bank AND document verification
+                sof_section.append(
+                    f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                    f"✅ DOCUMENTATION STATUS: All claims verified with supporting documents.\n"
+                    f"   ✅ FULLY VERIFIED: Bank transactions and source documents confirm all {total_claims} claims.\n"
+                )
+            elif fully_verified > 0:
+                # SOME claims have both
+                sof_section.append(
+                    f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                    f"⚠️ DOCUMENTATION STATUS: {fully_verified}/{total_claims} claims verified with documents.\n"
+                    f"   Additional source documents REQUIRED for remaining {total_claims - fully_verified} claims.\n"
+                )
+            else:
+                # NO documents verified yet
+                sof_section.append(
+                    f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                    f"⚠️ DOCUMENTATION STATUS: Corroborating source documents REQUIRED to prove legitimacy.\n"
+                    f"   Bank payments alone are INSUFFICIENT for AML compliance.\n"
+                )
         elif best_coverage >= 70:
             sof_section.append(
                 f"⚠️ BANK PAYMENT STATUS: Partial payments traced ({best_coverage}% coverage). Gaps identified.\n"
@@ -924,7 +944,24 @@ class SoFAssessmentEngine:
         
         # SoF Summary
         sof_section.append("\nSOURCE OF FUNDS SUMMARY:\n")
-        if verified_claims == total_claims:
+        
+        # Count fully verified claims (both bank + docs)
+        fully_verified_count = sum(1 for e in evidence_matches if e.get('verified') and e.get('document_verified'))
+        
+        if fully_verified_count == total_claims:
+            # ALL claims have both bank AND documents
+            sof_section.append(
+                f"✅ All {total_claims} SoF claims have matching bank statement evidence.\n"
+                f"✅ All {total_claims} SoF claims have supporting document verification.\n"
+                f"✅ FULLY VERIFIED: Both bank transactions and source documents confirm all claims.\n\n"
+                f"The source of funds has been thoroughly verified with:\n"
+                f"  • Bank statement evidence showing receipt of funds\n"
+                f"  • Supporting documents proving legitimacy and lawful origin\n"
+                f"  • Complete audit trail connecting funds to their claimed source\n\n"
+                f"AML compliance requirements for source documentation have been met.\n"
+            )
+        elif verified_claims == total_claims and fully_verified_count < total_claims:
+            # All have bank, but not all have documents
             sof_section.append(
                 f"✅ All {total_claims} SoF claims have matching bank statement evidence. "
                 f"However, bank statements alone are INSUFFICIENT for regulatory compliance.\n\n"
