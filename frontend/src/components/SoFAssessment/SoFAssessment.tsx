@@ -320,42 +320,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     
     return (
       <div className="space-y-4">
-        {/* Client Information Header */}
-        {result.client_info && result.purchase && (
-          <div className="bg-[#EAD8C0] border border-[#D4C4B0] rounded-lg p-4">
-            <h5 className="font-semibold text-gray-800 mb-3 text-lg">Client Information</h5>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-gray-700 font-medium">Client Name:</span>
-                <span className="text-gray-900 ml-2">{result.client_info.client_name || 'Not provided'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Risk Rating:</span>
-                <span className="text-gray-900 ml-2">{(result.client_info.client_risk_rating || 'Not specified').toUpperCase()}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Business Sector:</span>
-                <span className="text-gray-900 ml-2">{result.client_info.business_sector || 'Not specified'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">PEP Status:</span>
-                <span className="text-gray-900 ml-2">{result.client_info.is_pep ? 'Yes' : 'No'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Purchase Amount:</span>
-                <span className="text-gray-900 ml-2">£{result.purchase.amount?.toLocaleString() || 0} {result.purchase.currency || 'GBP'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Purchase Description:</span>
-                <span className="text-gray-900 ml-2">{result.purchase.description || 'Not specified'}</span>
-              </div>
-              <div className="col-span-2">
-                <span className="text-gray-700 font-medium">Expected Payment Date:</span>
-                <span className="text-gray-900 ml-2">{result.purchase.expected_payment_date || 'Not specified'}</span>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Client Information Header - REMOVED per user request */}
 
         {/* Claims Overview */}
         <div>
@@ -449,8 +414,62 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             </div>
                           ))}
                           {evidence.document_verification && (
-                            <div className="ml-2 text-green-800 font-semibold mt-1">
-                              ✅ SUPPORTING DOCUMENT VERIFIED (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
+                            <div className="ml-2 mt-2 space-y-1">
+                              <div className="text-green-800 font-semibold">
+                                ✅ SUPPORTING DOCUMENT VERIFIED (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
+                              </div>
+                              {evidence.document_verification.verification_details && (
+                                <div className="text-xs text-gray-700 space-y-0.5">
+                                  {evidence.document_verification.verification_details.document_used && (
+                                    <>
+                                      <div>📄 Document: {evidence.document_verification.verification_details.document_used.filename}</div>
+                                      <div>📋 Type: {evidence.document_verification.verification_details.document_used.document_type}</div>
+                                      {evidence.document_verification.verification_details.document_used.probate_reference && (
+                                        <div>🔖 Reference: {evidence.document_verification.verification_details.document_used.probate_reference}</div>
+                                      )}
+                                      {evidence.document_verification.verification_details.document_used.title_number && (
+                                        <div>🔖 Title: {evidence.document_verification.verification_details.document_used.title_number}</div>
+                                      )}
+                                      {evidence.document_verification.verification_details.document_used.solicitor_firm && (
+                                        <div>⚖️ Solicitor: {evidence.document_verification.verification_details.document_used.solicitor_firm}</div>
+                                      )}
+                                    </>
+                                  )}
+                                  {evidence.document_verification.verification_details.checks_passed && 
+                                   evidence.document_verification.verification_details.checks_passed.slice(0, 5).map((check: string, cidx: number) => (
+                                    <div key={cidx} className="text-xs">✓ {check}</div>
+                                  ))}
+                                  {evidence.document_verification.verification_details.comparison && (
+                                    <div className="mt-1 pt-1 border-t border-gray-300">
+                                      <div className="font-semibold">📊 Evidence Comparison:</div>
+                                      <div className="ml-2 space-y-0.5">
+                                        {evidence.document_verification.verification_details.comparison.customer_claim && (
+                                          <div>👤 Customer: £{evidence.document_verification.verification_details.comparison.customer_claim.claimed_amount?.toLocaleString()}</div>
+                                        )}
+                                        {evidence.document_verification.verification_details.comparison.document_evidence && (
+                                          <>
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.distribution_amount && (
+                                              <div>✅ Document: £{evidence.document_verification.verification_details.comparison.document_evidence.distribution_amount?.toLocaleString()} distribution</div>
+                                            )}
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.net_proceeds && (
+                                              <div>✅ Document: £{evidence.document_verification.verification_details.comparison.document_evidence.net_proceeds?.toLocaleString()} net proceeds</div>
+                                            )}
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.payment_date && (
+                                              <div>📅 Payment: {evidence.document_verification.verification_details.comparison.document_evidence.payment_date}</div>
+                                            )}
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.completion_date && (
+                                              <div>📅 Completion: {evidence.document_verification.verification_details.comparison.document_evidence.completion_date}</div>
+                                            )}
+                                          </>
+                                        )}
+                                        {evidence.document_verification.verification_details.comparison.matches?.amount_matches && (
+                                          <div className="text-green-700 font-semibold">✅ Amount matches exactly</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
