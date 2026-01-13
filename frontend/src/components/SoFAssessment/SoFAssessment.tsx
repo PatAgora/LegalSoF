@@ -407,13 +407,28 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <p className="text-sm mb-2 text-gray-900 font-semibold">
             FULLY VERIFIED (both bank + docs): {result.evidence_matches.filter(e => e.verified && e.document_verified).length}/{total_claims} claims.
           </p>
-          <div className="bg-[#D4C4B0] border border-[#C4B4A0] rounded p-3 mb-3 text-sm">
-            <p className="font-semibold text-gray-800 mb-1">⚠️ IMPORTANT:</p>
-            <p className="text-gray-900">
-              Bank statements alone are INSUFFICIENT. Corroborating source documents (e.g., probate grants, 
-              completion statements) are REQUIRED to prove legitimacy. Bank payments verify receipt, NOT lawful origin.
-            </p>
-          </div>
+          
+          {/* Only show warning if NOT all claims are fully verified */}
+          {result.evidence_matches.filter(e => e.verified && e.document_verified).length < total_claims && (
+            <div className="bg-[#D4C4B0] border border-[#C4B4A0] rounded p-3 mb-3 text-sm">
+              <p className="font-semibold text-gray-800 mb-1">⚠️ IMPORTANT:</p>
+              <p className="text-gray-900">
+                Bank statements alone are INSUFFICIENT. Corroborating source documents (e.g., probate grants, 
+                completion statements) are REQUIRED to prove legitimacy. Bank payments verify receipt, NOT lawful origin.
+              </p>
+            </div>
+          )}
+          
+          {/* Show positive message if ALL claims are fully verified */}
+          {result.evidence_matches.filter(e => e.verified && e.document_verified).length === total_claims && total_claims > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded p-3 mb-3 text-sm">
+              <p className="font-semibold text-green-800 mb-1">✅ VERIFICATION COMPLETE:</p>
+              <p className="text-green-900">
+                All claims have been fully verified with both bank statement evidence and supporting documents. 
+                AML compliance requirements for source documentation have been met.
+              </p>
+            </div>
+          )}
           <ul className="space-y-2 text-sm">
             {result.evidence_matches.map((evidence, idx) => {
               const hasBank = evidence.verified;
@@ -620,8 +635,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           const content = lines.slice(1).join('\n');
           
           // Determine section type
+          // Skip CLIENT INFORMATION section - not needed in UI
           if (title.includes('CLIENT INFORMATION')) {
-            return renderClientInfoSection(content);
+            return null; // Hidden
           } else if (title.includes('SOURCE OF FUNDS')) {
             return renderSoFSection(content, result);
           } else if (title.includes('TRANSACTION REVIEW')) {
@@ -712,7 +728,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 {result.claims.map((claim, idx) => {
                   const evidence = result.evidence_matches[idx];
                   const verified = evidence?.verified || false;
+                  const document_verified = evidence?.document_verified || false;
                   const transactions = evidence?.transactions || [];
+                  const fullyVerified = verified && document_verified;
                   
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
@@ -730,8 +748,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {verified ? (
+                        {fullyVerified ? (
                           <span className="text-green-700">✓ Verified</span>
+                        ) : verified ? (
+                          <span className="text-gray-800">
+                            Request {
+                              claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
+                              claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
+                              claim.source_type.toLowerCase().includes('loan') ? 'loan agreement' :
+                              claim.source_type.toLowerCase().includes('business') ? 'sale agreement' :
+                              'documentation'
+                            }
+                          </span>
                         ) : (
                           <span className="text-gray-800">
                             Request {
@@ -745,7 +773,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {verified ? (
+                        {fullyVerified ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            ✅ FULLY VERIFIED
+                          </span>
+                        ) : verified ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#D4C4B0] text-gray-900">
                             ⚠️ Payment found, docs req'd
                           </span>
