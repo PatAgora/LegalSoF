@@ -370,23 +370,46 @@ async def get_transaction_dashboard(
 ):
     """
     Get dashboard statistics and charts for transaction review
-    """
-    # Get all transactions
-    transactions = db.query(Transaction).filter(Transaction.matter_id == matter_id).all()
     
-    # Get all alerts
+    NEW: Uses bank statement data from SoF assessment for consistency
+    """
+    import json
+    from pathlib import Path
+    
+    # Load bank statement transactions (same source as transactions list)
+    storage_file = Path("/tmp/sof_assessment_storage.json")
+    bank_transactions = []
+    
+    if storage_file.exists():
+        with open(storage_file, 'r') as f:
+            storage = json.load(f)
+        
+        matter_storage = storage.get(str(matter_id)) or storage.get(matter_id)
+        if matter_storage and matter_storage.get('bank_statements'):
+            bank_statements = matter_storage['bank_statements']
+            
+            # Convert to transaction objects with necessary fields
+            for idx, stmt in enumerate(bank_statements):
+                bank_transactions.append({
+                    'id': f"SOF-{matter_id}-{idx+1}",
+                    'direction': stmt.get('direction', 'credit'),
+                    'base_amount': float(stmt.get('amount', 0)),
+                    'country_iso2': None,  # Not in bank statements
+                })
+    
+    # Get all alerts (still from database)
     alerts = db.query(TransactionAlert).filter(TransactionAlert.matter_id == matter_id).all()
     
-    # Calculate stats
-    total_transactions = len(transactions)
+    # Calculate stats using bank statement transactions
+    total_transactions = len(bank_transactions)
     total_alerts = len(alerts)
     
-    total_in = sum(t.base_amount for t in transactions if t.direction == 'in')
-    total_out = sum(t.base_amount for t in transactions if t.direction == 'out')
+    total_in = sum(t['base_amount'] for t in bank_transactions if t['direction'] in ('in', 'credit'))
+    total_out = sum(t['base_amount'] for t in bank_transactions if t['direction'] in ('out', 'debit'))
     
     # High-risk transactions (with CRITICAL or HIGH alerts)
     high_risk_txn_ids = {a.txn_id for a in alerts if a.severity in ('CRITICAL', 'HIGH')}
-    high_risk_value = sum(t.base_amount for t in transactions if t.id in high_risk_txn_ids)
+    high_risk_value = sum(t['base_amount'] for t in bank_transactions if t['id'] in high_risk_txn_ids)
     
     # Alert counts by severity
     alerts_by_severity = defaultdict(int)
@@ -411,7 +434,7 @@ async def get_transaction_dashboard(
     
     # Alerts over time (last 12 months)
     alerts_over_time = []
-    if transactions:
+    if bank_transactions:
         # Group by month
         monthly_alerts = defaultdict(int)
         for alert in alerts:
@@ -426,11 +449,12 @@ async def get_transaction_dashboard(
             })
     
     # Top countries by alert count
+    # Note: Bank statements don't include country data, so this will be empty
     country_alerts = defaultdict(int)
     for alert in alerts:
-        txn = next((t for t in transactions if t.id == alert.txn_id), None)
-        if txn and txn.country_iso2:
-            country_alerts[txn.country_iso2] += 1
+        txn = next((t for t in bank_transactions if t['id'] == alert.txn_id), None)
+        if txn and txn.get('country_iso2'):
+            country_alerts[txn['country_iso2']] += 1
     
     top_countries = [
         {'country': country, 'alert_count': count}
