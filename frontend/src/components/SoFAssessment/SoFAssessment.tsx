@@ -531,7 +531,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 ⚠️ DOCUMENT VERIFICATION INCOMPLETE (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
                               </div>
                               
-                              {/* DETAILED DIFFERENCES SECTION */}
+                              {/* DETAILED DIFFERENCES SECTION (for document-specific issues) */}
                               {evidence.document_verification.differences && evidence.document_verification.differences.length > 0 && (
                                 <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
                                   <div className="font-semibold text-amber-900 mb-1">📋 Specific Differences Identified:</div>
@@ -553,6 +553,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                         </div>
                                       );
                                     })}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* ISSUES SECTION (for non-document-specific issues like unknown source types) */}
+                              {(!evidence.document_verification.differences || evidence.document_verification.differences.length === 0) && 
+                               evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-amber-900 mb-1">📋 Specific Differences Identified:</div>
+                                  <div className="space-y-1">
+                                    {evidence.document_verification.issues.map((issue: string, iidx: number) => (
+                                      <div key={iidx} className="text-xs bg-white rounded p-1 border border-amber-100">
+                                        <div className="font-semibold text-amber-800">
+                                          ⚠️ Issue: {issue}
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
                               )}
