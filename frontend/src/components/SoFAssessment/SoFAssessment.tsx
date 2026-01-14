@@ -926,7 +926,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {fullyVerified ? (
-                          <span className="text-green-700">✓ Verified</span>
+                          <div className="text-green-700">
+                            <div>✓ Verified</div>
+                            {evidence?.document_verification?.verification_details?.document_used?.filename && (
+                              <div className="text-xs text-gray-600 mt-1">
+                                Doc: {evidence.document_verification.verification_details.document_used.filename.slice(0, 30)}{evidence.document_verification.verification_details.document_used.filename.length > 30 ? '...' : ''}
+                              </div>
+                            )}
+                          </div>
+                        ) : document_verified ? (
+                          <div className="text-gray-800">
+                            {evidence?.document_verification?.verification_details?.document_used?.filename && (
+                              <div className="text-sm">
+                                📄 {evidence.document_verification.verification_details.document_used.filename.slice(0, 25)}{evidence.document_verification.verification_details.document_used.filename.length > 25 ? '...' : ''}
+                              </div>
+                            )}
+                            {evidence?.issues && evidence.issues.length > 0 && (
+                              <div className="text-xs text-amber-700 mt-1 space-y-0.5">
+                                {evidence.issues.slice(0, 3).map((issue: string, issueIdx: number) => (
+                                  <div key={issueIdx}>⚠️ {issue}</div>
+                                ))}
+                                {evidence.issues.length > 3 && (
+                                  <div className="text-gray-500">+ {evidence.issues.length - 3} more issues</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         ) : verified ? (
                           <span className="text-gray-800">
                             Request {
