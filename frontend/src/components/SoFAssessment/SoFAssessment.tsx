@@ -1086,8 +1086,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </div>
         )}
         
-        {/* Alert Table */}
-        {result.transaction_review_summary && result.transaction_review_summary.key_concerns.length > 0 && (
+        {/* Alert Table or No Alerts Message */}
+        {result.transaction_review_summary && result.transaction_review_summary.key_concerns.length > 0 ? (
           <div className="px-6 py-4">
             <h4 className="text-sm font-bold text-gray-700 mb-3">Alert Analysis</h4>
             <div className="overflow-x-auto">
@@ -1133,6 +1133,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        ) : (
+          <div className="px-6 py-8">
+            <div className="text-center text-gray-500">
+              <div className="text-4xl mb-2">✓</div>
+              <p className="font-medium">No alerts found within transactions</p>
             </div>
           </div>
         )}
