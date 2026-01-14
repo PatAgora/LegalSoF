@@ -1026,16 +1026,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             ✅ FULLY VERIFIED (100%)
                           </span>
                         ) : manuallyAccepted ? (
-                          <div className="space-y-1">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                              ✓ ACCEPTED BY USER ({Math.round(confidence * 100)}%)
-                            </span>
-                            {evidence?.document_verification?.manually_accepted_by && (
-                              <div className="text-xs text-gray-600">
-                                By: {evidence.document_verification.manually_accepted_by}
-                              </div>
-                            )}
-                          </div>
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            ✓ Accepted by {evidence?.document_verification?.manually_accepted_by || 'User'} on {
+                              evidence?.document_verification?.manually_accepted_at 
+                                ? new Date(evidence.document_verification.manually_accepted_at).toLocaleDateString('en-GB', { 
+                                    day: '2-digit', 
+                                    month: 'short', 
+                                    year: 'numeric' 
+                                  })
+                                : 'Unknown date'
+                            }
+                          </span>
                         ) : requiresReview ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                             ⚠️ REQUIRES REVIEW ({Math.round(confidence * 100)}%)
