@@ -980,6 +980,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               </div>
                             )}
                           </div>
+                        ) : manuallyAccepted ? (
+                          <span className="text-gray-500">-</span>
                         ) : document_verified ? (
                           <div className="text-gray-800">
                             {evidence?.document_verification?.verification_details?.document_used?.filename && (
