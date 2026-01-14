@@ -330,30 +330,55 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               const evidence = result.evidence_matches[idx];
               const hasBank = evidence?.verified || false;
               const hasDocs = evidence?.document_verified || false;
+              const hasDocUploaded = evidence?.document_verification && evidence.document_verification.verification_details?.document_used;
+              const docIssues = evidence?.document_verification?.issues || [];
+              const confidence = evidence?.document_verification?.confidence || 0;
               
               let status = '';
               let icon = '';
+              let details = '';
+              
               if (hasBank && hasDocs) {
                 status = 'FULLY VERIFIED';
                 icon = '✅';
-              } else if (hasBank) {
+              } else if (hasBank && hasDocUploaded && !hasDocs) {
+                // Document uploaded but has issues
+                status = 'REQUIRES REVIEW';
+                icon = '⚠️';
+                const firstIssue = docIssues[0] || 'Document verification incomplete';
+                details = ` - ${firstIssue}`;
+                if (docIssues.length > 1) {
+                  details += ` (+${docIssues.length - 1} more)`;
+                }
+              } else if (hasBank && !hasDocUploaded) {
                 status = 'BANK PAYMENT FOUND - DOCS REQUIRED';
                 icon = '⚠️';
               } else if (hasDocs) {
                 status = 'DOCS PROVIDED - BANK PAYMENT REQUIRED';
                 icon = '⚠️';
+              } else if (hasDocUploaded && !hasDocs) {
+                status = 'DOC UPLOADED - NEEDS REVIEW';
+                icon = '⚠️';
+                details = ` - ${docIssues[0] || 'Verification incomplete'}`;
               } else {
                 status = 'NOT VERIFIED';
                 icon = '❌';
               }
               
               return (
-                <li key={idx} className="flex items-center space-x-2">
-                  <span>{icon}</span>
-                  <span>
-                    {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
-                    <span className="ml-2 font-semibold">[{status}]</span>
-                  </span>
+                <li key={idx} className="flex flex-col space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <span>{icon}</span>
+                    <span>
+                      {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
+                      <span className="ml-2 font-semibold">[{status}]</span>
+                    </span>
+                  </div>
+                  {details && (
+                    <div className="ml-6 text-xs text-gray-600">
+                      {details}
+                    </div>
+                  )}
                 </li>
               );
             })}
