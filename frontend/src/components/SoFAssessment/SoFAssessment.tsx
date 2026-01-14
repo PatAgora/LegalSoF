@@ -430,9 +430,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             {result.evidence_matches.map((evidence, idx) => {
               const hasBank = evidence.verified;
               const hasDocs = evidence.document_verified;
+              const hasDocUploaded = evidence.document_verification && evidence.document_verification.verification_details?.document_used;
+              const docIssues = evidence.document_verification?.issues || [];
               const confidence = evidence.document_verification?.confidence || 0;
               const fullyVerified = hasBank && hasDocs && confidence >= 0.999;
-              const requiresReview = hasDocs && confidence < 0.999;
+              const requiresReview = hasDocUploaded && !hasDocs;
               
               return (
                 <li key={idx}>
@@ -655,7 +657,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         </div>
                       )}
                     </div>
-                  ) : hasBank ? (
+                  ) : hasBank && !hasDocUploaded ? (
                     <div>
                       <div className="font-medium">⚠️ Claim {idx + 1} ({evidence.claim_source}): Bank payment found - SOURCE DOCS REQUIRED</div>
                       {evidence.transactions.length > 0 && (
