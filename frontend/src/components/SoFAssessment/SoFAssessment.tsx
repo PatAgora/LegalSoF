@@ -531,11 +531,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 ⚠️ DOCUMENT VERIFICATION INCOMPLETE (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
                               </div>
                               {evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
-                                <div className="text-xs text-red-700 space-y-0.5 mb-2">
-                                  <div className="font-semibold">Issues Found:</div>
-                                  {evidence.document_verification.issues.map((issue: string, iidx: number) => (
-                                    <div key={iidx}>❌ {issue}</div>
-                                  ))}
+                                <div className="bg-red-50 border border-red-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-red-900 mb-1">Issues Found:</div>
+                                  <div className="space-y-1">
+                                    {evidence.document_verification.issues.map((issue: string, iidx: number) => {
+                                      const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
+                                      const shortDocName = docName.length > 40 ? docName.substring(0, 37) + '...' : docName;
+                                      // Add document name to issue if it mentions missing/incomplete
+                                      const issueWithDoc = issue.toLowerCase().includes('missing') || issue.toLowerCase().includes('not found') || issue.toLowerCase().includes('incomplete')
+                                        ? `${issue} (in ${shortDocName})`
+                                        : issue;
+                                      return (
+                                        <div key={iidx} className="text-xs bg-white rounded p-1 border border-red-100">
+                                          <div className="text-red-800">❌ {issueWithDoc}</div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               )}
                               
@@ -544,19 +556,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
                                   <div className="font-semibold text-amber-900 mb-1">📋 Specific Differences Identified:</div>
                                   <div className="space-y-1">
-                                    {evidence.document_verification.differences.map((diff: any, didx: number) => (
-                                      <div key={didx} className="text-xs bg-white rounded p-1 border border-amber-100">
-                                        <div className="font-semibold text-amber-800">
-                                          {diff.severity === 'missing' ? '🔴 Missing' : '⚠️ Mismatch'}: {diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                                        </div>
-                                        <div className="text-gray-700 ml-3">{diff.issue}</div>
-                                        {diff.accepted && (
-                                          <div className="text-green-700 ml-3 mt-1">
-                                            ✅ Accepted by {diff.accepted_by} on {new Date(diff.accepted_at).toLocaleDateString()}
+                                    {evidence.document_verification.differences.map((diff: any, didx: number) => {
+                                      const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
+                                      const shortDocName = docName.length > 40 ? docName.substring(0, 37) + '...' : docName;
+                                      return (
+                                        <div key={didx} className="text-xs bg-white rounded p-1 border border-amber-100">
+                                          <div className="font-semibold text-amber-800">
+                                            {diff.severity === 'missing' ? '🔴 Missing' : '⚠️ Mismatch'}: {diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                                           </div>
-                                        )}
-                                      </div>
-                                    ))}
+                                          <div className="text-gray-700 ml-3">{diff.issue} (from {shortDocName})</div>
+                                          {diff.accepted && (
+                                            <div className="text-green-700 ml-3 mt-1">
+                                              ✅ Accepted by {diff.accepted_by} on {new Date(diff.accepted_at).toLocaleDateString()}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               )}
