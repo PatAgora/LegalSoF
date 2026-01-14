@@ -946,13 +946,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const document_verified = evidence?.document_verified || false;
                   const transactions = evidence?.transactions || [];
                   const confidence = evidence?.document_verification?.confidence || 0;
+                  const manuallyAccepted = evidence?.document_verification?.manual_review_status === 'accepted';
                   // Check if there's a document upload attempt (either file or issues)
                   const hasDocUploaded = evidence?.document_verification?.verification_details?.document_used;
                   const hasDocVerificationAttempt = hasDocUploaded || 
                     (evidence?.document_verification?.issues && evidence.document_verification.issues.length > 0);
                   // Only show as FULLY VERIFIED if confidence is 100% (>= 0.999 to account for floating point)
                   const fullyVerified = verified && document_verified && confidence >= 0.999;
-                  const requiresReview = hasDocVerificationAttempt && !fullyVerified;
+                  const requiresReview = hasDocVerificationAttempt && !fullyVerified && !manuallyAccepted;
                   
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
@@ -1024,6 +1025,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                             ✅ FULLY VERIFIED (100%)
                           </span>
+                        ) : manuallyAccepted ? (
+                          <div className="space-y-1">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              ✓ ACCEPTED BY USER ({Math.round(confidence * 100)}%)
+                            </span>
+                            {evidence?.document_verification?.manually_accepted_by && (
+                              <div className="text-xs text-gray-600">
+                                By: {evidence.document_verification.manually_accepted_by}
+                              </div>
+                            )}
+                          </div>
                         ) : requiresReview ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                             ⚠️ REQUIRES REVIEW ({Math.round(confidence * 100)}%)
