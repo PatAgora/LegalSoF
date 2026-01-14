@@ -530,26 +530,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               <div className="text-amber-800 font-semibold">
                                 ⚠️ DOCUMENT VERIFICATION INCOMPLETE (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
                               </div>
-                              {evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
-                                <div className="bg-red-50 border border-red-200 rounded p-2 mb-2">
-                                  <div className="font-semibold text-red-900 mb-1">Issues Found:</div>
-                                  <div className="space-y-1">
-                                    {evidence.document_verification.issues.map((issue: string, iidx: number) => {
-                                      const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
-                                      const shortDocName = docName.length > 80 ? docName.substring(0, 77) + '...' : docName;
-                                      // Add document name to issue if it mentions missing/incomplete
-                                      const issueWithDoc = issue.toLowerCase().includes('missing') || issue.toLowerCase().includes('not found') || issue.toLowerCase().includes('incomplete')
-                                        ? `${issue} (in ${shortDocName})`
-                                        : issue;
-                                      return (
-                                        <div key={iidx} className="text-xs bg-white rounded p-1 border border-red-100">
-                                          <div className="text-red-800">❌ {issueWithDoc}</div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
                               
                               {/* DETAILED DIFFERENCES SECTION */}
                               {evidence.document_verification.differences && evidence.document_verification.differences.length > 0 && (
