@@ -501,7 +501,7 @@ async def accept_claim_differences(
             diff['accepted_at'] = datetime.utcnow().isoformat()
     
     # Persist the updated storage
-    _persist_storage()
+    save_storage(assessment_storage)
     
     return {
         "success": True,
