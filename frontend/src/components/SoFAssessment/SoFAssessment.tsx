@@ -536,7 +536,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                   <div className="space-y-1">
                                     {evidence.document_verification.issues.map((issue: string, iidx: number) => {
                                       const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
-                                      const shortDocName = docName.length > 40 ? docName.substring(0, 37) + '...' : docName;
+                                      const shortDocName = docName.length > 80 ? docName.substring(0, 77) + '...' : docName;
                                       // Add document name to issue if it mentions missing/incomplete
                                       const issueWithDoc = issue.toLowerCase().includes('missing') || issue.toLowerCase().includes('not found') || issue.toLowerCase().includes('incomplete')
                                         ? `${issue} (in ${shortDocName})`
@@ -558,7 +558,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                   <div className="space-y-1">
                                     {evidence.document_verification.differences.map((diff: any, didx: number) => {
                                       const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
-                                      const shortDocName = docName.length > 40 ? docName.substring(0, 37) + '...' : docName;
+                                      const shortDocName = docName.length > 80 ? docName.substring(0, 77) + '...' : docName;
                                       return (
                                         <div key={didx} className="text-xs bg-white rounded p-1 border border-amber-100">
                                           <div className="font-semibold text-amber-800">
@@ -949,9 +949,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const document_verified = evidence?.document_verified || false;
                   const transactions = evidence?.transactions || [];
                   const confidence = evidence?.document_verification?.confidence || 0;
+                  // Check if there's a document upload attempt (either file or issues)
+                  const hasDocUploaded = evidence?.document_verification?.verification_details?.document_used;
+                  const hasDocVerificationAttempt = hasDocUploaded || 
+                    (evidence?.document_verification?.issues && evidence.document_verification.issues.length > 0);
                   // Only show as FULLY VERIFIED if confidence is 100% (>= 0.999 to account for floating point)
                   const fullyVerified = verified && document_verified && confidence >= 0.999;
-                  const requiresReview = document_verified && confidence < 0.999;
+                  const requiresReview = hasDocVerificationAttempt && !fullyVerified;
                   
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
