@@ -609,7 +609,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                       const reason = prompt('Please provide a reason for accepting these differences (optional):');
                                       if (reason !== null) { // null means cancelled
                                         try {
-                                          const response = await fetch(`/api/v1/matters/${result.matter_id}/sof-assessment/accept-differences`, {
+                                          const response = await fetch(`${API_BASE_URL}/api/v1/matters/${result.matter_id}/sof-assessment/accept-differences`, {
                                             method: 'POST',
                                             headers: {
                                               'Content-Type': 'application/json',
