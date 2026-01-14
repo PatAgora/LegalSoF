@@ -987,15 +987,26 @@ class SoFAssessmentEngine:
             else:
                 evidence_parts.append("❌ No bank transaction")
             
-            # Document verification evidence
-            if doc_verified:
-                doc_details = doc_verification.get('verification_details', {})
-                document_used = doc_details.get('document_used', {})
+            # Document verification evidence - check if document exists, not just if fully verified
+            doc_details = doc_verification.get('verification_details', {})
+            document_used = doc_details.get('document_used', {})
+            has_document = bool(document_used.get('filename'))
+            
+            if has_document:
                 doc_filename = document_used.get('filename', 'Doc')
+                doc_confidence = doc_verification.get('confidence', 0)
+                issues = doc_verification.get('issues', [])
+                
                 # Shorten filename for display (show first 20 chars + extension)
                 if len(doc_filename) > 25:
                     doc_filename = doc_filename[:20] + '...' + doc_filename[-5:]
-                evidence_parts.append(f"✅ Doc: {doc_filename}")
+                
+                if doc_verified:
+                    evidence_parts.append(f"✅ Doc: {doc_filename}")
+                else:
+                    # Document uploaded but has issues
+                    confidence_pct = int(doc_confidence * 100)
+                    evidence_parts.append(f"⚠️ Doc: {doc_filename} ({confidence_pct}%)")
             else:
                 evidence_parts.append("❌ No doc")
             
@@ -1003,12 +1014,22 @@ class SoFAssessmentEngine:
             
             # Outreach questions - based on verification status
             if doc_verified:
-                # Document is verified, check what else might be needed
+                # Document is fully verified
+                outreach = "✅ Verified"
+            elif has_document:
+                # Document provided but has issues
                 issues = doc_verification.get('issues', [])
                 if issues:
-                    outreach = f"Clarify: {issues[0][:25]}"
+                    # Show the first issue
+                    first_issue = issues[0]
+                    if "distribution" in first_issue.lower() or "amount" in first_issue.lower():
+                        outreach = "Verify amount in document"
+                    elif "date" in first_issue.lower():
+                        outreach = "Verify date in document"
+                    else:
+                        outreach = f"Review: {first_issue[:20]}..."
                 else:
-                    outreach = "✅ Verified"
+                    outreach = "Review document details"
             else:
                 # Still need documents
                 if 'inheritance' in evidence['claim_source'].lower():
@@ -1031,8 +1052,15 @@ class SoFAssessmentEngine:
                 summary = "✅ VERIFIED"
             elif doc_verified and not evidence['verified']:
                 summary = "⚠️ Doc OK, no bank txn"
-            elif evidence['verified'] and not doc_verified:
+            elif evidence['verified'] and has_document and not doc_verified:
+                # Bank txn found, doc provided but not fully verified
+                summary = "⚠️ Review doc"
+            elif evidence['verified'] and not has_document:
+                # Bank txn found but no document
                 summary = "⚠️ Bank txn, need doc"
+            elif has_document and not evidence['verified']:
+                # Doc provided but no bank txn
+                summary = "⚠️ Doc, no bank txn"
             else:
                 summary = "❌ MISSING"
             
