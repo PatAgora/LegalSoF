@@ -431,10 +431,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               const hasBank = evidence.verified;
               const hasDocs = evidence.document_verified;
               const hasDocUploaded = evidence.document_verification && evidence.document_verification.verification_details?.document_used;
+              const hasDocVerificationAttempt = evidence.document_verification && (hasDocUploaded || (evidence.document_verification.issues && evidence.document_verification.issues.length > 0));
               const docIssues = evidence.document_verification?.issues || [];
               const confidence = evidence.document_verification?.confidence || 0;
               const fullyVerified = hasBank && hasDocs && confidence >= 0.999;
-              const requiresReview = hasDocUploaded && !hasDocs;
+              const requiresReview = hasDocVerificationAttempt && !hasDocs;
               
               return (
                 <li key={idx}>
@@ -657,7 +658,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         </div>
                       )}
                     </div>
-                  ) : hasBank && !hasDocUploaded ? (
+                  ) : hasBank && !hasDocVerificationAttempt ? (
                     <div>
                       <div className="font-medium">⚠️ Claim {idx + 1} ({evidence.claim_source}): Bank payment found - SOURCE DOCS REQUIRED</div>
                       {evidence.transactions.length > 0 && (
