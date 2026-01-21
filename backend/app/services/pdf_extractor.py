@@ -63,6 +63,8 @@ class PDFDocumentExtractor:
             extracted_data = self._extract_solicitor_statement_data(full_text, tables)
         elif doc_type == 'Gift letter' or 'gift' in doc_type.lower():
             extracted_data = self._extract_gift_letter_data(full_text, tables)
+        elif 'Share Purchase Agreement' in doc_type or 'business' in doc_type.lower() or 'sale' in doc_type.lower():
+            extracted_data = self._extract_business_sale_data(full_text, tables)
         else:
             extracted_data = {}
         
@@ -693,6 +695,101 @@ class PDFDocumentExtractor:
                 if len(purpose) > 10 and len(purpose) < 200:  # Reasonable length
                     data['purpose'] = purpose
                     break
+        
+        return data
+    
+    def _extract_business_sale_data(self, text: str, tables: List[List[List[str]]] = None) -> Dict[str, Any]:
+        """Extract data from business sale agreements (share purchase agreements, business sale contracts)"""
+        data = {}
+        text_lower = text.lower()
+        
+        # Extract sale amount / consideration
+        amount_patterns = [
+            r'consideration[:\s]+£?([\d,]+(?:\.\d{2})?)',
+            r'purchase price[:\s]+£?([\d,]+(?:\.\d{2})?)',
+            r'sale price[:\s]+£?([\d,]+(?:\.\d{2})?)',
+            r'total consideration[:\s]+£?([\d,]+(?:\.\d{2})?)',
+            r'for[:\s]+£?([\d,]+(?:\.\d{2})?)',
+        ]
+        for pattern in amount_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                data['sale_amount'] = self._parse_amount(match.group(1))
+                data['consideration'] = data['sale_amount']
+                break
+        
+        # Extract dates
+        date_patterns = [
+            r'completion date[:\s]+(\d{1,2}(?:st|nd|rd|th)?\s+\w+\s+\d{4})',
+            r'dated[:\s]+(\d{1,2}(?:st|nd|rd|th)?\s+\w+\s+\d{4})',
+            r'sale date[:\s]+(\d{1,2}(?:st|nd|rd|th)?\s+\w+\s+\d{4})',
+            r'(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+        ]
+        for pattern in date_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data['sale_date'] = match.group(1)
+                data['completion_date'] = data['sale_date']
+                data['payment_date'] = data['sale_date']
+                break
+        
+        # Extract buyer name
+        buyer_patterns = [
+            r'buyer[:\s]+([A-Z][A-Za-z\s&]+(?:Ltd|Limited|LLP|plc))',
+            r'\(2\)\s+([A-Z][A-Za-z\s&]+(?:Ltd|Limited|LLP|plc))',
+            r'purchaser[:\s]+([A-Z][A-Za-z\s&]+(?:Ltd|Limited|LLP|plc))',
+        ]
+        for pattern in buyer_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                buyer = match.group(1).strip()
+                if len(buyer) > 3:
+                    data['buyer_name'] = buyer
+                    break
+        
+        # Extract seller name
+        seller_patterns = [
+            r'seller[:\s]+([A-Z][A-Za-z\s&]+(?:Ltd|Limited|LLP|plc))',
+            r'\(1\)\s+([A-Z][A-Za-z\s&]+(?:Ltd|Limited|LLP|plc))',
+            r'vendor[:\s]+([A-Z][A-Za-z\s&]+(?:Ltd|Limited|LLP|plc))',
+        ]
+        for pattern in seller_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                seller = match.group(1).strip()
+                if len(seller) > 3:
+                    data['seller_name'] = seller
+                    data['business_name'] = seller
+                    break
+        
+        # Extract shares sold
+        shares_patterns = [
+            r'([\d]+%\s+of\s+(?:the\s+)?issued\s+share\s+capital)',
+            r'(all\s+of\s+the\s+(?:issued\s+)?shares)',
+            r'([\d,]+\s+(?:ordinary\s+)?shares)',
+        ]
+        for pattern in shares_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                data['shares_sold'] = match.group(1).strip()
+                break
+        
+        # Extract solicitor
+        solicitor_patterns = [
+            r'solicitors?[:\s]+([A-Z][A-Za-z\s&]+(?:LLP|Solicitors))',
+            r'represented by[:\s]+([A-Z][A-Za-z\s&]+(?:LLP|Solicitors))',
+        ]
+        for pattern in solicitor_patterns:
+            match = re.search(pattern, text)
+            if match:
+                solicitor = match.group(1).strip()
+                if len(solicitor) > 5:
+                    data['solicitor_firm'] = solicitor
+                    break
+        
+        # Net proceeds typically same as consideration for business sales
+        if 'sale_amount' in data:
+            data['net_proceeds'] = data['sale_amount']
         
         return data
     

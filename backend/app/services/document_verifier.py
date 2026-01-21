@@ -97,6 +97,8 @@ class DocumentVerifier:
         # Route to appropriate verification method
         if 'inheritance' in source_type:
             return self._verify_inheritance_claim(result, claim, supporting_docs, bank_statements)
+        elif 'business' in source_type:
+            return self._verify_business_claim(result, claim, supporting_docs, bank_statements)
         elif 'property' in source_type or 'sale' in source_type:
             return self._verify_property_claim(result, claim, supporting_docs, bank_statements)
         elif 'loan' in source_type:
@@ -493,6 +495,150 @@ class DocumentVerifier:
         
         # Additional checks can be added here
         result['issues'] = issues
+        return result
+    
+    def _verify_business_claim(
+        self,
+        result: Dict[str, Any],
+        claim: Dict[str, Any],
+        supporting_docs: List[Dict[str, Any]],
+        bank_statements: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Verify business sale claim with share purchase agreement or business sale documentation"""
+        
+        expected_amount = claim['expected_amount']
+        expected_date = claim.get('expected_date_range', {}).get('start', '')
+        
+        checks_passed = []
+        issues = []
+        differences = []
+        
+        # Find business sale document (share purchase agreement, business sale agreement, etc.)
+        business_doc = None
+        for doc in supporting_docs:
+            filename = doc.get('filename', '').lower()
+            doc_type = doc.get('document_type', '').lower()
+            if any(term in filename or term in doc_type for term in ['share', 'purchase', 'business', 'sale', 'agreement']):
+                business_doc = doc
+                break
+        
+        if not business_doc:
+            issues.append("No business sale documentation provided")
+            result['missing_documents'].append("Share purchase agreement or business sale agreement")
+            result['verified'] = False
+            result['issues'] = issues
+            differences.append({
+                'field': 'business_sale_documentation',
+                'severity': 'missing',
+                'issue': 'No business sale documentation provided',
+                'expected': 'Share purchase agreement or business sale agreement',
+                'found': None
+            })
+            result['differences'] = differences
+            return result
+        
+        # AUDIT TRAIL: Record which document was used for verification
+        result['verification_details']['document_used'] = {
+            'filename': business_doc.get('filename', 'Unknown'),
+            'document_type': business_doc.get('document_type', 'Business Sale Agreement'),
+            'uploaded_at': business_doc.get('uploaded_at'),
+        }
+        
+        # Extract data from document
+        extracted_data = business_doc.get('extracted_data', {})
+        
+        if not extracted_data:
+            issues.append("Business sale document provided but no data could be extracted")
+            differences.append({
+                'field': 'document_content',
+                'severity': 'error',
+                'issue': 'Unable to extract data from the business sale document',
+                'expected': 'Readable document with sale details, amount, and date',
+                'found': 'Unreadable or empty document'
+            })
+        
+        # Verify sale amount
+        doc_amount = extracted_data.get('sale_amount') or extracted_data.get('consideration') or extracted_data.get('net_proceeds')
+        if doc_amount:
+            # Allow 1% tolerance
+            amount_match = abs(doc_amount - expected_amount) / expected_amount <= 0.01
+            if amount_match:
+                checks_passed.append(f"Sale amount matches: £{doc_amount:,.2f}")
+            else:
+                differences.append({
+                    'field': 'sale_amount',
+                    'severity': 'error',
+                    'issue': 'Sale amount does not match claimed amount',
+                    'expected': f'£{expected_amount:,.2f}',
+                    'found': f'£{doc_amount:,.2f}' if doc_amount else None
+                })
+        else:
+            differences.append({
+                'field': 'sale_amount',
+                'severity': 'missing',
+                'issue': 'No sale amount found in business sale document',
+                'expected': f'£{expected_amount:,.2f}',
+                'found': None
+            })
+        
+        # Verify sale date
+        doc_date = extracted_data.get('sale_date') or extracted_data.get('completion_date') or extracted_data.get('payment_date')
+        if doc_date:
+            checks_passed.append(f"Sale date documented: {doc_date}")
+        else:
+            differences.append({
+                'field': 'sale_date',
+                'severity': 'missing',
+                'issue': 'No sale date found in business sale document',
+                'expected': expected_date or 'Sale/completion date',
+                'found': None
+            })
+        
+        # Verify buyer name
+        buyer_name = extracted_data.get('buyer_name')
+        if buyer_name:
+            checks_passed.append(f"Buyer identified: {buyer_name}")
+        else:
+            differences.append({
+                'field': 'buyer_name',
+                'severity': 'warning',
+                'issue': 'No buyer name found in business sale document',
+                'expected': 'Buyer/purchaser name',
+                'found': None
+            })
+        
+        # Verify seller name
+        seller_name = extracted_data.get('seller_name') or extracted_data.get('business_name')
+        if seller_name:
+            checks_passed.append(f"Seller identified: {seller_name}")
+        else:
+            differences.append({
+                'field': 'seller_name',
+                'severity': 'warning',
+                'issue': 'No seller name found in business sale document',
+                'expected': 'Seller/business name',
+                'found': None
+            })
+        
+        # Verify solicitor details
+        solicitor = extracted_data.get('solicitor_firm')
+        if solicitor:
+            checks_passed.append(f"Solicitor: {solicitor}")
+        
+        # Calculate confidence based on checks passed
+        total_checks = 4  # amount, date, buyer, seller
+        confidence = len([c for c in checks_passed if any(key in c for key in ['amount', 'date', 'Buyer', 'Seller'])]) / total_checks
+        
+        # Set verification status
+        result['verified'] = confidence >= 0.75  # Need at least 3 out of 4 key fields
+        result['confidence'] = confidence
+        result['checks_passed'] = checks_passed
+        result['issues'] = issues
+        result['differences'] = differences
+        
+        if confidence < 0.999:
+            result['requires_review'] = True
+        
         return result
     
     def _verify_gift_claim(
