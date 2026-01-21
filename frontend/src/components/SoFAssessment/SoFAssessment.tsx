@@ -444,25 +444,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               </div>
                               {evidence.document_verification.verification_details && (
                                 <div className="text-xs text-gray-700 space-y-0.5">
-                                  {evidence.document_verification.verification_details.document_used && (
-                                    <>
-                                      <div>📄 Document: {evidence.document_verification.verification_details.document_used.filename}</div>
-                                      <div>📋 Type: {evidence.document_verification.verification_details.document_used.document_type}</div>
-                                      {evidence.document_verification.verification_details.document_used.probate_reference && (
-                                        <div>🔖 Reference: {evidence.document_verification.verification_details.document_used.probate_reference}</div>
-                                      )}
-                                      {evidence.document_verification.verification_details.document_used.title_number && (
-                                        <div>🔖 Title: {evidence.document_verification.verification_details.document_used.title_number}</div>
-                                      )}
-                                      {evidence.document_verification.verification_details.document_used.solicitor_firm && (
-                                        <div>⚖️ Solicitor: {evidence.document_verification.verification_details.document_used.solicitor_firm}</div>
-                                      )}
-                                    </>
-                                  )}
-                                  {evidence.document_verification.verification_details.checks_passed && 
-                                   evidence.document_verification.verification_details.checks_passed.slice(0, 5).map((check: string, cidx: number) => (
-                                    <div key={cidx} className="text-xs">✓ {check}</div>
-                                  ))}
                                   {evidence.document_verification.verification_details.comparison && (
                                     <div className="mt-1 pt-1 border-t border-gray-300">
                                       <div className="font-semibold">📊 Evidence Comparison:</div>
@@ -629,29 +610,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                   </p>
                                 </div>
                               )}
-                                                            {evidence.document_verification.verification_details && (
-                                <div className="text-xs text-gray-700 space-y-0.5">
-                                  {evidence.document_verification.verification_details.document_used && (
-                                    <>
-                                      <div>📄 Document: {evidence.document_verification.verification_details.document_used.filename}</div>
-                                      <div>📋 Type: {evidence.document_verification.verification_details.document_used.document_type}</div>
-                                      {evidence.document_verification.verification_details.document_used.probate_reference && (
-                                        <div>🔖 Reference: {evidence.document_verification.verification_details.document_used.probate_reference}</div>
-                                      )}
-                                      {evidence.document_verification.verification_details.document_used.title_number && (
-                                        <div>🔖 Title: {evidence.document_verification.verification_details.document_used.title_number}</div>
-                                      )}
-                                      {evidence.document_verification.verification_details.document_used.solicitor_firm && (
-                                        <div>⚖️ Solicitor: {evidence.document_verification.verification_details.document_used.solicitor_firm}</div>
-                                      )}
-                                    </>
-                                  )}
-                                  {evidence.document_verification.verification_details.checks_passed && 
-                                   evidence.document_verification.verification_details.checks_passed.slice(0, 5).map((check: string, cidx: number) => (
-                                    <div key={cidx} className="text-xs">✓ {check}</div>
-                                  ))}
-                                </div>
-                              )}
+
                             </div>
                           )}
                         </div>
