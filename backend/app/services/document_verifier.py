@@ -106,7 +106,15 @@ class DocumentVerifier:
         elif 'savings' in source_type:
             return self._verify_savings_claim(result, claim, supporting_docs, bank_statements)
         else:
-            result['issues'].append(f"Unknown source type: {source_type}")
+            result['issues'].append(f"Unsupported source type: '{source_type}' - manual verification required")
+            result['differences'] = [{
+                'field': 'source_type',
+                'severity': 'missing',
+                'issue': f"Source type '{source_type}' is not currently supported for automatic verification",
+                'expected': 'Supported types: inheritance, property sale, loan, gift, savings',
+                'found': source_type
+            }]
+            result['missing_documents'].append(f"Documentation for {source_type} claim")
             return result
     
     def _verify_inheritance_claim(
@@ -696,15 +704,15 @@ class DocumentVerifier:
                 break
         
         if not savings_doc:
-            issues.append("No bank statements or payslips provided to evidence savings")
+            issues.append("No document provided for savings account")
             result['missing_documents'].append("Historical bank statements or payslips showing savings accumulation")
             result['verified'] = False
             result['issues'] = issues
             result['differences'] = [{
-                'field': 'savings_evidence',
+                'field': 'savings_documentation',
                 'severity': 'missing',
-                'issue': 'No documentation provided to prove savings accumulation',
-                'expected': 'Bank statements or payslips showing savings over time',
+                'issue': 'No document provided for savings account - historical bank statements or payslips required to evidence savings accumulation',
+                'expected': f'Bank statements showing £{expected_amount:,.2f} savings accumulated over time',
                 'found': None
             }]
             return result
