@@ -280,6 +280,14 @@ async def run_sof_assessment(
     sof_explanation = storage['client_info']['sof_explanation']
     bank_statements = storage['bank_statements']
     
+    # Check if client_info JSON has explicit claims array
+    # If so, convert to structured format for the assessment engine
+    if 'claims' in storage['client_info'] and storage['client_info']['claims']:
+        # Convert claims array to structured format
+        sof_explanation = {
+            'sources': storage['client_info']['claims']
+        }
+    
     # IMPORTANT: Build fresh known_documents list from current uploads only
     # Do NOT accumulate from previous assessments
     known_documents = []
