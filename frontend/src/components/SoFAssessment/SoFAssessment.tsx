@@ -1022,10 +1022,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     return (
                       <tr key={idx} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
                             severity === 'CRITICAL' ? 'bg-red-600 text-white' : 'bg-[#D4A574] text-white'
                           }`}>
-                            {severity === 'CRITICAL' ? '🔴 CRITICAL' : '🟠 HIGH'}
+                            <span>{severity === 'CRITICAL' ? '🔴' : '🟠'}</span>
+                            <span>{severity}</span>
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">
@@ -1079,15 +1080,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </div>
         )}
         
-        {/* Summary */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="text-sm font-bold text-gray-700 mb-2">Summary</h4>
-          <div className="text-sm text-gray-700 space-y-2">
-            {content.split('TRANSACTION REVIEW SUMMARY:')[1]?.split('ADDITIONAL RED FLAGS')[0]?.split('\n').filter(line => line.trim()).map((line, idx) => (
-              <p key={idx}>{line.trim()}</p>
-            ))}
-          </div>
-        </div>
+
       </div>
     );
   };
