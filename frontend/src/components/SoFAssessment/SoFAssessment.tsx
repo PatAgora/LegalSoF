@@ -995,7 +995,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         )}
         
         {/* Alert Table or No Alerts Message */}
-        {result.transaction_review_summary && result.transaction_review_summary.key_concerns.length > 0 ? (
+        {result.transaction_review_summary && result.transaction_review_summary.alerts && result.transaction_review_summary.alerts.length > 0 ? (
           <div className="px-6 py-4">
             <h4 className="text-sm font-bold text-gray-700 mb-3">Alert Analysis</h4>
             <div className="overflow-x-auto">
@@ -1004,15 +1004,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Severity</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Identified</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Outreach Questions</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Transaction Details</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {result.transaction_review_summary.key_concerns.slice(0, 5).map((concern, idx) => {
-                    const isSanctioned = concern.toLowerCase().includes('sanctioned') || concern.toLowerCase().includes('prohibited');
-                    const isCash = concern.toLowerCase().includes('cash');
-                    const severity = isSanctioned ? 'CRITICAL' : 'HIGH';
+                  {result.transaction_review_summary.alerts.slice(0, 5).map((alert, idx) => {
+                    const severity = alert.severity || 'HIGH';
                     
                     return (
                       <tr key={idx} className="hover:bg-gray-50">
@@ -1023,11 +1021,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             {severity === 'CRITICAL' ? '🔴 CRITICAL' : '🟠 HIGH'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{concern}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {alert.reasons && alert.reasons.length > 0 ? alert.reasons[0] : 'AML concern'}
+                          <div className="text-xs text-gray-500 mt-1">
+                            {alert.description || 'No description'}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-800">
-                          {isSanctioned ? 'Explain all sanctioned transactions' :
-                           isCash ? 'Provide cash source documentation' :
-                           'Explain business purpose and parties'}
+                          <div>Amount: £{alert.amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
+                          <div className="text-xs text-gray-500">Date: {alert.date || 'Unknown'}</div>
+                          {alert.counterparty && <div className="text-xs text-gray-500">Counterparty: {alert.counterparty}</div>}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${

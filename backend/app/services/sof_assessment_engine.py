@@ -161,7 +161,7 @@ class SoFAssessmentEngine:
             "red_flags": red_flags,
             "transaction_review_summary": {
                 **transaction_review_data.get('summary', {}),
-                "alerts": transaction_review_data.get('alerts', [])  # Include full alert objects
+                "alert_details": transaction_review_data.get('alerts', [])  # Include full alert objects
             },
             "outcome": outcome,
             "next_actions": next_actions,
