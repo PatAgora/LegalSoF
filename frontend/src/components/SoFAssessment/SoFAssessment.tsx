@@ -1131,7 +1131,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             📤 Upload Documents
           </button>
           <button
-            onClick={() => activeStep === 'results' && setActiveStep('results')}
+            onClick={() => setActiveStep('results')}
             disabled={!result}
             className={`py-4 px-1 border-b-2 font-medium text-sm ${
               activeStep === 'results'
