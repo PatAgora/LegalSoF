@@ -1498,6 +1498,17 @@ class SoFAssessmentEngine:
                     f"of £{claim['expected_amount']:,.2f}. Please provide supporting documentation."
                 )
             
+            # Check if this specific claim is fully verified
+            claim_fully_verified = (
+                evidence.get('verified', False) and 
+                evidence.get('document_verified', False) and
+                evidence.get('document_verification', {}).get('confidence', 0) >= 0.99
+            )
+            
+            # Skip document requests for fully verified claims (100% confidence)
+            if claim_fully_verified:
+                continue
+            
             # Source-specific documents required for ALL claims to prove legitimacy
             if 'inheritance' in source_lower:
                 if "Probate grant" not in ' '.join(known_documents):
@@ -1538,14 +1549,23 @@ class SoFAssessmentEngine:
                 documents.append("Source of wealth statement covering last 5 years")
         
         # 5. Standard documents if not already provided
-        standard_docs = {
-            "Bank statements": "Complete bank statements covering receipt and payment periods",
-            "ID verification": "Certified copies of photo ID and proof of address"
-        }
+        # BUT: Skip if all evidence is fully verified (100% confidence)
+        all_fully_verified = all(
+            match.get('verified', False) and 
+            match.get('document_verified', False) and
+            match.get('document_verification', {}).get('confidence', 0) >= 0.99
+            for match in evidence_matches
+        ) if evidence_matches else False
         
-        for doc_type, doc_desc in standard_docs.items():
-            if doc_type.lower() not in [d.lower() for d in known_documents]:
-                documents.append(doc_desc)
+        if not all_fully_verified:
+            standard_docs = {
+                "Bank statements": "Complete bank statements covering receipt and payment periods",
+                "ID verification": "Certified copies of photo ID and proof of address"
+            }
+            
+            for doc_type, doc_desc in standard_docs.items():
+                if doc_type.lower() not in [d.lower() for d in known_documents]:
+                    documents.append(doc_desc)
         
         # Deduplicate
         questions = list(dict.fromkeys(questions))
