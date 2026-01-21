@@ -903,9 +903,34 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             }
                           </span>
                         ) : requiresReview ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                            ⚠️ REQUIRES REVIEW ({Math.round(confidence * 100)}%)
-                          </span>
+                          <div className="text-sm space-y-1">
+                            <div className="text-amber-800 font-semibold mb-1">
+                              ⚠️ Review Required ({Math.round(confidence * 100)}% confidence)
+                            </div>
+                            {evidence?.document_verification?.differences && evidence.document_verification.differences.length > 0 ? (
+                              <ul className="list-disc list-inside text-xs text-gray-700 space-y-0.5">
+                                {evidence.document_verification.differences.slice(0, 5).map((diff: any, diffIdx: number) => (
+                                  <li key={diffIdx}>
+                                    <span className="font-medium">{diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span> {diff.issue}
+                                  </li>
+                                ))}
+                                {evidence.document_verification.differences.length > 5 && (
+                                  <li className="text-gray-500">+ {evidence.document_verification.differences.length - 5} more issues</li>
+                                )}
+                              </ul>
+                            ) : evidence?.issues && evidence.issues.length > 0 ? (
+                              <ul className="list-disc list-inside text-xs text-gray-700 space-y-0.5">
+                                {evidence.issues.slice(0, 5).map((issue: string, issueIdx: number) => (
+                                  <li key={issueIdx}>{issue}</li>
+                                ))}
+                                {evidence.issues.length > 5 && (
+                                  <li className="text-gray-500">+ {evidence.issues.length - 5} more issues</li>
+                                )}
+                              </ul>
+                            ) : (
+                              <div className="text-xs text-gray-600">Document verification incomplete</div>
+                            )}
+                          </div>
                         ) : verified ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#D4C4B0] text-gray-900">
                             ⚠️ Payment found, docs req'd
