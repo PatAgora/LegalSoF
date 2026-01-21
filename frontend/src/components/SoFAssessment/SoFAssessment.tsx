@@ -1012,7 +1012,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   {result.transaction_review_summary.key_concerns.slice(0, 5).map((concern, idx) => {
                     const isSanctioned = concern.toLowerCase().includes('sanctioned') || concern.toLowerCase().includes('prohibited');
                     const isCash = concern.toLowerCase().includes('cash');
-                    const severity = isSanctioned || isCash ? 'CRITICAL' : 'HIGH';
+                    const severity = isSanctioned ? 'CRITICAL' : 'HIGH';
                     
                     return (
                       <tr key={idx} className="hover:bg-gray-50">

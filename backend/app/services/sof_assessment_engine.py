@@ -644,6 +644,7 @@ class SoFAssessmentEngine:
                     high_risk_countries = ['AF', 'MM', 'YE', 'LY']  # Afghanistan, Myanmar, Yemen, Libya
                     
                     key_concerns = []
+                    alert_objects = []  # Create actual alert objects for questions
                     sanctions_count = 0
                     cash_count = 0
                     high_risk_count = 0
@@ -652,18 +653,53 @@ class SoFAssessmentEngine:
                         country = stmt.get('country_iso2', '')
                         channel = stmt.get('channel', '')
                         amount = stmt.get('amount', 0)
+                        date = stmt.get('date', '')
+                        description = stmt.get('description', 'Unknown transaction')
+                        counterparty = stmt.get('counterparty', 'Unknown')
                         
                         # Check for sanctioned countries
                         if country in sanctioned_countries:
                             sanctions_count += 1
+                            country_name = {
+                                'IR': 'Iran', 'KP': 'North Korea', 
+                                'SY': 'Syria', 'CU': 'Cuba'
+                            }.get(country, country)
+                            alert_objects.append({
+                                "severity": "CRITICAL",
+                                "amount": amount,
+                                "date": date,
+                                "reasons": [f"Transaction to sanctioned jurisdiction: {country_name}"],
+                                "description": description,
+                                "counterparty": counterparty
+                            })
                         
                         # Check for high-risk countries
                         elif country in high_risk_countries:
                             high_risk_count += 1
+                            country_name = {
+                                'AF': 'Afghanistan', 'MM': 'Myanmar',
+                                'YE': 'Yemen', 'LY': 'Libya'
+                            }.get(country, country)
+                            alert_objects.append({
+                                "severity": "HIGH",
+                                "amount": amount,
+                                "date": date,
+                                "reasons": [f"Transaction to high-risk jurisdiction: {country_name}"],
+                                "description": description,
+                                "counterparty": counterparty
+                            })
                         
                         # Check for large cash transactions
                         if channel == 'cash' and amount >= 10000:
                             cash_count += 1
+                            alert_objects.append({
+                                "severity": "HIGH",
+                                "amount": amount,
+                                "date": date,
+                                "reasons": [f"Large cash transaction: £{amount:,.2f}"],
+                                "description": description,
+                                "counterparty": counterparty
+                            })
                     
                     if sanctions_count > 0:
                         key_concerns.append(f"{sanctions_count} transaction(s) involving prohibited/sanctioned jurisdictions")
@@ -683,7 +719,7 @@ class SoFAssessmentEngine:
                                 "medium_alerts": 0,
                                 "key_concerns": key_concerns
                             },
-                            "alerts": []
+                            "alerts": alert_objects  # Now includes actual alert objects for questions
                         }
             
             # No alerts and no bank statement risks
@@ -1359,25 +1395,47 @@ class SoFAssessmentEngine:
         documents = []
         
         # 1. Transaction Review issues - HIGHEST PRIORITY
+        tr_summary = transaction_review_data.get('summary', {})
+        critical_count = tr_summary.get('critical_alerts', 0)
+        high_count = tr_summary.get('high_alerts', 0)
+        key_concerns = tr_summary.get('key_concerns', [])
+        
+        # Generate questions based on key concerns
+        if critical_count > 0:
+            for concern in key_concerns:
+                if 'sanctioned' in concern.lower() or 'prohibited' in concern.lower():
+                    questions.append(
+                        f"URGENT: {concern}. Provide immediate explanation for all transactions "
+                        f"involving sanctioned/prohibited jurisdictions including Iran, North Korea, Syria, or Cuba."
+                    )
+                    documents.append("Written explanation and supporting evidence for all transactions to sanctioned countries")
+        
+        if high_count > 0:
+            for concern in key_concerns:
+                if 'cash' in concern.lower():
+                    questions.append(
+                        f"URGENT: {concern}. Explain the source and purpose of all large cash transactions."
+                    )
+                    documents.append("Source documentation for all cash transactions over £10,000")
+                elif 'high-risk' in concern.lower():
+                    questions.append(
+                        f"Transaction Review identified: {concern}. Provide explanation and supporting documentation."
+                    )
+        
+        # Fallback: if alerts exist in database, use them (legacy support)
         tr_alerts = transaction_review_data.get('alerts', [])
-        critical_tr = [a for a in tr_alerts if a['severity'] == 'CRITICAL']
-        high_tr = [a for a in tr_alerts if a['severity'] == 'HIGH']
-        
-        if critical_tr:
-            for alert in critical_tr[:3]:  # Top 3 critical
-                txn = alert['transaction']
-                reason = alert['reasons'][0] if alert['reasons'] else "AML concern"
-                questions.append(
-                    f"URGENT: Transaction Review flagged £{txn['amount']:,.2f} transaction "
-                    f"on {txn['date']} as CRITICAL - {reason}. Provide immediate explanation."
-                )
-            documents.append("Written explanation and supporting evidence for all CRITICAL flagged transactions")
-        
-        if high_tr:
-            questions.append(
-                f"{len(high_tr)} HIGH risk transaction(s) identified by AML monitoring. "
-                f"Please review Transaction Review tab and provide explanations."
-            )
+        if tr_alerts:
+            critical_tr = [a for a in tr_alerts if a['severity'] == 'CRITICAL']
+            high_tr = [a for a in tr_alerts if a['severity'] == 'HIGH']
+            
+            if critical_tr and not any('sanctioned' in q.lower() for q in questions):
+                for alert in critical_tr[:3]:
+                    txn = alert['transaction']
+                    reason = alert['reasons'][0] if alert['reasons'] else "AML concern"
+                    questions.append(
+                        f"URGENT: Transaction of £{txn['amount']:,.2f} on {txn['date']} "
+                        f"flagged as CRITICAL - {reason}. Provide immediate explanation."
+                    )
         
         # 2. Document requirements for ALL claims (verified and unverified)
         # Bank payments alone are insufficient - we need source documents
