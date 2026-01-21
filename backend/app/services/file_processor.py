@@ -401,7 +401,11 @@ class FileProcessor:
         text_lower = text.lower()
         
         # Check in order of specificity (most specific first)
-        # Property completion - check FIRST before probate
+        # Share Purchase Agreement - check FIRST (very specific)
+        if any(kw in text_lower for kw in ['share purchase agreement', 'spa', 'business sale', 'acquisition agreement', 'share transfer', 'sale of shares']):
+            return 'Share Purchase Agreement'
+        
+        # Property completion - check AFTER share purchase (can have similar keywords)
         completion_keywords = ['completion statement', 'completion date', 'contract price', 'net proceeds', 'property sale proceeds', 'vendor', 'purchaser', 'title number', 'land registry', 'completion accounts', 'property purchase']
         if any(kw in text_lower for kw in completion_keywords):
             return 'completion statement'
@@ -414,9 +418,6 @@ class FileProcessor:
         # Other document types
         if any(kw in text_lower for kw in ['loan agreement', 'loan offer', 'facility letter', 'lender', 'borrower', 'credit agreement']):
             return 'Loan'
-        
-        if any(kw in text_lower for kw in ['share purchase agreement', 'spa', 'business sale', 'acquisition agreement', 'share transfer']):
-            return 'Share purchase'
         
         if any(kw in text_lower for kw in ['client account statement', 'solicitor client account', 'statement of account']):
             return "Solicitor's statement"
