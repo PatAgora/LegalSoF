@@ -1409,41 +1409,16 @@ class SoFAssessmentEngine:
         documents = []
         
         # 1. Transaction Review issues - HIGHEST PRIORITY
-        tr_summary = transaction_review_data.get('summary', {})
-        critical_count = tr_summary.get('critical_alerts', 0)
-        high_count = tr_summary.get('high_alerts', 0)
-        key_concerns = tr_summary.get('key_concerns', [])
-        
-        # Generate questions based on key concerns
-        if critical_count > 0:
-            for concern in key_concerns:
-                if 'sanctioned' in concern.lower() or 'prohibited' in concern.lower():
-                    questions.append(
-                        f"URGENT: {concern}. Provide immediate explanation for all transactions "
-                        f"involving sanctioned/prohibited jurisdictions including Iran, North Korea, Syria, or Cuba."
-                    )
-                    documents.append("Written explanation and supporting evidence for all transactions to sanctioned countries")
-        
-        if high_count > 0:
-            for concern in key_concerns:
-                if 'cash' in concern.lower():
-                    questions.append(
-                        f"URGENT: {concern}. Explain the source and purpose of all large cash transactions."
-                    )
-                    documents.append("Source documentation for all cash transactions over £10,000")
-                elif 'high-risk' in concern.lower():
-                    questions.append(
-                        f"Transaction Review identified: {concern}. Provide explanation and supporting documentation."
-                    )
-        
-        # Fallback: if alerts exist in database, use them (legacy support)
+        # Use individual alert objects to generate specific, actionable questions
         tr_alerts = transaction_review_data.get('alerts', [])
+        
         if tr_alerts:
             critical_tr = [a for a in tr_alerts if a['severity'] == 'CRITICAL']
             high_tr = [a for a in tr_alerts if a['severity'] == 'HIGH']
             
-            if critical_tr and not any('sanctioned' in q.lower() for q in questions):
-                for alert in critical_tr[:3]:
+            # Generate specific questions for each CRITICAL alert
+            if critical_tr:
+                for alert in critical_tr[:3]:  # Top 3 critical alerts
                     # Handle both new format (flat fields) and old format (nested transaction object)
                     if 'transaction' in alert:
                         # Old format from database
@@ -1460,6 +1435,33 @@ class SoFAssessmentEngine:
                         f"URGENT: Transaction of £{amount:,.2f} on {date} "
                         f"flagged as CRITICAL - {reason}. Provide immediate explanation."
                     )
+                
+                # Add document request for all critical alerts
+                if any('sanction' in str(a.get('reasons', [])).lower() or 
+                       'prohibited' in str(a.get('reasons', [])).lower() 
+                       for a in critical_tr):
+                    documents.append("Written explanation and supporting evidence for all transactions to sanctioned/prohibited countries")
+            
+            # Generate specific questions for each HIGH alert
+            if high_tr:
+                for alert in high_tr[:5]:  # Top 5 high alerts
+                    # Handle both formats
+                    if 'transaction' in alert:
+                        amount = alert['transaction']['amount']
+                        date = alert['transaction']['date']
+                    else:
+                        amount = alert['amount']
+                        date = alert['date']
+                    
+                    reason = alert['reasons'][0] if alert['reasons'] else "High-risk transaction"
+                    questions.append(
+                        f"HIGH RISK: Transaction of £{amount:,.2f} on {date} "
+                        f"requires explanation - {reason}."
+                    )
+                
+                # Add document request for cash transactions
+                if any('cash' in str(a.get('reasons', [])).lower() for a in high_tr):
+                    documents.append("Source documentation for all cash transactions over £10,000")
         
         # 2. Document requirements for ALL claims (verified and unverified)
         # Bank payments alone are insufficient - we need source documents
