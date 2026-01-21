@@ -61,6 +61,8 @@ class PDFDocumentExtractor:
             extracted_data = self._extract_loan_data(full_text, tables)
         elif doc_type == "Solicitor's statement":
             extracted_data = self._extract_solicitor_statement_data(full_text, tables)
+        elif doc_type == 'Gift letter' or 'gift' in doc_type.lower():
+            extracted_data = self._extract_gift_letter_data(full_text, tables)
         else:
             extracted_data = {}
         
@@ -589,6 +591,108 @@ class PDFDocumentExtractor:
         period_match = re.search(r'Period[:\s]+(.+?)(?:\n|$)', text, re.IGNORECASE)
         if period_match:
             data['statement_period'] = period_match.group(1).strip()
+        
+        return data
+    
+    def _extract_gift_letter_data(self, text: str, tables: List[List[List[str]]] = None) -> Dict[str, Any]:
+        """Extract data from gift letter"""
+        data = {}
+        
+        # Donor name - look for common patterns
+        donor_patterns = [
+            r'(?:I|We),?\s+([A-Z][a-z]+(?:\s+(?:and\s+)?[A-Z][a-z]+)*)',  # "I, John Smith" or "We, John and Mary Smith"
+            r'donor[s]?[:\s]+([A-Z][a-z\s]+?)(?:\n|,)',  # "Donor: John Smith"
+            r'from[:\s]+([A-Z][a-z\s]+?)(?:\n|,)',  # "from: John Smith"
+            r'(?:my|our)\s+name[s]?\s+(?:is|are)[:\s]+([A-Z][a-z\s]+?)(?:\n|\.)',  # "My name is John Smith"
+        ]
+        for pattern in donor_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                donor = match.group(1).strip()
+                # Clean up common suffixes
+                donor = re.sub(r'\s+(hereby|confirm|declare|wish).*$', '', donor, flags=re.IGNORECASE)
+                data['donor_name'] = donor
+                break
+        
+        # Gift amount - look for monetary values
+        amount_patterns = [
+            r'(?:sum|amount|gift)\s+of\s+[£$]?\s*([\d,]+(?:\.\d{2})?)',  # "sum of £100,000"
+            r'[£$]\s*([\d,]+(?:\.\d{2})?)',  # "£100,000"
+            r'([\d,]+(?:\.\d{2})?)\s+(?:pounds|dollars|GBP|USD)',  # "100,000 pounds"
+        ]
+        for pattern in amount_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                amount_str = match.group(1).replace(',', '')
+                try:
+                    data['gift_amount'] = float(amount_str)
+                    break
+                except:
+                    pass
+        
+        # Date - look for date patterns
+        date_patterns = [
+            r'Date[:\s]+(\d{1,2}(?:st|nd|rd|th)?\s+[A-Z][a-z]+\s+\d{4})',  # "Date: 1st October 2023"
+            r'dated?\s+(\d{1,2}(?:st|nd|rd|th)?\s+[A-Z][a-z]+\s+\d{4})',  # "dated 1st January 2024"
+            r'(\d{1,2}[/-]\d{1,2}[/-]\d{4})',  # "01/01/2024" or "01-01-2024"
+            r'([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})',  # "January 1st, 2024"
+        ]
+        for pattern in date_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data['gift_date'] = match.group(1).strip()
+                break
+        
+        # Relationship - look for relationship statements
+        relationship_patterns = [
+            r'(?:my|our)\s+(son|daughter|child|parent|mother|father|sibling|brother|sister|grandchild|grandson|granddaughter|friend|relative)',
+            r'relationship[:\s]+([a-z\s]+?)(?:\n|\.)',
+        ]
+        for pattern in relationship_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                data['relationship'] = match.group(1).strip().title()
+                break
+        
+        # Recipient name
+        recipient_patterns = [
+            r'(?:to|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+            r'recipient[:\s]+([A-Z][a-z\s]+?)(?:\n|,)',
+        ]
+        for pattern in recipient_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                recipient = match.group(1).strip()
+                # Avoid capturing common words
+                if recipient.lower() not in ['the', 'my', 'their', 'help', 'assist']:
+                    data['recipient_name'] = recipient
+                    break
+        
+        # No repayment required - check for key phrases
+        no_repayment_phrases = [
+            r'no\s+(?:repayment|obligation|strings|conditions)',
+            r'not\s+(?:a\s+)?loan',
+            r'do(?:es)?\s+not\s+require\s+repayment',
+            r'(?:gift|given)\s+(?:freely|unconditionally)',
+            r'without\s+(?:expectation|obligation)\s+of\s+repayment',
+        ]
+        for phrase in no_repayment_phrases:
+            if re.search(phrase, text, re.IGNORECASE):
+                data['no_repayment_required'] = True
+                break
+        
+        # Purpose of gift
+        purpose_patterns = [
+            r'purpose[:\s]+([a-z\s]+?)(?:\n|\.)',
+            r'(?:to|for)\s+(?:help|assist|enable)(?:\s+with)?\s+([a-z\s]+?)(?:\n|\.)',
+        ]
+        for pattern in purpose_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                purpose = match.group(1).strip()
+                if len(purpose) > 10 and len(purpose) < 200:  # Reasonable length
+                    data['purpose'] = purpose
+                    break
         
         return data
     
