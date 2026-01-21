@@ -92,6 +92,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   });
   
   const [manualSofExplanation, setManualSofExplanation] = useState('');
+  
+  // Alert management state
+  const [alertRationales, setAlertRationales] = useState<{ [key: number]: string }>({});
+  const [alertSatisfied, setAlertSatisfied] = useState<{ [key: number]: boolean }>({});
 
   useEffect(() => {
     fetchStatus();
@@ -670,6 +674,21 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </ul>
               </>
             )}
+            {Object.keys(alertSatisfied).some(key => alertSatisfied[parseInt(key)]) && (
+              <>
+                <p className="text-sm font-medium mt-2 mb-1 text-green-700">✓ Satisfied Alerts:</p>
+                <ul className="ml-4 space-y-1 text-sm mb-2">
+                  {result.transaction_review_summary.alerts?.map((alert, idx) => (
+                    alertSatisfied[idx] && (
+                      <li key={idx} className="text-green-700">
+                        • Alert {idx + 1}: {alert.reasons?.[0] || 'AML concern'} 
+                        {alertRationales[idx] && <span className="text-gray-600 ml-2">({alertRationales[idx]})</span>}
+                      </li>
+                    )
+                  ))}
+                </ul>
+              </>
+            )}
             <p className="text-sm italic">Full alert details available in Transaction Review tab. These findings materially impact the SoF assessment.</p>
           </div>
         )}
@@ -994,6 +1013,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Severity</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Identified</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Transaction Details</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Alert Rationale</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Alert Satisfied</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
                   </tr>
                 </thead>
@@ -1020,6 +1041,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           <div>Amount: £{alert.amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
                           <div className="text-xs text-gray-500">Date: {alert.date || 'Unknown'}</div>
                           {alert.counterparty && <div className="text-xs text-gray-500">Counterparty: {alert.counterparty}</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <textarea
+                            value={alertRationales[idx] || ''}
+                            onChange={(e) => setAlertRationales({...alertRationales, [idx]: e.target.value})}
+                            placeholder="Enter rationale..."
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={alertSatisfied[idx] || false}
+                            onChange={(e) => setAlertSatisfied({...alertSatisfied, [idx]: e.target.checked})}
+                            className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
