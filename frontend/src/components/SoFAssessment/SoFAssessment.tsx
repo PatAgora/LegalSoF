@@ -394,9 +394,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <p className="text-sm mb-2 text-gray-900">
             Supporting documents: {result.evidence_matches.filter(e => e.document_verified).length}/{total_claims} claims verified with source documentation.
           </p>
-          <p className="text-sm mb-2 text-gray-900 font-semibold">
-            FULLY VERIFIED (bank + docs + 100% confidence): {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length}/{total_claims} claims.
-          </p>
           
           {/* Show requires review count if any */}
           {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length > 0 && (
