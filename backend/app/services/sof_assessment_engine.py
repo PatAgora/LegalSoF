@@ -641,6 +641,7 @@ class SoFAssessmentEngine:
                     storage = json.load(f)
                 
                 matter_storage = storage.get(str(self.matter_id))
+                
                 if matter_storage and matter_storage.get('bank_statements'):
                     bank_statements = matter_storage['bank_statements']
                     
@@ -671,11 +672,16 @@ class SoFAssessmentEngine:
                             }.get(country, country)
                             alert_objects.append({
                                 "severity": "CRITICAL",
-                                "amount": amount,
-                                "date": date,
+                                "score": 100,
                                 "reasons": [f"Transaction to sanctioned jurisdiction: {country_name}"],
-                                "description": description,
-                                "counterparty": counterparty
+                                "transaction": {
+                                    "id": f"BANK-{self.matter_id}-{date}",
+                                    "amount": amount,
+                                    "currency": "GBP",
+                                    "country": country,
+                                    "date": date,
+                                    "narrative": description
+                                }
                             })
                         
                         # Check for high-risk countries
@@ -687,11 +693,16 @@ class SoFAssessmentEngine:
                             }.get(country, country)
                             alert_objects.append({
                                 "severity": "HIGH",
-                                "amount": amount,
-                                "date": date,
+                                "score": 80,
                                 "reasons": [f"Transaction to high-risk jurisdiction: {country_name}"],
-                                "description": description,
-                                "counterparty": counterparty
+                                "transaction": {
+                                    "id": f"BANK-{self.matter_id}-{date}",
+                                    "amount": amount,
+                                    "currency": "GBP",
+                                    "country": country,
+                                    "date": date,
+                                    "narrative": description
+                                }
                             })
                         
                         # Check for large cash transactions
@@ -699,11 +710,16 @@ class SoFAssessmentEngine:
                             cash_count += 1
                             alert_objects.append({
                                 "severity": "HIGH",
-                                "amount": amount,
-                                "date": date,
+                                "score": 70,
                                 "reasons": [f"Large cash transaction: £{amount:,.2f}"],
-                                "description": description,
-                                "counterparty": counterparty
+                                "transaction": {
+                                    "id": f"BANK-{self.matter_id}-{date}",
+                                    "amount": amount,
+                                    "currency": "GBP",
+                                    "country": country or "GB",
+                                    "date": date,
+                                    "narrative": description
+                                }
                             })
                     
                     if sanctions_count > 0:
@@ -1415,7 +1431,8 @@ class SoFAssessmentEngine:
         
         # 1. Transaction Review issues - HIGHEST PRIORITY
         # Use individual alert objects to generate specific, actionable questions
-        tr_alerts = transaction_review_data.get('alerts', [])
+        # Check both 'alert_details' (from DB) and 'alerts' (from direct bank statement analysis)
+        tr_alerts = transaction_review_data.get('alert_details', transaction_review_data.get('alerts', []))
         
         if tr_alerts:
             critical_tr = [a for a in tr_alerts if a['severity'] == 'CRITICAL']

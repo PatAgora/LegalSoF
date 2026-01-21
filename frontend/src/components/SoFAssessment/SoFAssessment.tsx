@@ -653,7 +653,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {/* Transaction Review Summary */}
         {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
           <div>
-            <h5 className="font-semibold text-white mb-2">Automated Transaction Monitoring:</h5>
+            <h5 className="font-semibold text-black mb-2">Automated Transaction Monitoring:</h5>
             <p className="text-sm mb-2">
               System identified {result.transaction_review_summary.total_alerts} alert(s): 
               {' '}{result.transaction_review_summary.critical_alerts} CRITICAL, 
@@ -785,7 +785,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Claim</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Evidence Found</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Outreach Questions</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
                 </tr>
@@ -810,16 +809,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     <tr key={idx} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm text-gray-900 font-medium">
                         {claim.source_type} £{claim.expected_amount.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        {verified && transactions.length > 0 ? (
-                          <div className="text-green-700">
-                            ✅ {transactions[0].date}: £{transactions[0].amount.toLocaleString()}
-                            {transactions.length > 1 && <span className="text-gray-500 ml-1">(+{transactions.length - 1} more)</span>}
-                          </div>
-                        ) : (
-                          <div className="text-red-700">❌ No matching transaction</div>
-                        )}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {fullyVerified ? (

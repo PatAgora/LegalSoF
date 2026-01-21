@@ -357,14 +357,18 @@ async def get_sof_assessment_results(
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
     
+    # Reload storage from file to get latest data
+    assessment_storage_reloaded = load_storage()
+    assessment_storage_reloaded = {int(k): v for k, v in assessment_storage_reloaded.items()}
+    
     # Get assessment data
-    if matter_id not in assessment_storage:
+    if matter_id not in assessment_storage_reloaded:
         raise HTTPException(
             status_code=404,
             detail="No assessment data found for this matter"
         )
     
-    storage = assessment_storage[matter_id]
+    storage = assessment_storage_reloaded[matter_id]
     
     if storage['status'] != 'completed':
         raise HTTPException(
