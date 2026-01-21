@@ -107,7 +107,8 @@ class FileProcessor:
                     "sof_explanation": data['sof_explanation'],
                     "known_documents": data.get('known_documents', []),
                     "flags": data.get('flags', {}),
-                    "constraints": data.get('constraints', {})
+                    "constraints": data.get('constraints', {}),
+                    "claims": data.get('claims', [])  # Support explicit claims array
                 },
                 "file_type": "json"
             }
