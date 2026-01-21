@@ -101,6 +101,10 @@ class DocumentVerifier:
             return self._verify_property_claim(result, claim, supporting_docs, bank_statements)
         elif 'loan' in source_type:
             return self._verify_loan_claim(result, claim, supporting_docs, bank_statements)
+        elif 'gift' in source_type:
+            return self._verify_gift_claim(result, claim, supporting_docs, bank_statements)
+        elif 'savings' in source_type:
+            return self._verify_savings_claim(result, claim, supporting_docs, bank_statements)
         else:
             result['issues'].append(f"Unknown source type: {source_type}")
             return result
@@ -481,6 +485,253 @@ class DocumentVerifier:
         
         # Additional checks can be added here
         result['issues'] = issues
+        return result
+    
+    def _verify_gift_claim(
+        self,
+        result: Dict[str, Any],
+        claim: Dict[str, Any],
+        supporting_docs: List[Dict[str, Any]],
+        bank_statements: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Verify gift claim with gift letter"""
+        
+        expected_amount = claim['expected_amount']
+        expected_donor = claim.get('expected_payer', '')
+        gift_date = claim.get('gift_date', claim.get('expected_date_range', {}).get('start', ''))
+        
+        checks_passed = []
+        issues = []
+        differences = []
+        
+        # Find gift letter document
+        gift_doc = None
+        for doc in supporting_docs:
+            filename = doc.get('filename', '').lower()
+            doc_type = doc.get('document_type', '').lower()
+            if 'gift' in filename or 'gift' in doc_type:
+                gift_doc = doc
+                break
+        
+        if not gift_doc:
+            issues.append("No gift letter provided")
+            result['missing_documents'].append("Gift letter from donor")
+            result['verified'] = False
+            result['issues'] = issues
+            result['differences'] = [{
+                'field': 'gift_letter',
+                'severity': 'missing',
+                'issue': 'No gift letter document found',
+                'expected': 'Gift letter',
+                'found': None
+            }]
+            return result
+        
+        # AUDIT TRAIL: Record which document was used for verification
+        result['verification_details']['document_used'] = {
+            'filename': gift_doc.get('filename', 'Unknown'),
+            'document_type': 'Gift letter',
+            'uploaded_at': gift_doc.get('uploaded_at'),
+        }
+        
+        # Extract data from gift document
+        extracted_data = gift_doc.get('extracted_data', {})
+        
+        # Check for required gift letter fields
+        if not extracted_data or len(extracted_data) == 0:
+            issues.append("Gift letter document provided but no data could be extracted")
+            differences.append({
+                'field': 'document_content',
+                'severity': 'missing',
+                'issue': 'Unable to extract data from gift letter - document may be unreadable or improperly formatted',
+                'expected': 'Readable gift letter with donor details, amount, and date',
+                'found': 'Unreadable or empty document'
+            })
+        
+        # Check donor name
+        donor_found = extracted_data.get('donor_name') or extracted_data.get('sender_name')
+        if not donor_found:
+            issues.append("No donor name found in gift letter")
+            differences.append({
+                'field': 'donor_name',
+                'severity': 'missing',
+                'issue': 'Donor name not found in gift letter',
+                'expected': expected_donor if expected_donor else 'Donor name',
+                'found': None
+            })
+        elif expected_donor and expected_donor.lower() not in donor_found.lower():
+            differences.append({
+                'field': 'donor_name',
+                'severity': 'mismatch',
+                'issue': f'Donor name mismatch',
+                'expected': expected_donor,
+                'found': donor_found
+            })
+        else:
+            checks_passed.append(f"Donor name: {donor_found}")
+        
+        # Check gift amount
+        gift_amount = extracted_data.get('gift_amount') or extracted_data.get('amount')
+        if not gift_amount:
+            issues.append("No gift amount found in gift letter")
+            differences.append({
+                'field': 'gift_amount',
+                'severity': 'missing',
+                'issue': 'Gift amount not specified in letter',
+                'expected': f'£{expected_amount:,.2f}',
+                'found': None
+            })
+        else:
+            # Parse amount if string
+            if isinstance(gift_amount, str):
+                gift_amount = float(re.sub(r'[£,]', '', gift_amount))
+            
+            amount_diff = abs(gift_amount - expected_amount) / expected_amount
+            if amount_diff > 0.01:  # More than 1% difference
+                differences.append({
+                    'field': 'gift_amount',
+                    'severity': 'mismatch',
+                    'issue': f'Gift amount mismatch',
+                    'expected': f'£{expected_amount:,.2f}',
+                    'found': f'£{gift_amount:,.2f}'
+                })
+            else:
+                checks_passed.append(f"Gift amount: £{gift_amount:,.2f}")
+        
+        # Check gift date
+        letter_date = extracted_data.get('gift_date') or extracted_data.get('date')
+        if not letter_date:
+            issues.append("No date found in gift letter")
+            differences.append({
+                'field': 'gift_date',
+                'severity': 'missing',
+                'issue': 'Date not specified in gift letter',
+                'expected': gift_date if gift_date else 'Gift date',
+                'found': None
+            })
+        else:
+            checks_passed.append(f"Gift date: {letter_date}")
+        
+        # Check relationship
+        relationship = extracted_data.get('relationship') or extracted_data.get('donor_relationship')
+        if not relationship:
+            differences.append({
+                'field': 'relationship',
+                'severity': 'missing',
+                'issue': 'Relationship to donor not stated in gift letter',
+                'expected': 'Relationship to donor',
+                'found': None
+            })
+        else:
+            checks_passed.append(f"Relationship: {relationship}")
+        
+        # Check declaration that gift is not a loan
+        no_repayment = extracted_data.get('no_repayment_required') or extracted_data.get('not_a_loan')
+        if not no_repayment:
+            differences.append({
+                'field': 'repayment_declaration',
+                'severity': 'missing',
+                'issue': 'No declaration that gift does not require repayment',
+                'expected': 'Statement confirming no repayment is required',
+                'found': None
+            })
+        else:
+            checks_passed.append("Confirmed: No repayment required")
+        
+        # Calculate confidence
+        required_fields = 5  # donor, amount, date, relationship, no_repayment
+        found_fields = len(checks_passed)
+        confidence = found_fields / required_fields if required_fields > 0 else 0.0
+        
+        # Store verification details
+        result['verification_details']['checks_passed'] = checks_passed
+        result['verification_details']['comparison'] = {
+            'customer_claim': {
+                'claimed_amount': expected_amount,
+                'donor': expected_donor,
+                'gift_date': gift_date
+            },
+            'document_evidence': {
+                'donor_name': donor_found,
+                'gift_amount': gift_amount,
+                'gift_date': letter_date,
+                'relationship': relationship,
+                'no_repayment': no_repayment
+            },
+            'matches': {
+                'amount_matches': gift_amount and abs(gift_amount - expected_amount) / expected_amount <= 0.01,
+                'donor_matches': donor_found and expected_donor and expected_donor.lower() in donor_found.lower()
+            }
+        }
+        
+        result['verified'] = len(issues) == 0 and len(differences) == 0
+        result['confidence'] = confidence
+        result['issues'] = issues
+        result['differences'] = differences
+        result['requires_review'] = confidence < 0.999
+        
+        return result
+    
+    def _verify_savings_claim(
+        self,
+        result: Dict[str, Any],
+        claim: Dict[str, Any],
+        supporting_docs: List[Dict[str, Any]],
+        bank_statements: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Verify savings claim with bank statements and salary evidence"""
+        
+        expected_amount = claim['expected_amount']
+        
+        issues = []
+        differences = []
+        
+        # For savings, we need historical bank statements or payslips
+        savings_doc = None
+        for doc in supporting_docs:
+            filename = doc.get('filename', '').lower()
+            doc_type = doc.get('document_type', '').lower()
+            if 'bank' in filename or 'statement' in filename or 'payslip' in filename or 'salary' in filename:
+                savings_doc = doc
+                break
+        
+        if not savings_doc:
+            issues.append("No bank statements or payslips provided to evidence savings")
+            result['missing_documents'].append("Historical bank statements or payslips showing savings accumulation")
+            result['verified'] = False
+            result['issues'] = issues
+            result['differences'] = [{
+                'field': 'savings_evidence',
+                'severity': 'missing',
+                'issue': 'No documentation provided to prove savings accumulation',
+                'expected': 'Bank statements or payslips showing savings over time',
+                'found': None
+            }]
+            return result
+        
+        # AUDIT TRAIL: Record which document was used for verification
+        result['verification_details']['document_used'] = {
+            'filename': savings_doc.get('filename', 'Unknown'),
+            'document_type': 'Bank statements / Payslips',
+            'uploaded_at': savings_doc.get('uploaded_at'),
+        }
+        
+        # For now, mark as requiring manual review
+        issues.append("Savings claims require detailed manual review of accumulation over time")
+        differences.append({
+            'field': 'savings_verification',
+            'severity': 'review_required',
+            'issue': 'Savings accumulation requires detailed verification of income sources and account history',
+            'expected': f'Evidence of £{expected_amount:,.2f} savings accumulation',
+            'found': 'Document provided but requires manual verification'
+        })
+        
+        result['verified'] = False
+        result['confidence'] = 0.3  # Low confidence, requires manual review
+        result['issues'] = issues
+        result['differences'] = differences
+        result['requires_review'] = True
+        
         return result
     
     def _find_matching_transaction(
