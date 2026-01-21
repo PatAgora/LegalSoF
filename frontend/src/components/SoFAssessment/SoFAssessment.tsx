@@ -678,7 +678,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <>
                 <p className="text-sm font-medium mt-2 mb-1 text-green-700">✓ Satisfied Alerts:</p>
                 <ul className="ml-4 space-y-1 text-sm mb-2">
-                  {result.transaction_review_summary.alerts?.map((alert, idx) => (
+                  {(result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details || []).map((alert, idx) => (
                     alertSatisfied[idx] && (
                       <li key={idx} className="text-green-700">
                         • Alert {idx + 1}: {alert.reasons?.[0] || 'AML concern'} 
@@ -945,15 +945,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </div>
         </div>
         
-        {/* Summary */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="text-sm font-bold text-gray-700 mb-2">Summary</h4>
-          <div className="text-sm text-gray-700 space-y-2">
-            {content.split('SOURCE OF FUNDS SUMMARY:')[1]?.split('FUNDING PATH')[0]?.split('\n').filter(line => line.trim()).map((line, idx) => (
-              <p key={idx}>{line.trim()}</p>
-            ))}
-          </div>
-        </div>
+
       </div>
     );
   };
@@ -1003,7 +995,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         )}
         
         {/* Alert Table or No Alerts Message */}
-        {result.transaction_review_summary && result.transaction_review_summary.alerts && result.transaction_review_summary.alerts.length > 0 ? (
+        {result.transaction_review_summary && (result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details) && (result.transaction_review_summary.alerts?.length > 0 || result.transaction_review_summary.alert_details?.length > 0) ? (
           <div className="px-6 py-4">
             <h4 className="text-sm font-bold text-gray-700 mb-3">Alert Analysis</h4>
             <div className="overflow-x-auto">
@@ -1019,8 +1011,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {result.transaction_review_summary.alerts.slice(0, 5).map((alert, idx) => {
+                  {(result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details || []).slice(0, 5).map((alert, idx) => {
                     const severity = alert.severity || 'HIGH';
+                    // Handle both flat structure (alerts) and nested structure (alert_details with transaction object)
+                    const txn = alert.transaction || alert;
+                    const amount = txn.amount || alert.amount;
+                    const date = txn.date || alert.date;
+                    const narrative = txn.narrative || alert.counterparty || '';
                     
                     return (
                       <tr key={idx} className="hover:bg-gray-50">
@@ -1034,13 +1031,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         <td className="px-4 py-3 text-sm text-gray-900">
                           {alert.reasons && alert.reasons.length > 0 ? alert.reasons[0] : 'AML concern'}
                           <div className="text-xs text-gray-500 mt-1">
-                            {alert.description || 'No description'}
+                            {narrative || 'No description'}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-800">
-                          <div>Amount: £{alert.amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
-                          <div className="text-xs text-gray-500">Date: {alert.date || 'Unknown'}</div>
-                          {alert.counterparty && <div className="text-xs text-gray-500">Counterparty: {alert.counterparty}</div>}
+                          <div>Amount: £{amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
+                          <div className="text-xs text-gray-500">Date: {date || 'Unknown'}</div>
+                          {narrative && <div className="text-xs text-gray-500">Details: {narrative}</div>}
                         </td>
                         <td className="px-4 py-3">
                           <textarea
