@@ -405,17 +405,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </p>
           )}
           
-          {/* Only show warning if NOT all claims are fully verified */}
-          {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length < total_claims && (
-            <div className="bg-[#D4C4B0] border border-[#C4B4A0] rounded p-3 mb-3 text-sm">
-              <p className="font-semibold text-gray-800 mb-1">⚠️ IMPORTANT:</p>
-              <p className="text-gray-900">
-                Bank statements alone are INSUFFICIENT. Corroborating source documents (e.g., probate grants, 
-                completion statements) are REQUIRED to prove legitimacy. Bank payments verify receipt, NOT lawful origin.
-              </p>
-            </div>
-          )}
-          
           {/* Show positive message if ALL claims are fully verified with 100% confidence */}
           {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length === total_claims && total_claims > 0 && (
             <div className="bg-green-50 border border-green-200 rounded p-3 mb-3 text-sm">
