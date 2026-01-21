@@ -615,6 +615,8 @@ class SoFAssessmentEngine:
         """
         CRITICAL: Get Transaction Review alerts for this matter
         This integrates AML monitoring findings into SoF assessment
+        
+        NEW: Analyzes bank statements directly for AML risks when TransactionAlert table is empty
         """
         from app.models import TransactionAlert, Transaction
         
@@ -622,7 +624,69 @@ class SoFAssessmentEngine:
             TransactionAlert.matter_id == self.matter_id
         ).all()
         
+        # If no alerts in database, analyze bank statements directly
         if not alerts:
+            # Load bank statements from storage
+            import json
+            from pathlib import Path
+            storage_file = Path("/tmp/sof_assessment_storage.json")
+            
+            if storage_file.exists():
+                with open(storage_file, 'r') as f:
+                    storage = json.load(f)
+                
+                matter_storage = storage.get(str(self.matter_id))
+                if matter_storage and matter_storage.get('bank_statements'):
+                    bank_statements = matter_storage['bank_statements']
+                    
+                    # Analyze for AML risks
+                    sanctioned_countries = ['IR', 'KP', 'SY', 'CU']  # Iran, North Korea, Syria, Cuba
+                    high_risk_countries = ['AF', 'MM', 'YE', 'LY']  # Afghanistan, Myanmar, Yemen, Libya
+                    
+                    key_concerns = []
+                    sanctions_count = 0
+                    cash_count = 0
+                    high_risk_count = 0
+                    
+                    for stmt in bank_statements:
+                        country = stmt.get('country_iso2', '')
+                        channel = stmt.get('channel', '')
+                        amount = stmt.get('amount', 0)
+                        
+                        # Check for sanctioned countries
+                        if country in sanctioned_countries:
+                            sanctions_count += 1
+                        
+                        # Check for high-risk countries
+                        elif country in high_risk_countries:
+                            high_risk_count += 1
+                        
+                        # Check for large cash transactions
+                        if channel == 'cash' and amount >= 10000:
+                            cash_count += 1
+                    
+                    if sanctions_count > 0:
+                        key_concerns.append(f"{sanctions_count} transaction(s) involving prohibited/sanctioned jurisdictions")
+                    if high_risk_count > 0:
+                        key_concerns.append(f"{high_risk_count} transaction(s) involving high-risk jurisdictions")
+                    if cash_count > 0:
+                        key_concerns.append(f"{cash_count} large cash transaction(s) identified")
+                    
+                    total_alerts = sanctions_count + high_risk_count + cash_count
+                    
+                    if total_alerts > 0:
+                        return {
+                            "summary": {
+                                "total_alerts": total_alerts,
+                                "critical_alerts": sanctions_count,
+                                "high_alerts": high_risk_count + cash_count,
+                                "medium_alerts": 0,
+                                "key_concerns": key_concerns
+                            },
+                            "alerts": []
+                        }
+            
+            # No alerts and no bank statement risks
             return {
                 "summary": {
                     "total_alerts": 0,

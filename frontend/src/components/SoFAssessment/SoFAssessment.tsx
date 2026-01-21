@@ -677,7 +677,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {/* Red Flags */}
         {result.red_flags && result.red_flags.length > 0 && (
           <div>
-            <h5 className="font-semibold text-white mb-2">Red Flags Identified ({result.red_flags.length}):</h5>
+            <h5 className="font-semibold text-gray-900 mb-2">Red Flags Identified ({result.red_flags.length}):</h5>
             <ul className="space-y-1 text-sm">
               {result.red_flags.slice(0, 5).map((flag, idx) => (
                 <li key={idx}>• [{flag.severity}] {flag.flag}</li>

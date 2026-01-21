@@ -275,8 +275,8 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                     <div className="text-sm text-gray-700">{txn.narrative}</div>
                   </div>
                   <div className="text-right">
-                    <div className={`text-lg font-bold ${txn.direction === 'in' ? 'text-green-600' : 'text-red-600'}`}>
-                      {txn.direction === 'in' ? '+' : '-'} {txn.currency} {txn.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <div className={`text-lg font-bold ${txn.direction === 'in' || txn.direction === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
+                      {txn.direction === 'in' || txn.direction === 'credit' ? '+' : '-'} {txn.currency} {txn.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {txn.country_iso2} • {txn.channel || 'Unknown'}
