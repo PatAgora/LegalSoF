@@ -1,0 +1,69 @@
+{
+  "backup_date": "2026-01-21",
+  "backup_version": "v1.0-complete",
+  "database": {
+    "file": "sof_platform.db",
+    "size_kb": 216
+  },
+  "matters": [
+    {
+      "id": 1,
+      "reference": "MAT-2024-001",
+      "client": "Residential Property Ltd",
+      "type": "BUSINESS_PURCHASE",
+      "amount": 450000.0,
+      "status": "UNDER_REVIEW",
+      "risk": "MEDIUM"
+    },
+    {
+      "id": 2,
+      "reference": "MAT-2024-002",
+      "client": "Commercial Ventures PLC",
+      "type": "BUSINESS_PURCHASE",
+      "amount": 750000.0,
+      "status": "DRAFT",
+      "risk": "MEDIUM"
+    },
+    {
+      "id": 3,
+      "reference": "MAT-2024-003",
+      "client": "Property Investors Group",
+      "type": "PROPERTY_PURCHASE",
+      "amount": 620000.0,
+      "status": "DRAFT",
+      "risk": "MEDIUM"
+    },
+    {
+      "id": 4,
+      "reference": "MAT-2024-004",
+      "client": "Tech Acquisitions Ltd",
+      "type": "BUSINESS_PURCHASE",
+      "amount": 890000.0,
+      "status": "DRAFT",
+      "risk": "MEDIUM"
+    },
+    {
+      "id": 5,
+      "reference": "MAT-2024-005",
+      "client": "Startup Ventures Ltd",
+      "type": "INVESTMENT",
+      "amount": 320000.0,
+      "status": "DRAFT",
+      "risk": "MEDIUM"
+    },
+    {
+      "id": 6,
+      "reference": "MAT-2024-000",
+      "client": "TechStart Solutions Ltd",
+      "type": "BUSINESS_PURCHASE",
+      "amount": 850000.0,
+      "status": "DRAFT",
+      "risk": "LOW"
+    }
+  ],
+  "storage": {
+    "file": "sof_assessment_storage.json",
+    "size_kb": 144,
+    "matters_with_data": 7
+  }
+}
