@@ -636,25 +636,13 @@ class SoFAssessmentEngine:
             from pathlib import Path
             storage_file = Path("/tmp/sof_assessment_storage.json")
             
-            print(f"\n🔍 DEBUG: No TransactionAlert records, checking bank statements for Matter {self.matter_id}")
-            
             if storage_file.exists():
                 with open(storage_file, 'r') as f:
                     storage = json.load(f)
                 
-                print(f"🔍 DEBUG: Storage file exists, loading Matter {self.matter_id}")
                 matter_storage = storage.get(str(self.matter_id))
-                print(f"🔍 DEBUG: Matter storage found: {matter_storage is not None}")
-                
-                if matter_storage:
-                    bank_statements = matter_storage.get('bank_statements', [])
-                    print(f"🔍 DEBUG: Bank statements count: {len(bank_statements)}")
-                else:
-                    print(f"🔍 DEBUG: Matter storage is None/empty")
                 if matter_storage and matter_storage.get('bank_statements'):
                     bank_statements = matter_storage['bank_statements']
-                    
-                    print(f"🔍 DEBUG: Starting AML analysis on {len(bank_statements)} statements")
                     
                     # Analyze for AML risks
                     sanctioned_countries = ['IR', 'KP', 'SY', 'CU']  # Iran, North Korea, Syria, Cuba
@@ -667,7 +655,6 @@ class SoFAssessmentEngine:
                     high_risk_count = 0
                     
                     for stmt in bank_statements:
-                        print(f"🔍 DEBUG: Checking stmt - country: {stmt.get('country_iso2')}, channel: {stmt.get('channel')}, amount: {stmt.get('amount')}")
                         country = stmt.get('country_iso2', '')
                         channel = stmt.get('channel', '')
                         amount = stmt.get('amount', 0)
@@ -677,7 +664,6 @@ class SoFAssessmentEngine:
                         
                         # Check for sanctioned countries
                         if country in sanctioned_countries:
-                            print(f"🚨 DEBUG: SANCTIONED COUNTRY DETECTED - {country}")
                             sanctions_count += 1
                             country_name = {
                                 'IR': 'Iran', 'KP': 'North Korea', 
@@ -710,7 +696,6 @@ class SoFAssessmentEngine:
                         
                         # Check for large cash transactions
                         if channel == 'cash' and amount >= 10000:
-                            print(f"💰 DEBUG: LARGE CASH DETECTED - £{amount}")
                             cash_count += 1
                             alert_objects.append({
                                 "severity": "HIGH",
@@ -730,12 +715,8 @@ class SoFAssessmentEngine:
                     
                     total_alerts = sanctions_count + high_risk_count + cash_count
                     
-                    print(f"🔍 DEBUG: After analysis - sanctions: {sanctions_count}, cash: {cash_count}, total: {total_alerts}")
-                    print(f"🔍 DEBUG: Alert objects count: {len(alert_objects)}")
-                    print(f"🔍 DEBUG: Key concerns: {key_concerns}")
-                    
                     if total_alerts > 0:
-                        result = {
+                        return {
                             "summary": {
                                 "total_alerts": total_alerts,
                                 "critical_alerts": sanctions_count,
@@ -745,8 +726,6 @@ class SoFAssessmentEngine:
                             },
                             "alerts": alert_objects  # Now includes actual alert objects for questions
                         }
-                        print(f"✅ DEBUG: Returning transaction review data with {total_alerts} alerts")
-                        return result
             
             # No alerts and no bank statement risks
             return {
