@@ -1058,10 +1058,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
                             severity === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-[#EAD8C0] text-gray-800'
                           }`}>
-                            {severity === 'CRITICAL' ? '❌ BLOCKS COMPLETION' : '⚠️ REQUIRES REVIEW'}
+                            <span>{severity === 'CRITICAL' ? '❌' : '⚠️'}</span>
+                            <span>{severity === 'CRITICAL' ? 'BLOCKS COMPLETION' : 'REQUIRES REVIEW'}</span>
                           </span>
                         </td>
                       </tr>
