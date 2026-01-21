@@ -905,7 +905,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         ) : requiresReview ? (
                           <div className="text-sm space-y-1">
                             <div className="text-amber-800 font-semibold mb-1">
-                              ⚠️ Review Required ({Math.round(confidence * 100)}% confidence)
+                              ⚠️ Review Required
                             </div>
                             {evidence?.document_verification?.differences && evidence.document_verification.differences.length > 0 ? (
                               <ul className="list-disc list-inside text-xs text-gray-700 space-y-0.5">

@@ -238,8 +238,8 @@ async def get_transactions(
                     amount=float(stmt.get('amount', 0)),
                     currency=stmt.get('currency', 'GBP'),
                     base_amount=float(stmt.get('amount', 0)),  # Assume same as amount for GBP
-                    country_iso2=None,  # Not in bank statements
-                    channel=None,  # Not in bank statements
+                    country_iso2=stmt.get('country_iso2'),  # Load from bank statements if available
+                    channel=stmt.get('channel'),  # Load from bank statements if available
                     narrative=stmt.get('description', ''),
                     created_at=datetime.utcnow()
                 ))
