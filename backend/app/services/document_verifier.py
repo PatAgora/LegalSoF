@@ -695,11 +695,18 @@ class DocumentVerifier:
         differences = []
         
         # For savings, we need historical bank statements or payslips
+        # Be specific to avoid matching completion statements, solicitor statements, etc.
         savings_doc = None
         for doc in supporting_docs:
             filename = doc.get('filename', '').lower()
             doc_type = doc.get('document_type', '').lower()
-            if 'bank' in filename or 'statement' in filename or 'payslip' in filename or 'salary' in filename:
+            
+            # Exclude property/solicitor documents
+            if any(exclude in filename or exclude in doc_type for exclude in ['completion', 'solicitor', 'completion_statement']):
+                continue
+            
+            # Look for savings-related documents
+            if any(keyword in filename or keyword in doc_type for keyword in ['bank_statement', 'bank statement', 'payslip', 'salary', 'pay slip', 'p60', 'p45', 'savings']):
                 savings_doc = doc
                 break
         
