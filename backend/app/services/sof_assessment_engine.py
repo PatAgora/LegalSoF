@@ -799,13 +799,27 @@ class SoFAssessmentEngine:
         tr_alerts = transaction_review_data.get('alerts', [])
         for alert in tr_alerts:
             if alert['severity'] in ['CRITICAL', 'HIGH']:
+                # Handle both new format (flat fields) and old format (nested transaction object)
+                if 'transaction' in alert:
+                    # Old format from database
+                    amount = alert['transaction']['amount']
+                    date = alert['transaction']['date']
+                    txn_id = alert['transaction']['id']
+                    alert_id = alert.get('alert_id')
+                else:
+                    # New format from direct bank statement analysis
+                    amount = alert['amount']
+                    date = alert['date']
+                    txn_id = None
+                    alert_id = None
+                
                 red_flags.append({
                     "severity": alert['severity'],
                     "source": "TRANSACTION_REVIEW",
                     "flag": f"{alert['reasons'][0] if alert['reasons'] else 'AML alert'} - "
-                           f"£{alert['transaction']['amount']:,.2f} on {alert['transaction']['date']}",
-                    "transaction_ref": alert['transaction']['id'],
-                    "alert_id": alert['alert_id'],
+                           f"£{amount:,.2f} on {date}",
+                    "transaction_ref": txn_id,
+                    "alert_id": alert_id,
                     "details": alert['reasons']
                 })
         
@@ -1430,10 +1444,20 @@ class SoFAssessmentEngine:
             
             if critical_tr and not any('sanctioned' in q.lower() for q in questions):
                 for alert in critical_tr[:3]:
-                    txn = alert['transaction']
+                    # Handle both new format (flat fields) and old format (nested transaction object)
+                    if 'transaction' in alert:
+                        # Old format from database
+                        txn = alert['transaction']
+                        amount = txn['amount']
+                        date = txn['date']
+                    else:
+                        # New format from direct bank statement analysis
+                        amount = alert['amount']
+                        date = alert['date']
+                    
                     reason = alert['reasons'][0] if alert['reasons'] else "AML concern"
                     questions.append(
-                        f"URGENT: Transaction of £{txn['amount']:,.2f} on {txn['date']} "
+                        f"URGENT: Transaction of £{amount:,.2f} on {date} "
                         f"flagged as CRITICAL - {reason}. Provide immediate explanation."
                     )
         
