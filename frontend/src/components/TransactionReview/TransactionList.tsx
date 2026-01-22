@@ -264,17 +264,32 @@ export default function TransactionList({ matterId }: TransactionListProps) {
               <div className="p-4">
                 {/* Transaction Header */}
                 <div className="flex items-start justify-between mb-3">
-                  <div>
+                  <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
                       <span className="text-sm font-mono font-semibold text-gray-900">{txn.id}</span>
                       <span className="text-xs text-gray-500">•</span>
                       <span className="text-sm text-gray-600">{new Date(txn.txn_date).toLocaleDateString()}</span>
                       <span className="text-xs text-gray-500">•</span>
                       <span className="text-sm text-gray-600">{txn.customer_id}</span>
+                      {/* Severity Badge */}
+                      {highestSeverity && (
+                        <>
+                          <span className="text-xs text-gray-500">•</span>
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
+                            highestSeverity.severity === 'CRITICAL' ? 'bg-red-600 text-white' :
+                            highestSeverity.severity === 'HIGH' ? 'bg-orange-500 text-white' :
+                            highestSeverity.severity === 'MEDIUM' ? 'bg-yellow-500 text-white' :
+                            'bg-gray-500 text-white'
+                          }`}>
+                            <span>{highestSeverity.severity === 'CRITICAL' ? '🔴' : highestSeverity.severity === 'HIGH' ? '🟠' : '🟡'}</span>
+                            <span>{highestSeverity.severity}</span>
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="text-sm text-gray-700">{txn.narrative}</div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right ml-4">
                     <div className={`text-lg font-bold ${txn.direction === 'in' || txn.direction === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
                       {txn.direction === 'in' || txn.direction === 'credit' ? '+' : '-'} {txn.currency} {txn.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
