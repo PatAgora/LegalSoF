@@ -62,9 +62,24 @@ async def list_matters(
         # Get matters with pagination
         matters = query.offset(skip).limit(limit).all()
         
+        # Load SoF assessment storage for completion percentages
+        import os
+        storage_file = "/tmp/sof_assessment_storage.json"
+        storage = {}
+        
+        if os.path.exists(storage_file):
+            with open(storage_file, 'r') as f:
+                storage = json.load(f)
+        
         # Convert to dict format
         result = []
         for matter in matters:
+            # Get SoF data for this matter
+            sof_data = storage.get(str(matter.id))
+            
+            # Calculate completion percentage
+            completion_percentage = calculate_completion_percentage(matter, sof_data)
+            
             result.append({
                 "id": matter.id,
                 "reference_number": matter.reference_number,
@@ -80,6 +95,7 @@ async def list_matters(
                 "description": matter.description,
                 "created_at": matter.created_at.isoformat() if matter.created_at else None,
                 "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
+                "completion_percentage": completion_percentage,
             })
         
         return result
@@ -112,6 +128,22 @@ async def get_matter(
         if not matter:
             raise HTTPException(status_code=404, detail="Matter not found")
         
+        # Load SoF assessment data for completion percentage calculation
+        import os
+        import json
+        storage_file = "/tmp/sof_assessment_storage.json"
+        sof_data = None
+        
+        if os.path.exists(storage_file):
+            with open(storage_file, 'r') as f:
+                storage = json.load(f)
+                matter_key = str(matter_id)
+                if matter_key in storage:
+                    sof_data = storage[matter_key]
+        
+        # Calculate completion percentage (this function will be available after workflow implementation)
+        completion_percentage = calculate_completion_percentage(matter, sof_data)
+        
         return {
             "id": matter.id,
             "reference_number": matter.reference_number,
@@ -130,6 +162,7 @@ async def get_matter(
             "description": matter.description,
             "created_at": matter.created_at.isoformat() if matter.created_at else None,
             "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
+            "completion_percentage": completion_percentage,
         }
     
     finally:
