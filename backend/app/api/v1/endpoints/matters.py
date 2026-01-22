@@ -3,13 +3,30 @@ Matters API Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+from pydantic import BaseModel
 
 from app.db.session import get_db
-from app.models import Matter
+from app.models import Matter, MatterStatus
 
 router = APIRouter()
+
+
+# Request/Response Models
+class StatusUpdateRequest(BaseModel):
+    new_status: str
+    reason: Optional[str] = None
+    auto_transition: bool = False
+
+
+class StatusUpdateResponse(BaseModel):
+    success: bool
+    previous_status: str
+    new_status: str
+    completion_percentage: int
+    message: str
+    auto_transitions_applied: List[str] = []
 
 
 @router.get("/matters")
@@ -428,6 +445,346 @@ async def generate_matter_report(
                 "Content-Disposition": f"attachment; filename=Matter_Summary_{matter.reference_number}.docx"
             }
         )
+    
+    finally:
+        sync_db.close()
+
+
+# ==================== WORKFLOW ENGINE ====================
+
+def calculate_completion_percentage(matter: Matter, sof_data: Optional[Dict[str, Any]] = None) -> int:
+    """
+    Calculate matter completion percentage based on workflow state and data
+    """
+    percentage = 0
+    
+    # Base percentage by status
+    status_percentages = {
+        MatterStatus.DRAFT: 10,
+        MatterStatus.AWAITING_CLIENT: 20,
+        MatterStatus.CLIENT_UPLOADING: 40,
+        MatterStatus.UNDER_REVIEW: 60,
+        MatterStatus.QUERIES_RAISED: 50,  # Step back
+        MatterStatus.APPROVED: 90,
+        MatterStatus.REJECTED: 100,  # Terminal state
+        MatterStatus.COMPLETED: 100,
+    }
+    
+    percentage = status_percentages.get(matter.status, 0)
+    
+    # Add bonus for SoF assessment completion
+    if sof_data:
+        if 'assessment_result' in sof_data:
+            assessment = sof_data['assessment_result']
+            outcome = assessment.get('outcome', {})
+            
+            # Add 10% if assessment run
+            percentage = min(percentage + 10, 100)
+            
+            # Add 10% more if sufficient
+            if outcome.get('status', '').lower() == 'sufficient':
+                percentage = min(percentage + 10, 100)
+            
+            # Add 5% if all claims verified
+            evidence_matches = assessment.get('evidence_matches', [])
+            if evidence_matches:
+                all_verified = all(
+                    e.get('verified', False) and e.get('document_verified', False) 
+                    for e in evidence_matches
+                )
+                if all_verified:
+                    percentage = min(percentage + 5, 100)
+    
+    return percentage
+
+
+def get_next_status_suggestions(matter: Matter, sof_data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """
+    Get smart status suggestions based on current state and data
+    """
+    current_status = matter.status
+    suggestions = []
+    
+    # Status transition rules with reasons
+    transitions = {
+        MatterStatus.DRAFT: [
+            {'status': MatterStatus.AWAITING_CLIENT, 'reason': 'Ready to request documents from client', 'auto': False},
+            {'status': MatterStatus.CLIENT_UPLOADING, 'reason': 'Client portal access granted', 'auto': False},
+        ],
+        MatterStatus.AWAITING_CLIENT: [
+            {'status': MatterStatus.CLIENT_UPLOADING, 'reason': 'Client started uploading documents', 'auto': True},
+            {'status': MatterStatus.UNDER_REVIEW, 'reason': 'Skip to review (documents received externally)', 'auto': False},
+        ],
+        MatterStatus.CLIENT_UPLOADING: [
+            {'status': MatterStatus.UNDER_REVIEW, 'reason': 'All required documents uploaded', 'auto': True},
+        ],
+        MatterStatus.UNDER_REVIEW: [
+            {'status': MatterStatus.QUERIES_RAISED, 'reason': 'Additional information required', 'auto': False},
+            {'status': MatterStatus.APPROVED, 'reason': 'Review complete - all requirements met', 'auto': True},
+            {'status': MatterStatus.REJECTED, 'reason': 'Cannot proceed with this matter', 'auto': False},
+        ],
+        MatterStatus.QUERIES_RAISED: [
+            {'status': MatterStatus.AWAITING_CLIENT, 'reason': 'Waiting for client response', 'auto': False},
+            {'status': MatterStatus.UNDER_REVIEW, 'reason': 'Client responded - resume review', 'auto': False},
+        ],
+        MatterStatus.APPROVED: [
+            {'status': MatterStatus.COMPLETED, 'reason': 'Matter completed successfully', 'auto': False},
+            {'status': MatterStatus.QUERIES_RAISED, 'reason': 'New issue identified', 'auto': False},
+        ],
+        MatterStatus.REJECTED: [
+            # Terminal state - no transitions
+        ],
+        MatterStatus.COMPLETED: [
+            # Terminal state - no transitions
+        ],
+    }
+    
+    base_suggestions = transitions.get(current_status, [])
+    
+    # Check if auto-transitions should be suggested based on data
+    if sof_data and 'assessment_result' in sof_data:
+        assessment = sof_data['assessment_result']
+        outcome = assessment.get('outcome', {})
+        
+        # If UNDER_REVIEW and assessment is SUFFICIENT, suggest APPROVED
+        if current_status == MatterStatus.UNDER_REVIEW:
+            if outcome.get('status', '').lower() == 'sufficient':
+                # Check if all claims fully verified
+                evidence_matches = assessment.get('evidence_matches', [])
+                all_verified = all(
+                    e.get('verified', False) and e.get('document_verified', False) 
+                    for e in evidence_matches
+                )
+                
+                # Check no critical alerts
+                tr_summary = assessment.get('transaction_review_summary', {})
+                critical_alerts = tr_summary.get('critical_alerts', 0)
+                
+                if all_verified and critical_alerts == 0:
+                    # Mark APPROVED as auto-ready
+                    for sug in base_suggestions:
+                        if sug['status'] == MatterStatus.APPROVED:
+                            sug['auto'] = True
+                            sug['reason'] = '✅ AUTO: All claims verified, no critical alerts'
+        
+        # If UNDER_REVIEW and there are outstanding questions, suggest QUERIES_RAISED
+        if current_status == MatterStatus.UNDER_REVIEW:
+            next_actions = assessment.get('next_actions', {})
+            questions = next_actions.get('questions', [])
+            if len(questions) > 0:
+                for sug in base_suggestions:
+                    if sug['status'] == MatterStatus.QUERIES_RAISED:
+                        sug['auto'] = True
+                        sug['reason'] = f'⚠️ AUTO: {len(questions)} outstanding question(s)'
+    
+    return base_suggestions
+
+
+def apply_auto_transitions(matter: Matter, sof_data: Optional[Dict[str, Any]] = None) -> List[str]:
+    """
+    Apply automatic status transitions based on workflow rules
+    """
+    transitions_applied = []
+    
+    # Check if documents have been uploaded (transition to UNDER_REVIEW)
+    if matter.status == MatterStatus.CLIENT_UPLOADING and sof_data:
+        if 'uploaded_files' in sof_data and len(sof_data.get('uploaded_files', [])) > 0:
+            # Check if client_info and bank_statements uploaded
+            has_client_info = any(f.get('category') == 'client_info' for f in sof_data.get('uploaded_files', []))
+            has_bank = any(f.get('category') == 'bank_statement' for f in sof_data.get('uploaded_files', []))
+            
+            if has_client_info and has_bank:
+                matter.status = MatterStatus.UNDER_REVIEW
+                transitions_applied.append(f"CLIENT_UPLOADING → UNDER_REVIEW (documents uploaded)")
+    
+    # Check if assessment complete and sufficient (transition to APPROVED)
+    if matter.status == MatterStatus.UNDER_REVIEW and sof_data:
+        if 'assessment_result' in sof_data:
+            assessment = sof_data['assessment_result']
+            outcome = assessment.get('outcome', {})
+            
+            if outcome.get('status', '').lower() == 'sufficient':
+                # Check all claims verified
+                evidence_matches = assessment.get('evidence_matches', [])
+                all_verified = all(
+                    e.get('verified', False) and e.get('document_verified', False) 
+                    for e in evidence_matches
+                )
+                
+                # Check no critical alerts
+                tr_summary = assessment.get('transaction_review_summary', {})
+                critical_alerts = tr_summary.get('critical_alerts', 0)
+                
+                if all_verified and critical_alerts == 0:
+                    matter.status = MatterStatus.APPROVED
+                    transitions_applied.append(f"UNDER_REVIEW → APPROVED (all verified, no critical alerts)")
+    
+    return transitions_applied
+
+
+@router.patch("/matters/{matter_id}/status")
+async def update_matter_status(
+    matter_id: int,
+    request: StatusUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Update matter status with workflow validation and smart transitions
+    
+    Features:
+    - Workflow validation (prevent invalid transitions)
+    - Automatic status transitions based on data
+    - Completion percentage calculation
+    - Status change audit trail
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.core.config import settings
+    import os
+    
+    # Get sync DB session
+    db_url = str(settings.DATABASE_URL).replace("sqlite+aiosqlite", "sqlite")
+    engine = create_engine(db_url)
+    SessionLocal = sessionmaker(bind=engine)
+    sync_db = SessionLocal()
+    
+    try:
+        # Get matter
+        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            raise HTTPException(status_code=404, detail="Matter not found")
+        
+        # Load SoF assessment data
+        storage_file = "/tmp/sof_assessment_storage.json"
+        sof_data = None
+        
+        if os.path.exists(storage_file):
+            import json
+            with open(storage_file, 'r') as f:
+                storage = json.load(f)
+                matter_key = str(matter_id)
+                if matter_key in storage:
+                    sof_data = storage[matter_key]
+        
+        # Store previous status
+        previous_status = matter.status
+        
+        # Validate new status
+        try:
+            new_status = MatterStatus(request.new_status)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status: {request.new_status}. Valid statuses: {[s.value for s in MatterStatus]}"
+            )
+        
+        # Check if transition is allowed
+        suggestions = get_next_status_suggestions(matter, sof_data)
+        allowed_statuses = [s['status'] for s in suggestions]
+        
+        # Allow same status (for refresh) or any suggested status
+        if new_status != previous_status and new_status not in allowed_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid transition from {previous_status.value} to {new_status.value}. Allowed: {[s.value for s in allowed_statuses]}"
+            )
+        
+        # Apply status change
+        matter.status = new_status
+        matter.updated_at = datetime.now()
+        
+        # Apply automatic transitions if requested
+        auto_transitions = []
+        if request.auto_transition:
+            auto_transitions = apply_auto_transitions(matter, sof_data)
+        
+        # Calculate new completion percentage
+        completion_percentage = calculate_completion_percentage(matter, sof_data)
+        
+        # Commit changes
+        sync_db.commit()
+        sync_db.refresh(matter)
+        
+        # Build response
+        message = f"Status updated from {previous_status.value} to {matter.status.value}"
+        if auto_transitions:
+            message += f". Auto-transitions: {', '.join(auto_transitions)}"
+        
+        return StatusUpdateResponse(
+            success=True,
+            previous_status=previous_status.value,
+            new_status=matter.status.value,
+            completion_percentage=completion_percentage,
+            message=message,
+            auto_transitions_applied=auto_transitions
+        )
+    
+    finally:
+        sync_db.close()
+
+
+@router.get("/matters/{matter_id}/status/suggestions")
+async def get_status_suggestions(
+    matter_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get smart status transition suggestions for a matter
+    
+    Returns suggested next statuses with reasons and auto-transition flags
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.core.config import settings
+    import os
+    
+    # Get sync DB session
+    db_url = str(settings.DATABASE_URL).replace("sqlite+aiosqlite", "sqlite")
+    engine = create_engine(db_url)
+    SessionLocal = sessionmaker(bind=engine)
+    sync_db = SessionLocal()
+    
+    try:
+        # Get matter
+        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            raise HTTPException(status_code=404, detail="Matter not found")
+        
+        # Load SoF assessment data
+        storage_file = "/tmp/sof_assessment_storage.json"
+        sof_data = None
+        
+        if os.path.exists(storage_file):
+            import json
+            with open(storage_file, 'r') as f:
+                storage = json.load(f)
+                matter_key = str(matter_id)
+                if matter_key in storage:
+                    sof_data = storage[matter_key]
+        
+        # Get suggestions
+        suggestions = get_next_status_suggestions(matter, sof_data)
+        
+        # Calculate current completion percentage
+        completion_percentage = calculate_completion_percentage(matter, sof_data)
+        
+        # Check if auto-transitions available
+        auto_transitions = apply_auto_transitions(matter, sof_data)
+        
+        return {
+            'current_status': matter.status.value,
+            'completion_percentage': completion_percentage,
+            'suggestions': [
+                {
+                    'status': s['status'].value,
+                    'reason': s['reason'],
+                    'auto_recommended': s.get('auto', False)
+                }
+                for s in suggestions
+            ],
+            'auto_transitions_available': len(auto_transitions) > 0,
+            'auto_transition_preview': auto_transitions
+        }
     
     finally:
         sync_db.close()

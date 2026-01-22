@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import TransactionList from '../components/TransactionReview/TransactionList'
 import SoFAssessment from '../components/SoFAssessment/SoFAssessment'
+import StatusUpdateModal from '../components/StatusUpdateModal'
 
 type TabType = 'sof-assessment' | 'transactions'
 
@@ -13,6 +14,7 @@ export default function MatterDetailPage() {
   const [matter, setMatter] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showStatusModal, setShowStatusModal] = useState(false)
 
   // Fetch matter data from API
   useEffect(() => {
@@ -90,8 +92,11 @@ export default function MatterDetailPage() {
             >
               📊 Generate Report
             </button>
-            <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
-              Update Status
+            <button 
+              onClick={() => setShowStatusModal(true)}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+            >
+              🔄 Update Status
             </button>
           </div>
         </div>
@@ -144,6 +149,24 @@ export default function MatterDetailPage() {
         {activeTab === 'sof-assessment' && <SoFAssessment matterId={matter.id} />}
         {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
       </div>
+
+      {/* Status Update Modal */}
+      {showStatusModal && (
+        <StatusUpdateModal
+          matterId={matter.id}
+          currentStatus={matter.status}
+          onClose={() => setShowStatusModal(false)}
+          onSuccess={() => {
+            // Refresh matter data after status update
+            if (id) {
+              fetch(`${API_BASE_URL}/api/v1/matters/${id}`)
+                .then(res => res.json())
+                .then(data => setMatter(data))
+                .catch(err => console.error('Error refreshing matter:', err))
+            }
+          }}
+        />
+      )}
     </div>
   )
 }
