@@ -525,8 +525,7 @@ async def download_file_note(
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     footer_text = doc.add_paragraph()
-    footer_text.add_run('\nThis assessment was conducted using AI-powered analysis tools.\n')
-    footer_text.add_run('Document generated on: ' + datetime.now().strftime("%d %B %Y at %H:%M"))
+    footer_text.add_run('\nDocument generated on: ' + datetime.now().strftime("%d %B %Y at %H:%M"))
     footer_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Save to BytesIO
