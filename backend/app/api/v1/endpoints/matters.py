@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel
+import json
+import os
 
 from app.db.session import get_db
 from app.models import Matter, MatterStatus
