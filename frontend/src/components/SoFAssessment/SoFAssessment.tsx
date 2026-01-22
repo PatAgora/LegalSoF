@@ -1093,9 +1093,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Source of Funds Assessment</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Upload documents and run AI-powered SoF analysis with Transaction Review integration
-          </p>
         </div>
         {status && status.status !== 'no_data' && (
           <button
