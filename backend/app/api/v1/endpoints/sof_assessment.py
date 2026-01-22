@@ -410,7 +410,7 @@ async def download_file_note(
     db: Session = Depends(get_sync_db)
 ):
     """
-    Download audit-ready file note as plain text
+    Download audit-ready file note as Word document (.docx)
     """
     
     # Verify matter exists
@@ -433,15 +433,113 @@ async def download_file_note(
             detail=f"Assessment not completed (status: {storage['status']})"
         )
     
-    # Get file note
+    # Get file note text
     file_note = storage['assessment_result']['file_note_summary']
     
-    from fastapi.responses import PlainTextResponse
+    # Generate Word document
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
     
-    return PlainTextResponse(
-        content=file_note,
+    doc = Document()
+    
+    # Set document margins
+    sections = doc.sections
+    for section in sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+    
+    # Add title
+    title = doc.add_heading('Source of Funds Assessment File Note', level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Add matter reference
+    matter_ref = doc.add_paragraph()
+    matter_ref.add_run(f'Matter Reference: {matter.reference_number or f"MAT-{matter.id}"}').bold = True
+    matter_ref.add_run(f'\nClient: {matter.client_name}')
+    matter_ref.add_run(f'\nDate: {datetime.now().strftime("%d %B %Y")}')
+    matter_ref.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    doc.add_paragraph()  # Spacing
+    
+    # Parse and format the file note sections
+    sections_text = file_note.split('===')
+    
+    for section in sections_text:
+        if not section.strip():
+            continue
+            
+        lines = section.strip().split('\n')
+        section_title = lines[0].strip()
+        section_content = '\n'.join(lines[1:]).strip()
+        
+        # Add section heading
+        if section_title:
+            heading = doc.add_heading(section_title, level=1)
+            # Style the heading
+            for run in heading.runs:
+                run.font.color.rgb = RGBColor(0, 51, 102)  # Dark blue
+        
+        # Add section content
+        if section_content:
+            # Split content into paragraphs
+            paragraphs = section_content.split('\n\n')
+            for para_text in paragraphs:
+                if not para_text.strip():
+                    continue
+                    
+                para = doc.add_paragraph()
+                
+                # Handle bullet points and formatting
+                if para_text.strip().startswith('•') or para_text.strip().startswith('-'):
+                    para.style = 'List Bullet'
+                    para_text = para_text.strip()[1:].strip()
+                
+                # Add text with basic formatting
+                for line in para_text.split('\n'):
+                    if not line.strip():
+                        continue
+                    
+                    # Bold text between ** **
+                    parts = line.split('**')
+                    for i, part in enumerate(parts):
+                        if i % 2 == 0:
+                            para.add_run(part)
+                        else:
+                            para.add_run(part).bold = True
+                    
+                    para.add_run('\n')
+                
+                # Set paragraph spacing
+                para_format = para.paragraph_format
+                para_format.space_after = Pt(6)
+    
+    # Add footer
+    doc.add_paragraph()
+    footer = doc.add_paragraph()
+    footer.add_run('_' * 80)
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    footer_text = doc.add_paragraph()
+    footer_text.add_run('\nThis assessment was conducted using AI-powered analysis tools.\n')
+    footer_text.add_run('Document generated on: ' + datetime.now().strftime("%d %B %Y at %H:%M"))
+    footer_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Save to BytesIO
+    docx_buffer = BytesIO()
+    doc.save(docx_buffer)
+    docx_buffer.seek(0)
+    
+    # Return as downloadable Word document
+    return StreamingResponse(
+        docx_buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            "Content-Disposition": f"attachment; filename=sof_file_note_matter_{matter_id}.txt"
+            "Content-Disposition": f"attachment; filename=SoF_File_Note_Matter_{matter.reference_number or matter.id}.docx"
         }
     )
 
