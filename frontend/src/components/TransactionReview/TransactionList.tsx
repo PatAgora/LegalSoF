@@ -240,76 +240,111 @@ export default function TransactionList({ matterId }: TransactionListProps) {
         </div>
       </div>
 
-      {/* Transaction List */}
-      <div className="space-y-4">
-        {filteredTransactions.map((txn) => {
-          const txnAlerts = getAlertsForTransaction(txn.id);
-          const highestSeverity = txnAlerts.length > 0
-            ? txnAlerts.reduce((prev, curr) => {
-                const severityOrder = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
-                return (severityOrder[curr.severity as keyof typeof severityOrder] || 0) >
-                       (severityOrder[prev.severity as keyof typeof severityOrder] || 0)
-                  ? curr
-                  : prev;
-              })
-            : null;
+      {/* Transaction Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        {/* Table Header */}
+        <div className="bg-gray-50 border-b border-gray-200">
+          <div className="grid grid-cols-12 gap-4 px-6 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+            <div className="col-span-2">Transaction ID</div>
+            <div className="col-span-1">Date</div>
+            <div className="col-span-1">Severity</div>
+            <div className="col-span-3">Description</div>
+            <div className="col-span-2 text-right">Amount</div>
+            <div className="col-span-2">Country / Channel</div>
+            <div className="col-span-1 text-center">Actions</div>
+          </div>
+        </div>
 
-          return (
-            <div
-              key={txn.id}
-              className={`bg-white rounded-lg shadow border-l-4 ${
-                highestSeverity ? getSeverityColor(highestSeverity.severity) : 'border-gray-300'
-              } overflow-hidden`}
-            >
-              <div className="p-4">
-                {/* Transaction Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 mb-1">
-                      <span className="text-sm font-mono font-semibold text-gray-900">{txn.id}</span>
-                      <span className="text-xs text-gray-500">•</span>
-                      <span className="text-sm text-gray-600">{new Date(txn.txn_date).toLocaleDateString()}</span>
-                      <span className="text-xs text-gray-500">•</span>
-                      <span className="text-sm text-gray-600">{txn.customer_id}</span>
-                      {/* Severity Badge */}
-                      {highestSeverity && (
-                        <>
-                          <span className="text-xs text-gray-500">•</span>
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
-                            highestSeverity.severity === 'CRITICAL' ? 'bg-red-600 text-white' :
-                            highestSeverity.severity === 'HIGH' ? 'bg-orange-500 text-white' :
-                            highestSeverity.severity === 'MEDIUM' ? 'bg-yellow-500 text-white' :
-                            'bg-gray-500 text-white'
-                          }`}>
-                            <span>{highestSeverity.severity === 'CRITICAL' ? '🔴' : highestSeverity.severity === 'HIGH' ? '🟠' : '🟡'}</span>
-                            <span>{highestSeverity.severity}</span>
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-700">{txn.narrative}</div>
+        {/* Table Body */}
+        <div className="divide-y divide-gray-200">
+          {filteredTransactions.map((txn) => {
+            const txnAlerts = getAlertsForTransaction(txn.id);
+            const highestSeverity = txnAlerts.length > 0
+              ? txnAlerts.reduce((prev, curr) => {
+                  const severityOrder = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+                  return (severityOrder[curr.severity as keyof typeof severityOrder] || 0) >
+                         (severityOrder[prev.severity as keyof typeof severityOrder] || 0)
+                    ? curr
+                    : prev;
+                })
+              : null;
+
+            return (
+              <div key={txn.id}>
+                {/* Main Transaction Row */}
+                <div className={`grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50 transition-colors border-l-4 ${
+                  highestSeverity ? getSeverityColor(highestSeverity.severity) : 'border-transparent'
+                }`}>
+                  {/* Transaction ID */}
+                  <div className="col-span-2">
+                    <div className="text-sm font-mono font-semibold text-gray-900">{txn.id}</div>
+                    <div className="text-xs text-gray-500">{txn.customer_id}</div>
                   </div>
-                  <div className="text-right ml-4">
-                    <div className={`text-lg font-bold ${txn.direction === 'in' || txn.direction === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
+
+                  {/* Date */}
+                  <div className="col-span-1">
+                    <div className="text-sm text-gray-700">{new Date(txn.txn_date).toLocaleDateString('en-GB')}</div>
+                  </div>
+
+                  {/* Severity Column */}
+                  <div className="col-span-1">
+                    {highestSeverity ? (
+                      <span className={`inline-flex items-center justify-center w-full px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${
+                        highestSeverity.severity === 'CRITICAL' ? 'bg-red-600 text-white' :
+                        highestSeverity.severity === 'HIGH' ? 'bg-orange-500 text-white' :
+                        highestSeverity.severity === 'MEDIUM' ? 'bg-yellow-500 text-white' :
+                        'bg-blue-500 text-white'
+                      }`}>
+                        {highestSeverity.severity === 'CRITICAL' ? '🔴' : 
+                         highestSeverity.severity === 'HIGH' ? '🟠' : 
+                         highestSeverity.severity === 'MEDIUM' ? '🟡' : '🔵'}
+                        {' '}{highestSeverity.severity}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center justify-center w-full px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                        ✓ Clean
+                      </span>
+                    )}
+                    {txnAlerts.length > 1 && (
+                      <div className="text-xs text-gray-500 mt-1 text-center">+{txnAlerts.length - 1} more</div>
+                    )}
+                  </div>
+
+                  {/* Description */}
+                  <div className="col-span-3">
+                    <div className="text-sm text-gray-700 line-clamp-2">{txn.narrative}</div>
+                  </div>
+
+                  {/* Amount */}
+                  <div className="col-span-2 text-right">
+                    <div className={`text-sm font-bold ${txn.direction === 'in' || txn.direction === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
                       {txn.direction === 'in' || txn.direction === 'credit' ? '+' : '-'} {txn.currency} {txn.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {txn.country_iso2} • {txn.channel || 'Unknown'}
-                    </div>
+                  </div>
+
+                  {/* Country / Channel */}
+                  <div className="col-span-2">
+                    <div className="text-sm text-gray-700">{txn.country_iso2 || 'N/A'}</div>
+                    <div className="text-xs text-gray-500">{txn.channel || 'Unknown'}</div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="col-span-1 text-center">
+                    <button 
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      onClick={() => {/* Toggle alert details */}}
+                    >
+                      {txnAlerts.length > 0 ? '🔍 View' : '👁️'}
+                    </button>
                   </div>
                 </div>
 
-                {/* Alerts */}
+                {/* Alert Details (Expandable) - Only show if there are alerts */}
                 {txnAlerts.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <div className="flex items-center mb-2">
-                      <span className="text-sm font-semibold text-gray-700 mr-2">
-                        🚨 {txnAlerts.length} Alert{txnAlerts.length > 1 ? 's' : ''}:
-                      </span>
-                    </div>
+                  <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
                     <div className="space-y-3">
                       {txnAlerts.map((alert) => (
-                        <div key={alert.id} className="bg-gray-50 rounded-md p-4 border border-gray-200">
+                        <div key={alert.id} className="bg-white rounded-md p-4 border border-gray-300">
                           {/* Alert Header */}
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex items-center space-x-2">
@@ -356,7 +391,7 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                           )}
 
                           {/* AI Rationale */}
-                          <div className="mb-3 bg-white rounded p-3 border border-blue-200">
+                          <div className="mb-3 bg-blue-50 rounded p-3 border border-blue-200">
                             <div className="flex items-center mb-2">
                               <span className="text-xs font-semibold text-blue-700">🤖 AI Rationale</span>
                             </div>
@@ -370,7 +405,7 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                           </div>
 
                           {/* AI Outreach */}
-                          <div className="mb-3 bg-white rounded p-3 border border-purple-200">
+                          <div className="mb-3 bg-purple-50 rounded p-3 border border-purple-200">
                             <div className="flex items-center mb-2">
                               <span className="text-xs font-semibold text-purple-700">💬 AI Suggested Outreach</span>
                             </div>
@@ -406,9 +441,9 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                   </div>
                 )}
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {filteredTransactions.length === 0 && (
