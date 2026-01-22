@@ -82,8 +82,13 @@ export default function MatterDetailPage() {
             </p>
           </div>
           <div className="flex space-x-3">
-            <button className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-              Generate Report
+            <button 
+              onClick={() => {
+                window.open(`${API_BASE_URL}/api/v1/matters/${id}/report`, '_blank')
+              }}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+            >
+              📊 Generate Report
             </button>
             <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
               Update Status
