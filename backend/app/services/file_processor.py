@@ -213,6 +213,31 @@ class FileProcessor:
         Process PDF bank statement
         Enhanced extraction supporting multiple bank formats including NatWest
         """
+        # Try enhanced parser first
+        try:
+            from app.services.enhanced_pdf_parser import enhanced_pdf_parser
+            
+            print("\n🔍 Using Enhanced PDF Parser")
+            result = enhanced_pdf_parser.parse_pdf(content)
+            
+            if result['success'] and result['transactions']:
+                print(f"✅ Enhanced parser extracted {len(result['transactions'])} transactions")
+                return {
+                    "success": True,
+                    "data": {
+                        "bank_statements": result['transactions'],
+                        "transaction_count": len(result['transactions'])
+                    },
+                    "file_type": "pdf_statement",
+                    "metadata": result['metadata']
+                }
+            else:
+                print(f"⚠️ Enhanced parser failed: {result.get('error')}")
+        except Exception as e:
+            print(f"⚠️ Enhanced parser error: {e}, falling back to legacy parser")
+        
+        # Fallback to original parser
+        print("📄 Using legacy PDF parser")
         try:
             transactions = []
             debug_info = {
