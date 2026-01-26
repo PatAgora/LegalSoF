@@ -211,89 +211,183 @@ class FileProcessor:
     async def process_pdf_bank_statement(self, content: bytes) -> Dict[str, Any]:
         """
         Process PDF bank statement
-        Attempts to extract transaction data using pdfplumber
+        Enhanced extraction supporting multiple bank formats including NatWest
         """
         try:
             transactions = []
+            debug_info = {
+                "pages_processed": 0,
+                "tables_found": 0,
+                "text_lines_checked": 0,
+                "transactions_extracted": 0
+            }
             
             with pdfplumber.open(io.BytesIO(content)) as pdf:
-                for page in pdf.pages:
-                    # Extract tables
+                for page_num, page in enumerate(pdf.pages, 1):
+                    debug_info["pages_processed"] += 1
+                    
+                    # METHOD 1: Try table extraction first
                     tables = page.extract_tables()
+                    debug_info["tables_found"] += len(tables)
                     
                     for table in tables:
-                        # Try to identify header row
                         if not table or len(table) < 2:
                             continue
                         
-                        # Simple heuristic: look for date, amount, description columns
+                        # Try to identify header row (case-insensitive)
                         header = [str(cell).lower() if cell else '' for cell in table[0]]
                         
-                        # Find column indices
-                        date_idx = self._find_column_index(header, ['date', 'transaction date'])
-                        amount_idx = self._find_column_index(header, ['amount', 'debit', 'credit', 'value'])
-                        desc_idx = self._find_column_index(header, ['description', 'details', 'narrative'])
-                        balance_idx = self._find_column_index(header, ['balance'])
+                        # Find column indices (more flexible matching)
+                        date_idx = self._find_column_index(header, ['date', 'transaction date', 'trans date', 'posted date', 'posted'])
+                        amount_idx = self._find_column_index(header, ['amount', 'debit', 'credit', 'value', 'paid in', 'paid out', 'money in', 'money out'])
+                        desc_idx = self._find_column_index(header, ['description', 'details', 'narrative', 'transaction', 'particulars', 'type'])
+                        balance_idx = self._find_column_index(header, ['balance', 'running balance'])
                         
-                        if date_idx is None or amount_idx is None:
-                            continue
-                        
-                        # Parse rows
-                        for row in table[1:]:
-                            if not row or len(row) <= max(date_idx, amount_idx):
+                        # Parse rows even if not all columns found
+                        for row_idx, row in enumerate(table[1:]):
+                            if not row:
                                 continue
                             
                             try:
-                                # Parse date
-                                date_str = str(row[date_idx]).strip()
-                                if not date_str or date_str.lower() in ['none', 'null', '']:
-                                    continue
-                                
-                                parsed_date = self._parse_date(date_str)
-                                
-                                # Parse amount
-                                amount_str = str(row[amount_idx]).replace('£', '').replace(',', '').replace('$', '').strip()
-                                if not amount_str or amount_str.lower() in ['none', 'null', '']:
-                                    continue
-                                
-                                amount = abs(float(amount_str))
-                                
-                                # Infer direction (look for minus sign or separate debit/credit columns)
-                                direction = 'credit'
-                                if '-' in str(row[amount_idx]) or amount_str.startswith('-'):
-                                    direction = 'debit'
-                                
-                                # Description
-                                description = str(row[desc_idx]).strip() if desc_idx is not None and desc_idx < len(row) else 'N/A'
-                                
-                                # Balance
+                                # Try to find date and amount in ANY cell
+                                date_str = None
+                                amount_str = None
+                                description = ""
                                 balance = None
+                                
+                                # If we know column indices, use them
+                                if date_idx is not None and date_idx < len(row):
+                                    date_str = str(row[date_idx]).strip()
+                                if amount_idx is not None and amount_idx < len(row):
+                                    amount_str = str(row[amount_idx]).strip()
+                                if desc_idx is not None and desc_idx < len(row):
+                                    description = str(row[desc_idx]).strip()
                                 if balance_idx is not None and balance_idx < len(row):
+                                    balance_str = str(row[balance_idx]).replace('£', '').replace(',', '').strip()
                                     try:
-                                        balance_str = str(row[balance_idx]).replace('£', '').replace(',', '').strip()
                                         balance = float(balance_str)
                                     except:
                                         pass
+                                
+                                # FALLBACK: Scan all cells for date and amount patterns
+                                if not date_str or not amount_str:
+                                    for cell in row:
+                                        if cell:
+                                            cell_str = str(cell).strip()
+                                            # Check for date pattern
+                                            if not date_str and re.search(r'\d{2}[-/]\d{2}[-/]\d{2,4}', cell_str):
+                                                date_str = cell_str
+                                            # Check for amount pattern
+                                            if not amount_str and re.search(r'[£$€]?[\d,]+\.\d{2}', cell_str):
+                                                amount_str = cell_str
+                                            # Collect description if not a date or amount
+                                            if not re.search(r'\d{2}[-/]\d{2}[-/]\d{2,4}', cell_str) and not re.search(r'[£$€]?[\d,]+\.\d{2}', cell_str):
+                                                if len(cell_str) > 3:
+                                                    description = description + " " + cell_str if description else cell_str
+                                
+                                if not date_str or not amount_str:
+                                    continue
+                                
+                                if date_str.lower() in ['none', 'null', ''] or amount_str.lower() in ['none', 'null', '']:
+                                    continue
+                                
+                                # Parse date
+                                parsed_date = self._parse_date(date_str)
+                                if not parsed_date:
+                                    continue
+                                
+                                # Parse amount
+                                clean_amount = amount_str.replace('£', '').replace('$', '').replace('€', '').replace(',', '').strip()
+                                
+                                # Handle negative/debit indicators
+                                direction = 'credit'
+                                if '-' in clean_amount or '(' in clean_amount or 'DR' in amount_str.upper():
+                                    direction = 'debit'
+                                    clean_amount = clean_amount.replace('-', '').replace('(', '').replace(')', '').strip()
+                                
+                                try:
+                                    amount = abs(float(clean_amount))
+                                except:
+                                    continue
                                 
                                 transactions.append({
                                     "account_id": "PDF_Statement",
                                     "date": parsed_date,
                                     "amount": amount,
-                                    "currency": "GBP",  # Default assumption
+                                    "currency": "GBP",
                                     "direction": direction,
-                                    "description": description,
+                                    "description": description[:500] if description else "N/A",
                                     "counterparty_name": "",
                                     "balance": balance
                                 })
+                                debug_info["transactions_extracted"] += 1
                             
                             except Exception as e:
-                                # Skip malformed rows
+                                # Skip malformed rows silently
                                 continue
+                    
+                    # METHOD 2: If no tables or few transactions, try text extraction
+                    if len(transactions) < 3:  # Threshold: try text extraction if < 3 transactions found
+                        text = page.extract_text()
+                        if text:
+                            lines = text.split('\n')
+                            debug_info["text_lines_checked"] += len(lines)
+                            
+                            for line in lines:
+                                line = line.strip()
+                                if not line or len(line) < 10:
+                                    continue
+                                
+                                # Look for lines with date pattern AND amount pattern
+                                date_match = re.search(r'\d{2}[-/]\d{2}[-/]\d{2,4}', line)
+                                amount_match = re.search(r'[£$€]?[\d,]+\.\d{2}', line)
+                                
+                                if date_match and amount_match:
+                                    try:
+                                        date_str = date_match.group()
+                                        amount_str = amount_match.group()
+                                        
+                                        # Extract description (text between date and amount)
+                                        desc_start = date_match.end()
+                                        desc_end = amount_match.start()
+                                        description = line[desc_start:desc_end].strip()
+                                        
+                                        parsed_date = self._parse_date(date_str)
+                                        if not parsed_date:
+                                            continue
+                                        
+                                        clean_amount = amount_str.replace('£', '').replace('$', '').replace('€', '').replace(',', '').strip()
+                                        direction = 'debit' if '-' in line[:amount_match.start()] or 'DR' in line else 'credit'
+                                        clean_amount = clean_amount.replace('-', '').replace('(', '').replace(')', '')
+                                        
+                                        amount = abs(float(clean_amount))
+                                        
+                                        # Check if this transaction already exists (avoid duplicates)
+                                        duplicate = any(
+                                            t['date'] == parsed_date and abs(t['amount'] - amount) < 0.01 
+                                            for t in transactions
+                                        )
+                                        
+                                        if not duplicate:
+                                            transactions.append({
+                                                "account_id": "PDF_Statement",
+                                                "date": parsed_date,
+                                                "amount": amount,
+                                                "currency": "GBP",
+                                                "direction": direction,
+                                                "description": description[:500] if description else "Transaction",
+                                                "counterparty_name": "",
+                                                "balance": None
+                                            })
+                                            debug_info["transactions_extracted"] += 1
+                                    
+                                    except Exception:
+                                        continue
             
             if not transactions:
                 return {
                     "success": False,
-                    "error": "No transaction data could be extracted from PDF"
+                    "error": f"No transaction data could be extracted from PDF. Debug: {debug_info}"
                 }
             
             return {
