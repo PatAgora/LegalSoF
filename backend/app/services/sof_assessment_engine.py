@@ -625,9 +625,12 @@ class SoFAssessmentEngine:
         """
         from app.models import TransactionAlert, Transaction
         
-        alerts = self.db.query(TransactionAlert).filter(
-            TransactionAlert.matter_id == self.matter_id
-        ).all()
+        # Check if database connection is available
+        alerts = []
+        if self.db:
+            alerts = self.db.query(TransactionAlert).filter(
+                TransactionAlert.matter_id == self.matter_id
+            ).all()
         
         # If no alerts in database, analyze bank statements directly
         if not alerts:
