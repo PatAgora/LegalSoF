@@ -1,0 +1,97 @@
+Comprehensive Test Suite - Directory Structure
+===============================================
+
+test_data/comprehensive_test/
+│
+├── 📘 Documentation
+│   ├── README.md                           Main documentation and overview
+│   ├── TEST_SUITE_COMPLETE.md             Complete details of all scenarios
+│   ├── QUICK_START.md                     Quick access guide
+│   └── DIRECTORY_STRUCTURE.txt            This file
+│
+├── 🛠️ Tools & Scripts
+│   ├── generate_test_suite.py             Generates all test files
+│   ├── run_all_tests.py                   Automated test runner for all scenarios
+│   └── test_scenario.sh                   Individual scenario tester
+│
+├── 📁 Scenario 1: Perfect Match ✅
+│   └── scenario_1_perfect_match/
+│       ├── client_info.json               SoF: Inheritance £250k + Property £200k
+│       ├── bank_statement_matching.pdf    Contains both transactions
+│       ├── bank_statement_non_matching.pdf
+│       ├── probate_grant_2023_8765.pdf    Margaret Elizabeth Thompson estate
+│       └── completion_statement_*.pdf     78 Victoria Road, Brighton
+│
+├── 📁 Scenario 2: Missing Solicitor ⚠️
+│   └── scenario_2_missing_solicitor/
+│       ├── client_info.json               SoF: Business Sale £500k + Loan £250k
+│       ├── bank_statement_matching.pdf    
+│       ├── bank_statement_non_matching.pdf
+│       ├── business_sale_*.pdf            Missing solicitor field (intentional)
+│       └── loan_agreement_*.pdf           HSBC Bank loan agreement
+│
+├── 📁 Scenario 3: Amount Mismatch ❌
+│   └── scenario_3_amount_mismatch/
+│       ├── client_info.json               SoF: Property £400k + Savings £220k
+│       ├── bank_statement_matching.pdf    
+│       ├── bank_statement_non_matching.pdf Shows £385k and £215k (not claimed amounts)
+│       └── completion_statement_*.pdf     Shows £385k net proceeds (£15k difference)
+│
+├── 📁 Scenario 4: Date Discrepancy ⚠️
+│   └── scenario_4_date_discrepancy/
+│       ├── client_info.json               SoF: Inheritance £350k + Business Sale £540k
+│       ├── bank_statement_matching.pdf    
+│       ├── bank_statement_non_matching.pdf Dates don't match claims
+│       ├── probate_grant_2023_5432.pdf    Distribution Aug (claimed Jun) - 2 month diff
+│       └── business_sale_*.pdf            Completion Oct (claimed Sep) - 1 month diff
+│
+└── 📁 Scenario 5: Wrong Document Type ❌
+    └── scenario_5_wrong_documents/
+        ├── client_info.json               SoF: Gift £100k + Savings £220k
+        ├── bank_statement_matching.pdf    
+        ├── bank_statement_non_matching.pdf
+        ├── gift_letter.pdf                Proper gift letter from parents
+        └── credit_card_statement.pdf      Wrong doc type (should be bank statement)
+
+
+File Counts
+===========
+Total Files:          27 files
+PDF Files:            19 PDFs
+  - Bank Statements:  10 PDFs (5 matching + 5 non-matching)
+  - Supporting Docs:  9 PDFs (probate grants, completion statements, etc.)
+JSON Files:           5 files (client_info.json for each scenario)
+Python Scripts:       2 files (generator + test runner)
+Shell Scripts:        1 file (scenario tester)
+Documentation:        4 files (README + guides)
+
+
+Key Features
+============
+✅ All bank statements are PDF files (must extract transaction data)
+✅ Supporting documents are PDF files (realistic format)
+✅ Intentional discrepancies for testing verification logic
+✅ Covers all SoF source types (inheritance, property, business, loan, gift, savings)
+✅ Covers all verification scenarios (perfect, missing, mismatch, date issues, wrong docs)
+✅ Automated test runners for easy testing
+✅ Comprehensive documentation
+
+
+Quick Commands
+==============
+
+# Run all tests
+cd /home/user/webapp/test_data/comprehensive_test
+python3 run_all_tests.py
+
+# Test individual scenario
+./test_scenario.sh scenario_1_perfect_match
+
+# View scenario details
+cat scenario_1_perfect_match/client_info.json | python3 -m json.tool
+
+# List all PDFs
+find . -name "*.pdf" | sort
+
+# Check PDF content
+python3 -c "import PyPDF2; f=open('scenario_1_perfect_match/bank_statement_matching.pdf','rb'); print(PyPDF2.PdfReader(f).pages[0].extract_text())"

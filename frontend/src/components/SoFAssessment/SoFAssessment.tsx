@@ -92,6 +92,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   });
   
   const [manualSofExplanation, setManualSofExplanation] = useState('');
+  
+  // Alert management state
+  const [alertRationales, setAlertRationales] = useState<{ [key: number]: string }>({});
+  const [alertSatisfied, setAlertSatisfied] = useState<{ [key: number]: boolean }>({});
 
   useEffect(() => {
     fetchStatus();
@@ -236,7 +240,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/run`,
-        { method: 'POST' }
+        { 
+          method: 'POST',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        }
       );
 
       if (!response.ok) {
@@ -245,6 +255,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       }
 
       const data = await response.json();
+      console.log('Assessment result received:', data.assessment);
+      console.log('Evidence matches:', data.assessment.evidence_matches);
       setResult(data.assessment);
       setActiveStep('results');
       await fetchStatus();
@@ -312,42 +324,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     
     return (
       <div className="space-y-4">
-        {/* Client Information Header */}
-        {result.client_info && result.purchase && (
-          <div className="bg-[#EAD8C0] border border-[#D4C4B0] rounded-lg p-4">
-            <h5 className="font-semibold text-gray-800 mb-3 text-lg">Client Information</h5>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-gray-700 font-medium">Client Name:</span>
-                <span className="text-gray-900 ml-2">{result.client_info.client_name || 'Not provided'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Risk Rating:</span>
-                <span className="text-gray-900 ml-2">{(result.client_info.client_risk_rating || 'Not specified').toUpperCase()}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Business Sector:</span>
-                <span className="text-gray-900 ml-2">{result.client_info.business_sector || 'Not specified'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">PEP Status:</span>
-                <span className="text-gray-900 ml-2">{result.client_info.is_pep ? 'Yes' : 'No'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Purchase Amount:</span>
-                <span className="text-gray-900 ml-2">£{result.purchase.amount?.toLocaleString() || 0} {result.purchase.currency || 'GBP'}</span>
-              </div>
-              <div>
-                <span className="text-gray-700 font-medium">Purchase Description:</span>
-                <span className="text-gray-900 ml-2">{result.purchase.description || 'Not specified'}</span>
-              </div>
-              <div className="col-span-2">
-                <span className="text-gray-700 font-medium">Expected Payment Date:</span>
-                <span className="text-gray-900 ml-2">{result.purchase.expected_payment_date || 'Not specified'}</span>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Client Information Header - REMOVED per user request */}
 
         {/* Claims Overview */}
         <div>
@@ -355,14 +332,57 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <ul className="space-y-1 text-sm">
             {result.claims.map((claim, idx) => {
               const evidence = result.evidence_matches[idx];
-              const verified = evidence?.verified || false;
+              const hasBank = evidence?.verified || false;
+              const hasDocs = evidence?.document_verified || false;
+              const hasDocUploaded = evidence?.document_verification && evidence.document_verification.verification_details?.document_used;
+              const docIssues = evidence?.document_verification?.issues || [];
+              const confidence = evidence?.document_verification?.confidence || 0;
+              
+              let status = '';
+              let icon = '';
+              let details = '';
+              
+              if (hasBank && hasDocs) {
+                status = 'FULLY VERIFIED';
+                icon = '✅';
+              } else if (hasBank && hasDocUploaded && !hasDocs) {
+                // Document uploaded but has issues
+                status = 'REQUIRES REVIEW';
+                icon = '⚠️';
+                const firstIssue = docIssues[0] || 'Document verification incomplete';
+                details = ` - ${firstIssue}`;
+                if (docIssues.length > 1) {
+                  details += ` (+${docIssues.length - 1} more)`;
+                }
+              } else if (hasBank && !hasDocUploaded) {
+                status = 'BANK PAYMENT FOUND - DOCS REQUIRED';
+                icon = '⚠️';
+              } else if (hasDocs) {
+                status = 'DOCS PROVIDED - BANK PAYMENT REQUIRED';
+                icon = '⚠️';
+              } else if (hasDocUploaded && !hasDocs) {
+                status = 'DOC UPLOADED - NEEDS REVIEW';
+                icon = '⚠️';
+                details = ` - ${docIssues[0] || 'Verification incomplete'}`;
+              } else {
+                status = 'NOT VERIFIED';
+                icon = '❌';
+              }
+              
               return (
-                <li key={idx} className="flex items-center space-x-2">
-                  <span>⚠️</span>
-                  <span>
-                    {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
-                    <span className="ml-2 font-semibold">[{verified ? 'BANK PAYMENT FOUND - DOCS REQUIRED' : 'NO BANK PAYMENT - DOCS REQUIRED'}]</span>
-                  </span>
+                <li key={idx} className="flex flex-col space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <span>{icon}</span>
+                    <span>
+                      {claim.source_type}: £{claim.expected_amount.toLocaleString()} 
+                      <span className="ml-2 font-semibold">[{status}]</span>
+                    </span>
+                  </div>
+                  {details && (
+                    <div className="ml-6 text-xs text-gray-600">
+                      {details}
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -373,130 +393,271 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         <div>
           <h5 className="font-semibold text-gray-900 mb-2">Evidence Review:</h5>
           <p className="text-sm mb-2 text-gray-900">
-            Direct verification: {verified_count}/{total_claims} claims matched to bank statement entries.
+            Bank transactions: {verified_count}/{total_claims} claims matched to bank statement entries.
           </p>
-          <div className="bg-[#D4C4B0] border border-[#C4B4A0] rounded p-3 mb-3 text-sm">
-            <p className="font-semibold text-gray-800 mb-1">⚠️ IMPORTANT:</p>
-            <p className="text-gray-900">
-              Bank statements alone are INSUFFICIENT. Corroborating source documents (e.g., probate grants, 
-              completion statements) are REQUIRED to prove legitimacy. Bank payments verify receipt, NOT lawful origin.
+          <p className="text-sm mb-2 text-gray-900">
+            Supporting documents: {result.evidence_matches.filter(e => e.document_verified).length}/{total_claims} claims verified with source documentation.
+          </p>
+          
+          {/* Show requires review count if any */}
+          {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length > 0 && (
+            <p className="text-sm mb-2 text-amber-700 font-semibold">
+              ⚠️ REQUIRES REVIEW: {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length}/{total_claims} claims (confidence {'<'} 100%).
             </p>
-          </div>
+          )}
+          
+          {/* Show positive message if ALL claims are fully verified with 100% confidence */}
+          {result.evidence_matches.filter(e => e.verified && e.document_verified && (e.document_verification?.confidence || 0) >= 0.999).length === total_claims && total_claims > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded p-3 mb-3 text-sm">
+              <p className="font-semibold text-green-800 mb-1">✅ VERIFICATION COMPLETE:</p>
+              <p className="text-green-900">
+                All claims have been fully verified with both bank statement evidence and supporting documents at 100% confidence. 
+                AML compliance requirements for source documentation have been met.
+              </p>
+            </div>
+          )}
           <ul className="space-y-2 text-sm">
-            {result.evidence_matches.map((evidence, idx) => (
-              <li key={idx}>
-                {evidence.verified ? (
-                  <div>
-                    <div className="font-medium">⚠️ Claim {idx + 1} ({evidence.claim_source}): Bank payment found - SOURCE DOCS REQUIRED</div>
-                    {evidence.transactions.length > 0 && (
-                      <div className="ml-6 mt-1 space-y-1">
-                        {evidence.transactions.map((txn: any, tidx: number) => (
-                          <div key={tidx} className="text-xs">
-                            <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
-                            <div>• Transaction: {txn.description || 'N/A'}</div>
-                            <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
-                            <div className="ml-2 text-gray-800 font-semibold mt-1">
-                              ⚠️ REQUIRES: Source documentation to prove legitimacy
+            {result.evidence_matches.map((evidence, idx) => {
+              const hasBank = evidence.verified;
+              const hasDocs = evidence.document_verified;
+              const hasDocUploaded = evidence.document_verification && evidence.document_verification.verification_details?.document_used;
+              const hasDocVerificationAttempt = evidence.document_verification && (hasDocUploaded || (evidence.document_verification.issues && evidence.document_verification.issues.length > 0));
+              const docIssues = evidence.document_verification?.issues || [];
+              const confidence = evidence.document_verification?.confidence || 0;
+              const fullyVerified = hasBank && hasDocs && confidence >= 0.999;
+              const requiresReview = hasDocVerificationAttempt && !hasDocs;
+              
+              return (
+                <li key={idx}>
+                  {fullyVerified ? (
+                    <div>
+                      <div className="font-medium text-green-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED (100%)</div>
+                      {evidence.transactions.length > 0 && (
+                        <div className="ml-6 mt-1 space-y-1">
+                          {evidence.transactions.map((txn: any, tidx: number) => (
+                            <div key={tidx} className="text-xs">
+                              <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
+                              <div>• Transaction: {txn.description || 'N/A'}</div>
+                              <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                          {evidence.document_verification && (
+                            <div className="ml-2 mt-2 space-y-1">
+                              <div className="text-green-800 font-semibold">
+                                ✅ SUPPORTING DOCUMENT VERIFIED (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
+                              </div>
+                              {evidence.document_verification.verification_details && (
+                                <div className="text-xs text-gray-700 space-y-0.5">
+                                  {evidence.document_verification.verification_details.comparison && (
+                                    <div className="mt-1 pt-1 border-t border-gray-300">
+                                      <div className="font-semibold">📊 Evidence Comparison:</div>
+                                      <div className="ml-2 space-y-0.5">
+                                        {evidence.document_verification.verification_details.comparison.customer_claim && (
+                                          <div>👤 Customer: £{evidence.document_verification.verification_details.comparison.customer_claim.claimed_amount?.toLocaleString()}</div>
+                                        )}
+                                        {evidence.document_verification.verification_details.comparison.document_evidence && (
+                                          <>
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.distribution_amount && (
+                                              <div>✅ Document: £{evidence.document_verification.verification_details.comparison.document_evidence.distribution_amount?.toLocaleString()} distribution</div>
+                                            )}
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.net_proceeds && (
+                                              <div>✅ Document: £{evidence.document_verification.verification_details.comparison.document_evidence.net_proceeds?.toLocaleString()} net proceeds</div>
+                                            )}
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.payment_date && (
+                                              <div>📅 Payment: {evidence.document_verification.verification_details.comparison.document_evidence.payment_date}</div>
+                                            )}
+                                            {evidence.document_verification.verification_details.comparison.document_evidence.completion_date && (
+                                              <div>📅 Completion: {evidence.document_verification.verification_details.comparison.document_evidence.completion_date}</div>
+                                            )}
+                                          </>
+                                        )}
+                                        {evidence.document_verification.verification_details.comparison.matches?.amount_matches && (
+                                          <div className="text-green-700 font-semibold">✅ Amount matches exactly</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : requiresReview ? (
+                    <div>
+                      <div className="font-medium text-amber-700">⚠️ Claim {idx + 1} ({evidence.claim_source}): REQUIRES REVIEW ({Math.round(confidence * 100)}% confidence)</div>
+                      {evidence.transactions.length > 0 && (
+                        <div className="ml-6 mt-1 space-y-1">
+                          {evidence.transactions.map((txn: any, tidx: number) => (
+                            <div key={tidx} className="text-xs">
+                              <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
+                              <div>• Transaction: {txn.description || 'N/A'}</div>
+                              <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
+                            </div>
+                          ))}
+                          {evidence.document_verification && (
+                            <div className="ml-2 mt-2 space-y-1">
+                              <div className="text-amber-800 font-semibold">
+                                ⚠️ DOCUMENT VERIFICATION INCOMPLETE (Confidence: {Math.round((evidence.document_verification.confidence || 0) * 100)}%)
+                              </div>
+                              
+                              {/* DETAILED DIFFERENCES SECTION (for document-specific issues) */}
+                              {evidence.document_verification.differences && evidence.document_verification.differences.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-amber-900 mb-1">📋 Specific Differences Identified:</div>
+                                  <div className="space-y-1">
+                                    {evidence.document_verification.differences.map((diff: any, didx: number) => {
+                                      const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
+                                      const shortDocName = docName.length > 80 ? docName.substring(0, 77) + '...' : docName;
+                                      return (
+                                        <div key={didx} className="text-xs bg-white rounded p-1 border border-amber-100">
+                                          <div className="font-semibold text-amber-800">
+                                            {diff.severity === 'missing' ? '🔴 Missing' : '⚠️ Mismatch'}: {diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                          </div>
+                                          <div className="text-gray-700 ml-3">{diff.issue} (from {shortDocName})</div>
+                                          {diff.accepted && (
+                                            <div className="text-green-700 ml-3 mt-1">
+                                              ✅ Accepted by {diff.accepted_by} on {new Date(diff.accepted_at).toLocaleDateString()}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* ISSUES SECTION (for non-document-specific issues like unknown source types) */}
+                              {(!evidence.document_verification.differences || evidence.document_verification.differences.length === 0) && 
+                               evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-amber-900 mb-1">📋 Specific Differences Identified:</div>
+                                  <div className="space-y-1">
+                                    {evidence.document_verification.issues.map((issue: string, iidx: number) => (
+                                      <div key={iidx} className="text-xs bg-white rounded p-1 border border-amber-100">
+                                        <div className="font-semibold text-amber-800">
+                                          ⚠️ Issue: {issue}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* MANUAL REVIEW STATUS */}
+                              {evidence.document_verification.manual_review_status && (
+                                <div className="bg-blue-50 border border-blue-200 rounded p-2 mb-2">
+                                  <div className="text-xs">
+                                    <div className="font-semibold text-blue-900">Manual Review Status:</div>
+                                    <div className="ml-2">
+                                      {evidence.document_verification.manual_review_status === 'accepted' ? (
+                                        <>
+                                          <div className="text-green-700">✅ Differences Accepted</div>
+                                          {evidence.document_verification.manually_accepted_by && (
+                                            <div className="text-gray-700">By: {evidence.document_verification.manually_accepted_by}</div>
+                                          )}
+                                          {evidence.document_verification.manually_accepted_at && (
+                                            <div className="text-gray-700">Date: {new Date(evidence.document_verification.manually_accepted_at).toLocaleString()}</div>
+                                          )}
+                                          {evidence.document_verification.acceptance_reason && (
+                                            <div className="text-gray-700 italic mt-1">Reason: {evidence.document_verification.acceptance_reason}</div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <div className="text-amber-700">⏳ Pending Manual Review</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* ACCEPT DIFFERENCE BUTTON */}
+                              {evidence.document_verification.manual_review_status === 'pending' && (
+                                <div className="mt-2">
+                                  <button
+                                    onClick={async () => {
+                                      const reason = prompt('Please provide a reason for accepting these differences (optional):');
+                                      if (reason !== null) { // null means cancelled
+                                        try {
+                                          const response = await fetch(`${API_BASE_URL}/api/v1/matters/${result.matter_id}/sof-assessment/accept-differences`, {
+                                            method: 'POST',
+                                            headers: {
+                                              'Content-Type': 'application/json',
+                                            },
+                                            body: JSON.stringify({
+                                              claim_index: idx,
+                                              accepted_by: 'Current User', // TODO: Get from auth context
+                                              reason: reason || 'Manual review completed - differences accepted'
+                                            })
+                                          });
+                                          
+                                          if (response.ok) {
+                                            alert('Differences accepted successfully!');
+                                            // Refresh the assessment data
+                                            window.location.reload();
+                                          } else {
+                                            const error = await response.json();
+                                            alert(`Error: ${error.detail || 'Failed to accept differences'}`);
+                                          }
+                                        } catch (err) {
+                                          alert(`Error: ${err}`);
+                                        }
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded transition-colors"
+                                  >
+                                    ✓ Accept Differences
+                                  </button>
+                                  <p className="text-xs text-gray-600 mt-1 italic">
+                                    Review the differences above and click to accept if satisfied upon manual review
+                                  </p>
+                                </div>
+                              )}
+
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : hasBank && !hasDocVerificationAttempt ? (
+                    <div>
+                      <div className="font-medium">⚠️ Claim {idx + 1} ({evidence.claim_source}): Bank payment found - SOURCE DOCS REQUIRED</div>
+                      {evidence.transactions.length > 0 && (
+                        <div className="ml-6 mt-1 space-y-1">
+                          {evidence.transactions.map((txn: any, tidx: number) => (
+                            <div key={tidx} className="text-xs">
+                              <div>• Amount: £{txn.amount.toLocaleString()} | Date: {txn.date}</div>
+                              <div>• Transaction: {txn.description || 'N/A'}</div>
+                              <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
+                              <div className="ml-2 text-gray-800 font-semibold mt-1">
+                                ⚠️ REQUIRES: Source documentation to prove legitimacy
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : hasDocs ? (
+                    <div>
+                      <div className="font-medium">⚠️ Claim {idx + 1} ({evidence.claim_source}): Document provided - BANK PAYMENT REQUIRED</div>
+                      <div className="ml-6 mt-1 text-xs">
+                        ⚠️ Supporting document verified but no matching bank transaction found
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <>⚠️ Claim {idx + 1} ({evidence.claim_source}): NOT VERIFIED - No direct matching transaction found in statements provided.</>
-                )}
-              </li>
-            ))}
+                    </div>
+                  ) : (
+                    <>⚠️ Claim {idx + 1} ({evidence.claim_source}): NOT VERIFIED - No bank transaction or supporting documents</>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
-
-        {/* Funding Analysis */}
-        {best_path && (
-          <div>
-            <h5 className="font-semibold text-white mb-2">Funding Analysis:</h5>
-            <p className="text-sm mb-2">
-              Total funding traced: {best_path.coverage}% of purchase amount.
-            </p>
-            {best_path.coverage >= 90 && verified_count < total_claims && (
-              <div className="text-sm space-y-1 mb-2">
-                <p className="font-medium">INTERPRETATION:</p>
-                <p>While not all individual claims have direct evidence in the provided statements, sufficient aggregate funding has been traced to cover the full purchase amount. This may indicate:</p>
-                <ul className="ml-4 space-y-1">
-                  <li>• Some source transactions occurred before the statement period</li>
-                  <li>• Funds arrived via intermediate accounts not yet documented</li>
-                  <li>• Alternative credits provide equivalent funding coverage</li>
-                </ul>
-                <p className="mt-2 italic">Recommendation: Request specific documentation for unverified claims to complete the audit trail, even though funding is mathematically sufficient.</p>
-              </div>
-            )}
-            {best_path.steps && best_path.steps.length > 0 && (
-              <div className="text-sm">
-                {(() => {
-                  // Separate claimed vs other funding sources
-                  const claimedSources = new Set(
-                    result.evidence_matches
-                      .filter(e => e.verified && e.transactions.length > 0)
-                      .flatMap(e => e.transactions.map(t => t.date + t.amount))
-                  );
-                  
-                  const claimedSteps: string[] = [];
-                  const otherSteps: string[] = [];
-                  
-                  best_path.steps.forEach(step => {
-                    // Check if this step matches a verified claim transaction
-                    const isClaimedSource = result.evidence_matches.some(evidence => {
-                      if (!evidence.verified) return false;
-                      return evidence.transactions.some(txn => {
-                        return step.includes(txn.date) && step.includes(txn.amount.toString());
-                      });
-                    });
-                    
-                    if (isClaimedSource) {
-                      claimedSteps.push(step);
-                    } else {
-                      otherSteps.push(step);
-                    }
-                  });
-                  
-                  return (
-                    <>
-                      {claimedSteps.length > 0 && (
-                        <div className="mb-3">
-                          <p className="font-medium mb-1">Funding pathway (from client explanation):</p>
-                          <ul className="ml-4 space-y-1">
-                            {claimedSteps.map((step, idx) => (
-                              <li key={idx}>• {step}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      
-                      {otherSteps.length > 0 && (
-                        <div>
-                          <p className="font-medium mb-1">Other potential funding pathway:</p>
-                          <p className="text-xs italic text-white/70 mb-2">
-                            The below are other potential incoming funds that may be used for the purchase. They may need to be clarified by the client.
-                          </p>
-                          <ul className="ml-4 space-y-1">
-                            {otherSteps.map((step, idx) => (
-                              <li key={idx}>• {step}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Transaction Review Summary */}
         {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
           <div>
-            <h5 className="font-semibold text-white mb-2">Automated Transaction Monitoring:</h5>
+            <h5 className="font-semibold text-black mb-2">Automated Transaction Monitoring:</h5>
             <p className="text-sm mb-2">
               System identified {result.transaction_review_summary.total_alerts} alert(s): 
               {' '}{result.transaction_review_summary.critical_alerts} CRITICAL, 
@@ -513,19 +674,22 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </ul>
               </>
             )}
+            {Object.keys(alertSatisfied).some(key => alertSatisfied[parseInt(key)]) && (
+              <>
+                <p className="text-sm font-medium mt-2 mb-1 text-green-700">✓ Satisfied Alerts:</p>
+                <ul className="ml-4 space-y-1 text-sm mb-2">
+                  {(result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details || []).map((alert, idx) => (
+                    alertSatisfied[idx] && (
+                      <li key={idx} className="text-green-700">
+                        • Alert {idx + 1}: {alert.reasons?.[0] || 'AML concern'} 
+                        {alertRationales[idx] && <span className="text-gray-600 ml-2">({alertRationales[idx]})</span>}
+                      </li>
+                    )
+                  ))}
+                </ul>
+              </>
+            )}
             <p className="text-sm italic">Full alert details available in Transaction Review tab. These findings materially impact the SoF assessment.</p>
-          </div>
-        )}
-
-        {/* Red Flags */}
-        {result.red_flags && result.red_flags.length > 0 && (
-          <div>
-            <h5 className="font-semibold text-white mb-2">Red Flags Identified ({result.red_flags.length}):</h5>
-            <ul className="space-y-1 text-sm">
-              {result.red_flags.slice(0, 5).map((flag, idx) => (
-                <li key={idx}>• [{flag.severity}] {flag.flag}</li>
-              ))}
-            </ul>
           </div>
         )}
 
@@ -556,8 +720,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           const content = lines.slice(1).join('\n');
           
           // Determine section type
+          // Skip CLIENT INFORMATION section - not needed in UI
           if (title.includes('CLIENT INFORMATION')) {
-            return renderClientInfoSection(content);
+            return null; // Hidden
           } else if (title.includes('SOURCE OF FUNDS')) {
             return renderSoFSection(content, result);
           } else if (title.includes('TRANSACTION REVIEW')) {
@@ -639,7 +804,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Claim</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Evidence Found</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Outreach Questions</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
                 </tr>
@@ -648,7 +812,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 {result.claims.map((claim, idx) => {
                   const evidence = result.evidence_matches[idx];
                   const verified = evidence?.verified || false;
+                  const document_verified = evidence?.document_verified || false;
                   const transactions = evidence?.transactions || [];
+                  const confidence = evidence?.document_verification?.confidence || 0;
+                  const manuallyAccepted = evidence?.document_verification?.manual_review_status === 'accepted';
+                  // Check if there's a document upload attempt (either file or issues)
+                  const hasDocUploaded = evidence?.document_verification?.verification_details?.document_used;
+                  const hasDocVerificationAttempt = hasDocUploaded || 
+                    (evidence?.document_verification?.issues && evidence.document_verification.issues.length > 0);
+                  // Only show as FULLY VERIFIED if confidence is 100% (>= 0.999 to account for floating point)
+                  const fullyVerified = verified && document_verified && confidence >= 0.999;
+                  const requiresReview = hasDocVerificationAttempt && !fullyVerified && !manuallyAccepted;
                   
                   return (
                     <tr key={idx} className="hover:bg-gray-50">
@@ -656,18 +830,45 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         {claim.source_type} £{claim.expected_amount.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {verified && transactions.length > 0 ? (
+                        {fullyVerified ? (
                           <div className="text-green-700">
-                            ✅ {transactions[0].date}: £{transactions[0].amount.toLocaleString()}
-                            {transactions.length > 1 && <span className="text-gray-500 ml-1">(+{transactions.length - 1} more)</span>}
+                            <div>✓ Verified</div>
+                            {evidence?.document_verification?.verification_details?.document_used?.filename && (
+                              <div className="text-xs text-gray-600 mt-1">
+                                Doc: {evidence.document_verification.verification_details.document_used.filename.slice(0, 30)}{evidence.document_verification.verification_details.document_used.filename.length > 30 ? '...' : ''}
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="text-red-700">❌ No matching transaction</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        {verified ? (
-                          <span className="text-green-700">✓ Verified</span>
+                        ) : manuallyAccepted ? (
+                          <span className="text-gray-500">-</span>
+                        ) : document_verified ? (
+                          <div className="text-gray-800">
+                            {evidence?.document_verification?.verification_details?.document_used?.filename && (
+                              <div className="text-sm">
+                                📄 {evidence.document_verification.verification_details.document_used.filename.slice(0, 25)}{evidence.document_verification.verification_details.document_used.filename.length > 25 ? '...' : ''}
+                              </div>
+                            )}
+                            {evidence?.issues && evidence.issues.length > 0 && (
+                              <div className="text-xs text-amber-700 mt-1 space-y-0.5">
+                                {evidence.issues.slice(0, 3).map((issue: string, issueIdx: number) => (
+                                  <div key={issueIdx}>⚠️ {issue}</div>
+                                ))}
+                                {evidence.issues.length > 3 && (
+                                  <div className="text-gray-500">+ {evidence.issues.length - 3} more issues</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : verified ? (
+                          <span className="text-gray-800">
+                            Request {
+                              claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
+                              claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
+                              claim.source_type.toLowerCase().includes('loan') ? 'loan agreement' :
+                              claim.source_type.toLowerCase().includes('business') ? 'sale agreement' :
+                              'documentation'
+                            }
+                          </span>
                         ) : (
                           <span className="text-gray-800">
                             Request {
@@ -681,7 +882,52 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {verified ? (
+                        {fullyVerified ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            ✅ FULLY VERIFIED (100%)
+                          </span>
+                        ) : manuallyAccepted ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            ✓ Accepted by {evidence?.document_verification?.manually_accepted_by || 'User'} on {
+                              evidence?.document_verification?.manually_accepted_at 
+                                ? new Date(evidence.document_verification.manually_accepted_at).toLocaleDateString('en-GB', { 
+                                    day: '2-digit', 
+                                    month: 'short', 
+                                    year: 'numeric' 
+                                  })
+                                : 'Unknown date'
+                            }
+                          </span>
+                        ) : requiresReview ? (
+                          <div className="text-sm space-y-1">
+                            <div className="text-amber-800 font-semibold mb-1">
+                              ⚠️ Review Required
+                            </div>
+                            {evidence?.document_verification?.differences && evidence.document_verification.differences.length > 0 ? (
+                              <ul className="list-disc list-inside text-xs text-gray-700 space-y-0.5">
+                                {evidence.document_verification.differences.slice(0, 5).map((diff: any, diffIdx: number) => (
+                                  <li key={diffIdx}>
+                                    <span className="font-medium">{diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span> {diff.issue}
+                                  </li>
+                                ))}
+                                {evidence.document_verification.differences.length > 5 && (
+                                  <li className="text-gray-500">+ {evidence.document_verification.differences.length - 5} more issues</li>
+                                )}
+                              </ul>
+                            ) : evidence?.issues && evidence.issues.length > 0 ? (
+                              <ul className="list-disc list-inside text-xs text-gray-700 space-y-0.5">
+                                {evidence.issues.slice(0, 5).map((issue: string, issueIdx: number) => (
+                                  <li key={issueIdx}>{issue}</li>
+                                ))}
+                                {evidence.issues.length > 5 && (
+                                  <li className="text-gray-500">+ {evidence.issues.length - 5} more issues</li>
+                                )}
+                              </ul>
+                            ) : (
+                              <div className="text-xs text-gray-600">Document verification incomplete</div>
+                            )}
+                          </div>
+                        ) : verified ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#D4C4B0] text-gray-900">
                             ⚠️ Payment found, docs req'd
                           </span>
@@ -699,15 +945,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </div>
         </div>
         
-        {/* Summary */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="text-sm font-bold text-gray-700 mb-2">Summary</h4>
-          <div className="text-sm text-gray-700 space-y-2">
-            {content.split('SOURCE OF FUNDS SUMMARY:')[1]?.split('FUNDING PATH')[0]?.split('\n').filter(line => line.trim()).map((line, idx) => (
-              <p key={idx}>{line.trim()}</p>
-            ))}
-          </div>
-        </div>
+
       </div>
     );
   };
@@ -756,8 +994,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </div>
         )}
         
-        {/* Alert Table */}
-        {result.transaction_review_summary && result.transaction_review_summary.key_concerns.length > 0 && (
+        {/* Alert Table or No Alerts Message */}
+        {result.transaction_review_summary && (result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details) && (result.transaction_review_summary.alerts?.length > 0 || result.transaction_review_summary.alert_details?.length > 0) ? (
           <div className="px-6 py-4">
             <h4 className="text-sm font-bold text-gray-700 mb-3">Alert Analysis</h4>
             <div className="overflow-x-auto">
@@ -766,36 +1004,65 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Severity</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Issue Identified</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Outreach Questions</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Transaction Details</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Alert Rationale</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Alert Satisfied</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Summary</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {result.transaction_review_summary.key_concerns.slice(0, 5).map((concern, idx) => {
-                    const isSanctioned = concern.toLowerCase().includes('sanctioned') || concern.toLowerCase().includes('prohibited');
-                    const isCash = concern.toLowerCase().includes('cash');
-                    const severity = isSanctioned || isCash ? 'CRITICAL' : 'HIGH';
+                  {(result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details || []).slice(0, 5).map((alert, idx) => {
+                    const severity = alert.severity || 'HIGH';
+                    // Handle both flat structure (alerts) and nested structure (alert_details with transaction object)
+                    const txn = alert.transaction || alert;
+                    const amount = txn.amount || alert.amount;
+                    const date = txn.date || alert.date;
+                    const narrative = txn.narrative || alert.counterparty || '';
                     
                     return (
                       <tr key={idx} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
                             severity === 'CRITICAL' ? 'bg-red-600 text-white' : 'bg-[#D4A574] text-white'
                           }`}>
-                            {severity === 'CRITICAL' ? '🔴 CRITICAL' : '🟠 HIGH'}
+                            <span>{severity === 'CRITICAL' ? '🔴' : '🟠'}</span>
+                            <span>{severity}</span>
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{concern}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {alert.reasons && alert.reasons.length > 0 ? alert.reasons[0] : 'AML concern'}
+                          <div className="text-xs text-gray-500 mt-1">
+                            {narrative || 'No description'}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-800">
-                          {isSanctioned ? 'Explain all sanctioned transactions' :
-                           isCash ? 'Provide cash source documentation' :
-                           'Explain business purpose and parties'}
+                          <div>Amount: £{amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
+                          <div className="text-xs text-gray-500">Date: {date || 'Unknown'}</div>
+                          {narrative && <div className="text-xs text-gray-500">Details: {narrative}</div>}
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          <textarea
+                            value={alertRationales[idx] || ''}
+                            onChange={(e) => setAlertRationales({...alertRationales, [idx]: e.target.value})}
+                            placeholder="Enter rationale..."
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            rows={2}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={alertSatisfied[idx] || false}
+                            onChange={(e) => setAlertSatisfied({...alertSatisfied, [idx]: e.target.checked})}
+                            className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
                             severity === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-[#EAD8C0] text-gray-800'
                           }`}>
-                            {severity === 'CRITICAL' ? '❌ BLOCKS COMPLETION' : '⚠️ REQUIRES REVIEW'}
+                            <span>{severity === 'CRITICAL' ? '❌' : '⚠️'}</span>
+                            <span>{severity === 'CRITICAL' ? 'BLOCKS COMPLETION' : 'REQUIRES REVIEW'}</span>
                           </span>
                         </td>
                       </tr>
@@ -805,17 +1072,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </table>
             </div>
           </div>
+        ) : (
+          <div className="px-6 py-8">
+            <div className="text-center text-gray-500">
+              <div className="text-4xl mb-2">✓</div>
+              <p className="font-medium">No alerts found within transactions</p>
+            </div>
+          </div>
         )}
         
-        {/* Summary */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="text-sm font-bold text-gray-700 mb-2">Summary</h4>
-          <div className="text-sm text-gray-700 space-y-2">
-            {content.split('TRANSACTION REVIEW SUMMARY:')[1]?.split('ADDITIONAL RED FLAGS')[0]?.split('\n').filter(line => line.trim()).map((line, idx) => (
-              <p key={idx}>{line.trim()}</p>
-            ))}
-          </div>
-        </div>
+
       </div>
     );
   };
@@ -827,9 +1093,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Source of Funds Assessment</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Upload documents and run AI-powered SoF analysis with Transaction Review integration
-          </p>
         </div>
         {status && status.status !== 'no_data' && (
           <button
@@ -855,7 +1118,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             📤 Upload Documents
           </button>
           <button
-            onClick={() => activeStep === 'results' && setActiveStep('results')}
+            onClick={() => setActiveStep('results')}
             disabled={!result}
             className={`py-4 px-1 border-b-2 font-medium text-sm ${
               activeStep === 'results'

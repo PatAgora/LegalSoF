@@ -201,12 +201,53 @@ async def get_transactions(
 ):
     """
     Get all transactions for a matter
-    """
-    transactions = db.query(Transaction).filter(
-        Transaction.matter_id == matter_id
-    ).order_by(desc(Transaction.txn_date)).limit(limit).offset(offset).all()
     
-    return transactions
+    NEW: Returns transactions from SoF assessment bank statements instead of separate upload.
+    This allows Transaction Review to analyze the same bank statements used for SoF verification.
+    """
+    import json
+    from pathlib import Path
+    
+    # Load SoF assessment storage to get bank statements
+    storage_file = Path("/tmp/sof_assessment_storage.json")
+    
+    if storage_file.exists():
+        with open(storage_file, 'r') as f:
+            storage = json.load(f)
+        
+        # Get bank statements for this matter
+        matter_storage = storage.get(str(matter_id)) or storage.get(matter_id)
+        if matter_storage and matter_storage.get('bank_statements'):
+            bank_statements = matter_storage['bank_statements']
+            
+            # Convert bank statement transactions to Transaction response format
+            transactions = []
+            for idx, stmt in enumerate(bank_statements):
+                # Convert date string to date object
+                try:
+                    txn_date_obj = datetime.strptime(stmt['date'], '%Y-%m-%d').date()
+                except:
+                    txn_date_obj = date.today()
+                
+                transactions.append(TransactionResponse(
+                    id=f"SOF-{matter_id}-{idx+1}",
+                    matter_id=matter_id,
+                    txn_date=txn_date_obj,
+                    customer_id=f"MATTER-{matter_id}",
+                    direction=stmt.get('direction', 'credit'),
+                    amount=float(stmt.get('amount', 0)),
+                    currency=stmt.get('currency', 'GBP'),
+                    base_amount=float(stmt.get('amount', 0)),  # Assume same as amount for GBP
+                    country_iso2=stmt.get('country_iso2'),  # Load from bank statements if available
+                    channel=stmt.get('channel'),  # Load from bank statements if available
+                    narrative=stmt.get('description', ''),
+                    created_at=datetime.utcnow()
+                ))
+            
+            return transactions[offset:offset+limit]
+    
+    # Fallback to empty list if no SoF data
+    return []
 
 
 @router.get("/matters/{matter_id}/transaction-alerts", response_model=List[TransactionAlertResponse])
@@ -219,10 +260,13 @@ async def get_transaction_alerts(
 ):
     """
     Get transaction alerts for a matter with optional filters
-    Includes context-aware AI analysis by default (100% local, no external API calls)
-    """
-    from app.services.transaction_context_analyzer import TransactionContextAnalyzer
     
+    NOTE: Transaction Review requires uploaded bank statement CSVs via the upload endpoint.
+    The simple bank statements from SoF Assessment don't have enough data (country, channel)
+    to generate meaningful AML alerts.
+    
+    For now, returns empty list if no transactions exist in the Transaction table.
+    """
     query = db.query(TransactionAlert).join(Transaction).filter(
         TransactionAlert.matter_id == matter_id
     )
@@ -235,16 +279,12 @@ async def get_transaction_alerts(
     
     alerts = query.order_by(desc(TransactionAlert.created_at)).all()
     
-    # Initialize context analyzer (once for all alerts)
-    context = None
-    analyzer = None
-    if include_context:
-        analyzer = TransactionContextAnalyzer(db)
-        context = analyzer.gather_matter_context(matter_id)
-    
-    # Enrich alerts with transaction data and context-aware AI
+    # Convert to response format
     result = []
     for alert in alerts:
+        # Get transaction details
+        txn = db.query(Transaction).filter(Transaction.id == alert.txn_id).first()
+        
         alert_dict = {
             'id': alert.id,
             'matter_id': alert.matter_id,
@@ -256,53 +296,11 @@ async def get_transaction_alerts(
             'rule_tags': alert.rule_tags if isinstance(alert.rule_tags, list) else [],
             'status': alert.status,
             'created_at': alert.created_at,
+            'transaction_date': txn.txn_date if txn else None,
+            'amount': txn.base_amount if txn else None,
+            'currency': txn.currency if txn else None,
+            'country_iso2': txn.country_iso2 if txn else None
         }
-        
-        # Get transaction details
-        txn = db.query(Transaction).filter(Transaction.id == alert.txn_id).first()
-        if txn:
-            alert_dict['transaction_date'] = txn.txn_date
-            alert_dict['amount'] = txn.base_amount
-            alert_dict['currency'] = txn.currency
-            alert_dict['country_iso2'] = txn.country_iso2
-            
-            # Generate context-aware AI analysis (100% local)
-            if include_context and analyzer and context:
-                txn_dict = {
-                    "id": txn.id,
-                    "customer_id": txn.customer_id,
-                    "txn_date": txn.txn_date.isoformat(),
-                    "direction": txn.direction,
-                    "amount": txn.amount,
-                    "currency": txn.currency,
-                    "country_iso2": txn.country_iso2,
-                    "narrative": txn.narrative
-                }
-                
-                # Analyze documentation sufficiency
-                assessment = analyzer.analyze_documentation_sufficiency(
-                    context=context,
-                    alert_severity=alert.severity,
-                    alert_reasons=alert.reasons if isinstance(alert.reasons, list) else [],
-                    transaction=txn_dict
-                )
-                
-                # Generate context-aware AI rationale
-                alert_dict['ai_rationale'] = analyzer.generate_context_aware_rationale(
-                    context=context,
-                    alert_severity=alert.severity,
-                    alert_reasons=alert.reasons if isinstance(alert.reasons, list) else [],
-                    transaction=txn_dict,
-                    assessment=assessment
-                )
-                
-                # Generate context-aware AI outreach
-                alert_dict['ai_outreach'] = analyzer.generate_context_aware_outreach(
-                    context=context,
-                    alert_severity=alert.severity,
-                    transaction=txn_dict,
-                    assessment=assessment
-                )
         
         result.append(TransactionAlertResponse(**alert_dict))
     
@@ -372,23 +370,46 @@ async def get_transaction_dashboard(
 ):
     """
     Get dashboard statistics and charts for transaction review
-    """
-    # Get all transactions
-    transactions = db.query(Transaction).filter(Transaction.matter_id == matter_id).all()
     
-    # Get all alerts
+    NEW: Uses bank statement data from SoF assessment for consistency
+    """
+    import json
+    from pathlib import Path
+    
+    # Load bank statement transactions (same source as transactions list)
+    storage_file = Path("/tmp/sof_assessment_storage.json")
+    bank_transactions = []
+    
+    if storage_file.exists():
+        with open(storage_file, 'r') as f:
+            storage = json.load(f)
+        
+        matter_storage = storage.get(str(matter_id)) or storage.get(matter_id)
+        if matter_storage and matter_storage.get('bank_statements'):
+            bank_statements = matter_storage['bank_statements']
+            
+            # Convert to transaction objects with necessary fields
+            for idx, stmt in enumerate(bank_statements):
+                bank_transactions.append({
+                    'id': f"SOF-{matter_id}-{idx+1}",
+                    'direction': stmt.get('direction', 'credit'),
+                    'base_amount': float(stmt.get('amount', 0)),
+                    'country_iso2': None,  # Not in bank statements
+                })
+    
+    # Get all alerts (still from database)
     alerts = db.query(TransactionAlert).filter(TransactionAlert.matter_id == matter_id).all()
     
-    # Calculate stats
-    total_transactions = len(transactions)
+    # Calculate stats using bank statement transactions
+    total_transactions = len(bank_transactions)
     total_alerts = len(alerts)
     
-    total_in = sum(t.base_amount for t in transactions if t.direction == 'in')
-    total_out = sum(t.base_amount for t in transactions if t.direction == 'out')
+    total_in = sum(t['base_amount'] for t in bank_transactions if t['direction'] in ('in', 'credit'))
+    total_out = sum(t['base_amount'] for t in bank_transactions if t['direction'] in ('out', 'debit'))
     
     # High-risk transactions (with CRITICAL or HIGH alerts)
     high_risk_txn_ids = {a.txn_id for a in alerts if a.severity in ('CRITICAL', 'HIGH')}
-    high_risk_value = sum(t.base_amount for t in transactions if t.id in high_risk_txn_ids)
+    high_risk_value = sum(t['base_amount'] for t in bank_transactions if t['id'] in high_risk_txn_ids)
     
     # Alert counts by severity
     alerts_by_severity = defaultdict(int)
@@ -413,7 +434,7 @@ async def get_transaction_dashboard(
     
     # Alerts over time (last 12 months)
     alerts_over_time = []
-    if transactions:
+    if bank_transactions:
         # Group by month
         monthly_alerts = defaultdict(int)
         for alert in alerts:
@@ -428,11 +449,12 @@ async def get_transaction_dashboard(
             })
     
     # Top countries by alert count
+    # Note: Bank statements don't include country data, so this will be empty
     country_alerts = defaultdict(int)
     for alert in alerts:
-        txn = next((t for t in transactions if t.id == alert.txn_id), None)
-        if txn and txn.country_iso2:
-            country_alerts[txn.country_iso2] += 1
+        txn = next((t for t in bank_transactions if t['id'] == alert.txn_id), None)
+        if txn and txn.get('country_iso2'):
+            country_alerts[txn['country_iso2']] += 1
     
     top_countries = [
         {'country': country, 'alert_count': count}

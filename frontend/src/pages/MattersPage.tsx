@@ -1,44 +1,38 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001'
 
 export default function MattersPage() {
   const [searchTerm, setSearchTerm] = useState('')
+  const [matters, setMatters] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock data - in real app, this would come from API
-  const matters = [
-    {
-      id: 1,
-      reference_number: 'REF-2024-001',
-      client_name: 'ABC Corp Ltd',
-      target_amount: 1500000,
-      target_currency: 'GBP',
-      status: 'under_review',
-      risk_rating: 'medium',
-      created_at: '2024-01-15',
-    },
-    {
-      id: 2,
-      reference_number: 'REF-2024-002',
-      client_name: 'XYZ Holdings',
-      target_amount: 2500000,
-      target_currency: 'GBP',
-      status: 'approved',
-      risk_rating: 'low',
-      created_at: '2024-01-10',
-    },
-    {
-      id: 3,
-      reference_number: 'REF-2024-003',
-      client_name: 'Smith Industries',
-      target_amount: 500000,
-      target_currency: 'GBP',
-      status: 'awaiting_client',
-      risk_rating: 'high',
-      created_at: '2024-01-18',
-    },
-  ]
+  // Fetch matters from API
+  useEffect(() => {
+    const fetchMatters = async () => {
+      try {
+        setLoading(true)
+        const response = await fetch(`${API_BASE_URL}/api/v1/matters`)
+        if (!response.ok) {
+          throw new Error('Failed to fetch matters')
+        }
+        const data = await response.json()
+        setMatters(data)
+      } catch (err) {
+        console.error('Error fetching matters:', err)
+        setError('Failed to load matters. Please try again.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchMatters()
+  }, [])
 
   const getStatusBadge = (status: string) => {
+    const normalizedStatus = status?.toLowerCase() || 'draft'
     const styles = {
       draft: 'bg-gray-100 text-gray-800',
       awaiting_client: 'bg-yellow-100 text-yellow-800',
@@ -48,27 +42,55 @@ export default function MattersPage() {
       approved: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
       completed: 'bg-gray-100 text-gray-800',
-    }[status] || 'bg-gray-100 text-gray-800'
+    }[normalizedStatus] || 'bg-gray-100 text-gray-800'
 
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles}`}>
-        {status.replace(/_/g, ' ').toUpperCase()}
+        {normalizedStatus.replace(/_/g, ' ').toUpperCase()}
       </span>
     )
   }
 
   const getRiskBadge = (risk: string) => {
+    const normalizedRisk = risk?.toLowerCase() || 'medium'
     const styles = {
       low: 'bg-green-100 text-green-800',
       medium: 'bg-yellow-100 text-yellow-800',
       high: 'bg-red-100 text-red-800',
       critical: 'bg-red-200 text-red-900',
-    }[risk] || 'bg-gray-100 text-gray-800'
+    }[normalizedRisk] || 'bg-gray-100 text-gray-800'
 
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles}`}>
-        {risk.toUpperCase()}
+        {normalizedRisk.toUpperCase()}
       </span>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+          <p className="mt-4 text-gray-600">Loading matters...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-red-600 text-lg">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 bg-primary-600 text-white px-4 py-2 rounded-lg"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
     )
   }
 

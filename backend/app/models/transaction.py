@@ -48,6 +48,8 @@ class TransactionAlert(Base):
     reviewed_by = Column(Integer, ForeignKey("users.id"))
     reviewed_at = Column(DateTime(timezone=True))
     review_notes = Column(Text)
+    ai_rationale = Column(Text)  # AI-generated explanation of why this alert was triggered
+    ai_outreach = Column(Text)  # AI-generated suggested customer outreach message
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     # Relationships

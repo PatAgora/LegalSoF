@@ -1,0 +1,55 @@
+{
+  "client_info": {
+    "client_name": "Commercial Ventures PLC",
+    "client_id": "TEST-002",
+    "client_risk_rating": "medium",
+    "is_pep": false,
+    "business_sector": "Business Services",
+    "high_risk_jurisdictions": []
+  },
+  "purchase": {
+    "description": "Purchase of commercial property / business acquisition",
+    "amount": 750000,
+    "currency": "GBP",
+    "expected_payment_date": "2024-01-15"
+  },
+  "sof_explanation": {
+    "total_funds": 750000,
+    "currency": "GBP",
+    "sources": [
+      {
+        "source_type": "business_sale",
+        "amount": 500000,
+        "currency": "GBP",
+        "description": "Sale of Digital Marketing Agency Ltd",
+        "company_name": "Digital Marketing Agency Ltd",
+        "company_number": "08765432",
+        "completion_date": "2023-10-15",
+        "solicitor_firm": null
+      },
+      {
+        "source_type": "business_loan",
+        "amount": 250000,
+        "currency": "GBP",
+        "description": "Business loan from HSBC Bank",
+        "lender": "HSBC Bank PLC",
+        "loan_date": "2023-11-01",
+        "account_number": "****9876"
+      }
+    ]
+  },
+  "bank_statement_period": {
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31"
+  },
+  "known_documents": [
+    {
+      "type": "business_sale_agreement",
+      "description": "Sale Agreement for Digital Marketing Agency Ltd"
+    },
+    {
+      "type": "loan_agreement",
+      "description": "Loan Agreement with HSBC Bank PLC"
+    }
+  ]
+}

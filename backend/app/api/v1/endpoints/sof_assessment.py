@@ -35,9 +35,34 @@ def get_sync_db():
         db.close()
 
 
-# In-memory storage for assessment data (per matter)
-# In production, this would be stored in database
-assessment_storage: Dict[int, Dict[str, Any]] = {}
+import json
+import os
+from pathlib import Path
+
+# Persistent storage using JSON file (survives backend restarts)
+STORAGE_FILE = Path("/tmp/sof_assessment_storage.json")
+
+def load_storage() -> Dict[int, Dict[str, Any]]:
+    """Load storage from file"""
+    if STORAGE_FILE.exists():
+        try:
+            with open(STORAGE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_storage(storage: Dict[int, Dict[str, Any]]):
+    """Save storage to file"""
+    # Convert matter_id keys to strings for JSON
+    storage_str_keys = {str(k): v for k, v in storage.items()}
+    with open(STORAGE_FILE, 'w') as f:
+        json.dump(storage_str_keys, f)
+
+# Load storage on module import
+assessment_storage = load_storage()
+# Convert string keys back to ints
+assessment_storage = {int(k): v for k, v in assessment_storage.items()}
 
 
 @router.post("/matters/{matter_id}/sof-assessment/upload")
@@ -117,6 +142,14 @@ async def upload_sof_files(
             detail=f"File processing failed: {result['error']}"
         )
     
+    # Validate result based on file category
+    if file_category == 'bank_statement':
+        if 'bank_statements' not in result.get('data', {}):
+            raise HTTPException(
+                status_code=400,
+                detail="PDF file does not contain valid bank statement data. No transactions could be extracted."
+            )
+    
     # Store the processed data
     storage = assessment_storage[matter_id]
     
@@ -129,7 +162,11 @@ async def upload_sof_files(
         storage['bank_statements'].extend(new_transactions)
     
     elif file_category == 'supporting_doc':
-        storage['supporting_docs'].append(result['data'])
+        # Add filename and upload timestamp to the document data for audit trail
+        doc_data = result['data'].copy()
+        doc_data['filename'] = file.filename
+        doc_data['uploaded_at'] = datetime.utcnow().isoformat()
+        storage['supporting_docs'].append(doc_data)
     
     # Track uploaded file
     storage['uploaded_files'].append({
@@ -142,6 +179,9 @@ async def upload_sof_files(
     
     storage['last_updated'] = datetime.utcnow().isoformat()
     storage['status'] = 'files_uploaded'
+    
+    # Persist storage to file
+    save_storage(assessment_storage)
     
     return {
         "success": True,
@@ -239,7 +279,26 @@ async def run_sof_assessment(
     purchase = storage['client_info']['purchase']
     sof_explanation = storage['client_info']['sof_explanation']
     bank_statements = storage['bank_statements']
-    known_documents = storage['client_info'].get('known_documents', [])
+    
+    # Check if client_info JSON has explicit claims array
+    # If so, convert to structured format for the assessment engine
+    print(f"\n=== CLAIMS CHECK ===")
+    print(f"Has 'claims' key: {'claims' in storage['client_info']}")
+    if 'claims' in storage['client_info']:
+        print(f"Claims array: {storage['client_info']['claims']}")
+    
+    if 'claims' in storage['client_info'] and storage['client_info']['claims']:
+        # Convert claims array to structured format
+        print(f"✅ Converting claims array to structured format")
+        sof_explanation = {
+            'sources': storage['client_info']['claims']
+        }
+        print(f"sof_explanation type: {type(sof_explanation)}")
+    print(f"====================\n")
+    
+    # IMPORTANT: Build fresh known_documents list from current uploads only
+    # Do NOT accumulate from previous assessments
+    known_documents = []
     supporting_docs_data = storage['supporting_docs']  # Full document data with extracted info
     
     # Add uploaded supporting docs to known documents
@@ -282,6 +341,9 @@ async def run_sof_assessment(
         storage['status'] = 'completed'
         storage['last_updated'] = datetime.utcnow().isoformat()
         
+        # Persist storage to file
+        save_storage(assessment_storage)
+        
         return {
             "success": True,
             "matter_id": matter_id,
@@ -311,14 +373,18 @@ async def get_sof_assessment_results(
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
     
+    # Reload storage from file to get latest data
+    assessment_storage_reloaded = load_storage()
+    assessment_storage_reloaded = {int(k): v for k, v in assessment_storage_reloaded.items()}
+    
     # Get assessment data
-    if matter_id not in assessment_storage:
+    if matter_id not in assessment_storage_reloaded:
         raise HTTPException(
             status_code=404,
             detail="No assessment data found for this matter"
         )
     
-    storage = assessment_storage[matter_id]
+    storage = assessment_storage_reloaded[matter_id]
     
     if storage['status'] != 'completed':
         raise HTTPException(
@@ -344,7 +410,7 @@ async def download_file_note(
     db: Session = Depends(get_sync_db)
 ):
     """
-    Download audit-ready file note as plain text
+    Download audit-ready file note as Word document (.docx)
     """
     
     # Verify matter exists
@@ -367,17 +433,206 @@ async def download_file_note(
             detail=f"Assessment not completed (status: {storage['status']})"
         )
     
-    # Get file note
+    # Get file note text
     file_note = storage['assessment_result']['file_note_summary']
     
-    from fastapi.responses import PlainTextResponse
+    # Generate Word document
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
     
-    return PlainTextResponse(
-        content=file_note,
+    doc = Document()
+    
+    # Set document margins
+    sections = doc.sections
+    for section in sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+    
+    # Add title
+    title = doc.add_heading('Source of Funds Assessment File Note', level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Add matter reference
+    matter_ref = doc.add_paragraph()
+    matter_ref.add_run(f'Matter Reference: {matter.reference_number or f"MAT-{matter.id}"}').bold = True
+    matter_ref.add_run(f'\nClient: {matter.client_name}')
+    matter_ref.add_run(f'\nDate: {datetime.now().strftime("%d %B %Y")}')
+    matter_ref.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    doc.add_paragraph()  # Spacing
+    
+    # Parse and format the file note sections
+    sections_text = file_note.split('===')
+    
+    for section in sections_text:
+        if not section.strip():
+            continue
+            
+        lines = section.strip().split('\n')
+        section_title = lines[0].strip()
+        section_content = '\n'.join(lines[1:]).strip()
+        
+        # Add section heading
+        if section_title:
+            heading = doc.add_heading(section_title, level=1)
+            # Style the heading
+            for run in heading.runs:
+                run.font.color.rgb = RGBColor(0, 51, 102)  # Dark blue
+        
+        # Add section content
+        if section_content:
+            # Split content into paragraphs
+            paragraphs = section_content.split('\n\n')
+            for para_text in paragraphs:
+                if not para_text.strip():
+                    continue
+                    
+                para = doc.add_paragraph()
+                
+                # Handle bullet points and formatting
+                if para_text.strip().startswith('•') or para_text.strip().startswith('-'):
+                    para.style = 'List Bullet'
+                    para_text = para_text.strip()[1:].strip()
+                
+                # Add text with basic formatting
+                for line in para_text.split('\n'):
+                    if not line.strip():
+                        continue
+                    
+                    # Bold text between ** **
+                    parts = line.split('**')
+                    for i, part in enumerate(parts):
+                        if i % 2 == 0:
+                            para.add_run(part)
+                        else:
+                            para.add_run(part).bold = True
+                    
+                    para.add_run('\n')
+                
+                # Set paragraph spacing
+                para_format = para.paragraph_format
+                para_format.space_after = Pt(6)
+    
+    # Add footer
+    doc.add_paragraph()
+    footer = doc.add_paragraph()
+    footer.add_run('_' * 80)
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    footer_text = doc.add_paragraph()
+    footer_text.add_run('\nDocument generated on: ' + datetime.now().strftime("%d %B %Y at %H:%M"))
+    footer_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Save to BytesIO
+    docx_buffer = BytesIO()
+    doc.save(docx_buffer)
+    docx_buffer.seek(0)
+    
+    # Return as downloadable Word document
+    return StreamingResponse(
+        docx_buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            "Content-Disposition": f"attachment; filename=sof_file_note_matter_{matter_id}.txt"
+            "Content-Disposition": f"attachment; filename=SoF_File_Note_Matter_{matter.reference_number or matter.id}.docx"
         }
     )
+
+
+@router.post("/matters/{matter_id}/sof-assessment/accept-differences")
+async def accept_claim_differences(
+    matter_id: int,
+    request: dict,
+    db: Session = Depends(get_sync_db)
+):
+    """
+    Manually accept differences for a specific claim after manual review
+    
+    Body:
+        {
+            "claim_index": int,
+            "accepted_by": str,
+            "reason": str (optional)
+        }
+    """
+    from datetime import datetime
+    
+    # Verify matter exists
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    
+    # Get assessment data
+    if matter_id not in assessment_storage:
+        raise HTTPException(
+            status_code=404,
+            detail="No assessment data found for this matter"
+        )
+    
+    storage = assessment_storage[matter_id]
+    
+    if storage['status'] != 'completed':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Assessment not completed (status: {storage['status']})"
+        )
+    
+    claim_index = request.get('claim_index')
+    accepted_by = request.get('accepted_by', 'User')
+    reason = request.get('reason', 'Manual review completed - differences accepted')
+    
+    if claim_index is None:
+        raise HTTPException(status_code=400, detail="claim_index is required")
+    
+    # Get the evidence match for this claim
+    evidence_matches = storage['assessment_result']['evidence_matches']
+    
+    if claim_index < 0 or claim_index >= len(evidence_matches):
+        raise HTTPException(status_code=400, detail="Invalid claim_index")
+    
+    evidence = evidence_matches[claim_index]
+    
+    # Check if this claim requires review
+    if not evidence.get('document_verification', {}).get('requires_review', False):
+        raise HTTPException(
+            status_code=400,
+            detail="This claim does not require review (already at 100% confidence)"
+        )
+    
+    # Update the manual review status
+    doc_verification = evidence['document_verification']
+    doc_verification['manual_review_status'] = 'accepted'
+    doc_verification['manually_accepted_by'] = accepted_by
+    doc_verification['manually_accepted_at'] = datetime.utcnow().isoformat()
+    doc_verification['acceptance_reason'] = reason
+    
+    # Mark all differences as accepted
+    if 'differences' in doc_verification:
+        for diff in doc_verification['differences']:
+            diff['accepted'] = True
+            diff['accepted_by'] = accepted_by
+            diff['accepted_at'] = datetime.utcnow().isoformat()
+    
+    # Persist the updated storage
+    save_storage(assessment_storage)
+    
+    return {
+        "success": True,
+        "message": f"Differences accepted for claim {claim_index + 1}",
+        "claim_index": claim_index,
+        "accepted_by": accepted_by,
+        "accepted_at": doc_verification['manually_accepted_at'],
+        "reason": reason,
+        "updated_status": {
+            "requires_review": doc_verification.get('requires_review', False),
+            "manual_review_status": doc_verification.get('manual_review_status'),
+            "confidence": doc_verification.get('confidence', 0)
+        }
+    }
 
 
 @router.delete("/matters/{matter_id}/sof-assessment/reset")
@@ -397,6 +652,9 @@ async def reset_sof_assessment(
     # Clear storage
     if matter_id in assessment_storage:
         del assessment_storage[matter_id]
+    
+    # Persist storage to file
+    save_storage(assessment_storage)
     
     return {
         "success": True,

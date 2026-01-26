@@ -44,7 +44,13 @@ class SoFAssessmentEngine:
         risk_rating = client_info.get('client_risk_rating', 'medium').lower()
         
         # Step 1: Parse SoF explanation into testable claims
-        claims = self.parse_sof_claims(sof_explanation, purchase)
+        # Handle both string and structured dict formats
+        if isinstance(sof_explanation, dict):
+            # New structured format with sources array
+            claims = self.parse_structured_sof(sof_explanation, purchase)
+        else:
+            # Legacy text format
+            claims = self.parse_sof_claims(sof_explanation, purchase)
         
         # Step 2: Find evidence in bank statements
         evidence_matches = self.match_evidence(claims, bank_statements)
@@ -76,6 +82,11 @@ class SoFAssessmentEngine:
                 claim_id = verification['claim_id']
                 if claim_id < len(evidence_matches):
                     evidence_matches[claim_id]['document_verified'] = verification['verified']
+                    evidence_matches[claim_id]['confidence'] = verification.get('confidence', 0.0)
+                    evidence_matches[claim_id]['verification_details'] = verification.get('verification_details', {})
+                    evidence_matches[claim_id]['issues'] = verification.get('issues', [])
+                    evidence_matches[claim_id]['requires_review'] = verification.get('requires_review', False)
+                    evidence_matches[claim_id]['review_reason'] = verification.get('review_reason')
                     evidence_matches[claim_id]['document_verification'] = verification
         
         # Step 3: Trace funding paths
@@ -148,7 +159,10 @@ class SoFAssessmentEngine:
             "funding_paths": funding_paths,
             "date_alignment": date_alignment,
             "red_flags": red_flags,
-            "transaction_review_summary": transaction_review_data.get('summary', {}),
+            "transaction_review_summary": {
+                **transaction_review_data.get('summary', {}),
+                "alert_details": transaction_review_data.get('alerts', [])  # Include full alert objects
+            },
             "outcome": outcome,
             "next_actions": next_actions,
             "file_note_summary": file_note,
@@ -209,6 +223,15 @@ class SoFAssessmentEngine:
                             expected_account = bank.title()
                             break
                     
+                    # Extract broader context (±150 chars around match)
+                    start_pos = max(0, match.start() - 150)
+                    end_pos = min(len(sof_explanation), match.end() + 150)
+                    claim_context = sof_explanation[start_pos:end_pos].strip()
+                    if start_pos > 0:
+                        claim_context = "..." + claim_context
+                    if end_pos < len(sof_explanation):
+                        claim_context = claim_context + "..."
+                    
                     claims.append({
                         "claim_id": claim_id,
                         "source_type": source_type.replace('_', ' ').title(),
@@ -217,7 +240,8 @@ class SoFAssessmentEngine:
                         "expected_date_range": date_range,
                         "expected_payer": counterparty,
                         "expected_account": expected_account,
-                        "claim_text": match.group(0)
+                        "claim_text": match.group(0),
+                        "description": claim_context  # Full context snippet
                     })
                     claim_id += 1
                 except ValueError:
@@ -235,6 +259,82 @@ class SoFAssessmentEngine:
                 "expected_account": None,
                 "claim_text": "Source not clearly specified in explanation"
             })
+        
+        return claims
+    
+    def parse_structured_sof(
+        self,
+        sof_explanation: Dict[str, Any],
+        purchase: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Parse structured SoF explanation (new format with sources array)
+        """
+        claims = []
+        sources = sof_explanation.get('sources', [])
+        
+        for idx, source in enumerate(sources, start=1):
+            claim = {
+                "claim_id": idx,
+                "source_type": source.get('source_type', 'unknown'),
+                "expected_amount": float(source.get('amount', 0)),
+                "currency": source.get('currency', 'GBP'),
+                "description": source.get('description', ''),
+                "expected_date_range": {},
+                "expected_payer": None,
+                "expected_account": None,
+                "claim_text": source.get('description', '')
+            }
+            
+            # Extract type-specific fields
+            if source.get('source_type') == 'inheritance':
+                claim['expected_payer'] = source.get('deceased_name')
+                claim['probate_reference'] = source.get('probate_reference')
+                if source.get('distribution_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['distribution_date'],
+                        'end': source['distribution_date']
+                    }
+            
+            elif source.get('source_type') == 'property_sale':
+                claim['property_address'] = source.get('property_address')
+                claim['title_number'] = source.get('title_number')
+                claim['solicitor_firm'] = source.get('solicitor_firm')
+                if source.get('completion_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['completion_date'],
+                        'end': source['completion_date']
+                    }
+            
+            elif source.get('source_type') == 'business_sale':
+                claim['company_name'] = source.get('company_name')
+                claim['company_number'] = source.get('company_number')
+                claim['solicitor_firm'] = source.get('solicitor_firm')
+                if source.get('completion_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['completion_date'],
+                        'end': source['completion_date']
+                    }
+            
+            elif source.get('source_type') == 'business_loan':
+                claim['expected_payer'] = source.get('lender')
+                claim['loan_date'] = source.get('loan_date')
+                if source.get('loan_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['loan_date'],
+                        'end': source['loan_date']
+                    }
+            
+            elif source.get('source_type') == 'gift':
+                claim['expected_payer'] = source.get('donor_name')
+                claim['gift_date'] = source.get('gift_date')
+                if source.get('gift_date'):
+                    claim['expected_date_range'] = {
+                        'start': source['gift_date'],
+                        'end': source['gift_date']
+                    }
+            
+            claims.append(claim)
         
         return claims
     
@@ -356,7 +456,9 @@ class SoFAssessmentEngine:
                 "match_quality": "strong" if any(m['match_quality'] == 'strong' for m in matches) else 
                                 "exact" if matches else "none",
                 "transactions": matches,
-                "verified": len(matches) > 0
+                "verified": len(matches) > 0,
+                "document_verified": False,  # Initialize to False, will be set to True if docs verify
+                "document_verification": None  # Will be populated if docs are provided
             })
         
         return evidence_matches
@@ -516,14 +618,135 @@ class SoFAssessmentEngine:
         """
         CRITICAL: Get Transaction Review alerts for this matter
         This integrates AML monitoring findings into SoF assessment
+        
+        NEW: Analyzes bank statements directly for AML risks when TransactionAlert table is empty
+        - Sanctioned countries: IR, KP, SY, CU → CRITICAL
+        - Large cash (≥£10k) → HIGH
         """
         from app.models import TransactionAlert, Transaction
         
-        alerts = self.db.query(TransactionAlert).filter(
-            TransactionAlert.matter_id == self.matter_id
-        ).all()
+        # Check if database connection is available
+        alerts = []
+        if self.db:
+            alerts = self.db.query(TransactionAlert).filter(
+                TransactionAlert.matter_id == self.matter_id
+            ).all()
         
+        # If no alerts in database, analyze bank statements directly
         if not alerts:
+            # Load bank statements from storage
+            import json
+            from pathlib import Path
+            storage_file = Path("/tmp/sof_assessment_storage.json")
+            
+            if storage_file.exists():
+                with open(storage_file, 'r') as f:
+                    storage = json.load(f)
+                
+                matter_storage = storage.get(str(self.matter_id))
+                
+                if matter_storage and matter_storage.get('bank_statements'):
+                    bank_statements = matter_storage['bank_statements']
+                    
+                    # Analyze for AML risks
+                    sanctioned_countries = ['IR', 'KP', 'SY', 'CU']  # Iran, North Korea, Syria, Cuba
+                    high_risk_countries = ['AF', 'MM', 'YE', 'LY']  # Afghanistan, Myanmar, Yemen, Libya
+                    
+                    key_concerns = []
+                    alert_objects = []  # Create actual alert objects for questions
+                    sanctions_count = 0
+                    cash_count = 0
+                    high_risk_count = 0
+                    
+                    for stmt in bank_statements:
+                        country = stmt.get('country_iso2', '')
+                        channel = stmt.get('channel', '')
+                        amount = stmt.get('amount', 0)
+                        date = stmt.get('date', '')
+                        description = stmt.get('description', 'Unknown transaction')
+                        counterparty = stmt.get('counterparty', 'Unknown')
+                        
+                        # Check for sanctioned countries
+                        if country in sanctioned_countries:
+                            sanctions_count += 1
+                            country_name = {
+                                'IR': 'Iran', 'KP': 'North Korea', 
+                                'SY': 'Syria', 'CU': 'Cuba'
+                            }.get(country, country)
+                            alert_objects.append({
+                                "severity": "CRITICAL",
+                                "score": 100,
+                                "reasons": [f"Transaction to sanctioned jurisdiction: {country_name}"],
+                                "transaction": {
+                                    "id": f"BANK-{self.matter_id}-{date}",
+                                    "amount": amount,
+                                    "currency": "GBP",
+                                    "country": country,
+                                    "date": date,
+                                    "narrative": description
+                                }
+                            })
+                        
+                        # Check for high-risk countries
+                        elif country in high_risk_countries:
+                            high_risk_count += 1
+                            country_name = {
+                                'AF': 'Afghanistan', 'MM': 'Myanmar',
+                                'YE': 'Yemen', 'LY': 'Libya'
+                            }.get(country, country)
+                            alert_objects.append({
+                                "severity": "HIGH",
+                                "score": 80,
+                                "reasons": [f"Transaction to high-risk jurisdiction: {country_name}"],
+                                "transaction": {
+                                    "id": f"BANK-{self.matter_id}-{date}",
+                                    "amount": amount,
+                                    "currency": "GBP",
+                                    "country": country,
+                                    "date": date,
+                                    "narrative": description
+                                }
+                            })
+                        
+                        # Check for large cash transactions
+                        if channel == 'cash' and amount >= 10000:
+                            cash_count += 1
+                            alert_objects.append({
+                                "severity": "HIGH",
+                                "score": 70,
+                                "reasons": [f"Large cash transaction: £{amount:,.2f}"],
+                                "transaction": {
+                                    "id": f"BANK-{self.matter_id}-{date}",
+                                    "amount": amount,
+                                    "currency": "GBP",
+                                    "country": country or "GB",
+                                    "date": date,
+                                    "narrative": description
+                                }
+                            })
+                    
+                    if sanctions_count > 0:
+                        key_concerns.append(f"{sanctions_count} transaction(s) involving prohibited/sanctioned jurisdictions")
+                    if high_risk_count > 0:
+                        key_concerns.append(f"{high_risk_count} transaction(s) involving high-risk jurisdictions")
+                    if cash_count > 0:
+                        key_concerns.append(f"{cash_count} large cash transaction(s) identified")
+                    
+                    total_alerts = sanctions_count + high_risk_count + cash_count
+                    
+                    if total_alerts > 0:
+                        return {
+                            "summary": {
+                                "total_alerts": total_alerts,
+                                "critical_alerts": sanctions_count,
+                                "high_alerts": high_risk_count + cash_count,
+                                "medium_alerts": 0,
+                                "key_concerns": key_concerns
+                            },
+                            "alerts": alert_objects  # Now includes actual alert objects for questions
+                        }
+            
+            # No alerts and no bank statement risks
             return {
                 "summary": {
                     "total_alerts": 0,
@@ -600,13 +823,27 @@ class SoFAssessmentEngine:
         tr_alerts = transaction_review_data.get('alerts', [])
         for alert in tr_alerts:
             if alert['severity'] in ['CRITICAL', 'HIGH']:
+                # Handle both new format (flat fields) and old format (nested transaction object)
+                if 'transaction' in alert:
+                    # Old format from database
+                    amount = alert['transaction']['amount']
+                    date = alert['transaction']['date']
+                    txn_id = alert['transaction']['id']
+                    alert_id = alert.get('alert_id')
+                else:
+                    # New format from direct bank statement analysis
+                    amount = alert['amount']
+                    date = alert['date']
+                    txn_id = None
+                    alert_id = None
+                
                 red_flags.append({
                     "severity": alert['severity'],
                     "source": "TRANSACTION_REVIEW",
                     "flag": f"{alert['reasons'][0] if alert['reasons'] else 'AML alert'} - "
-                           f"£{alert['transaction']['amount']:,.2f} on {alert['transaction']['date']}",
-                    "transaction_ref": alert['transaction']['id'],
-                    "alert_id": alert['alert_id'],
+                           f"£{amount:,.2f} on {date}",
+                    "transaction_ref": txn_id,
+                    "alert_id": alert_id,
                     "details": alert['reasons']
                 })
         
@@ -687,9 +924,19 @@ class SoFAssessmentEngine:
     ) -> Dict[str, Any]:
         """
         Make overall risk decision considering all factors
+        Now properly considers BOTH bank transaction matches AND document verification
+        AND requires 100% confidence for full verification
         """
-        # Count verified claims
-        verified_claims = sum(1 for e in evidence_matches if e['verified'])
+        # Count verified claims - must have:
+        # 1. Bank match (verified=True)
+        # 2. Document verification (document_verified=True)  
+        # 3. 100% confidence (no issues found)
+        verified_claims = sum(
+            1 for e in evidence_matches 
+            if e.get('verified', False) 
+            and e.get('document_verified', False)
+            and e.get('document_verification', {}).get('confidence', 0) >= 1.0
+        )
         total_claims = len(claims)
         verification_rate = verified_claims / total_claims if total_claims > 0 else 0
         
@@ -810,12 +1057,37 @@ class SoFAssessmentEngine:
         sof_section = ["=== SOURCE OF FUNDS ANALYSIS ===\n"]
         
         # Overall funding status
+        # Count how many claims have BOTH bank and document verification AND 100% confidence
+        fully_verified = sum(
+            1 for e in evidence_matches 
+            if e.get('verified') 
+            and e.get('document_verified')
+            and e.get('confidence', 0) >= 0.999  # Require 100% confidence
+        )
+        total_claims = len(claims)
+        
         if best_coverage >= 90:
-            sof_section.append(
-                f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
-                f"⚠️ DOCUMENTATION STATUS: Corroborating source documents REQUIRED to prove legitimacy.\n"
-                f"   Bank payments alone are INSUFFICIENT for AML compliance.\n"
-            )
+            if fully_verified == total_claims:
+                # ALL claims have both bank AND document verification
+                sof_section.append(
+                    f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                    f"✅ DOCUMENTATION STATUS: All claims verified with supporting documents.\n"
+                    f"   ✅ FULLY VERIFIED: Bank transactions and source documents confirm all {total_claims} claims.\n"
+                )
+            elif fully_verified > 0:
+                # SOME claims have both
+                sof_section.append(
+                    f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                    f"⚠️ DOCUMENTATION STATUS: {fully_verified}/{total_claims} claims verified with documents.\n"
+                    f"   Additional source documents REQUIRED for remaining {total_claims - fully_verified} claims.\n"
+                )
+            else:
+                # NO documents verified yet
+                sof_section.append(
+                    f"✅ BANK PAYMENT STATUS: Incoming payments found covering {best_coverage}% of purchase amount.\n"
+                    f"⚠️ DOCUMENTATION STATUS: Corroborating source documents REQUIRED to prove legitimacy.\n"
+                    f"   Bank payments alone are INSUFFICIENT for AML compliance.\n"
+                )
         elif best_coverage >= 70:
             sof_section.append(
                 f"⚠️ BANK PAYMENT STATUS: Partial payments traced ({best_coverage}% coverage). Gaps identified.\n"
@@ -853,13 +1125,26 @@ class SoFAssessmentEngine:
             else:
                 evidence_parts.append("❌ No bank transaction")
             
-            # Document verification evidence
-            if doc_verified:
-                doc_type = doc_verification.get('verification_details', {}).get('extracted_data', {})
-                if doc_type:
-                    evidence_parts.append(f"✅ Doc verified")
+            # Document verification evidence - check if document exists, not just if fully verified
+            doc_details = doc_verification.get('verification_details', {})
+            document_used = doc_details.get('document_used', {})
+            has_document = bool(document_used.get('filename'))
+            
+            if has_document:
+                doc_filename = document_used.get('filename', 'Doc')
+                doc_confidence = doc_verification.get('confidence', 0)
+                issues = doc_verification.get('issues', [])
+                
+                # Shorten filename for display (show first 20 chars + extension)
+                if len(doc_filename) > 25:
+                    doc_filename = doc_filename[:20] + '...' + doc_filename[-5:]
+                
+                if doc_verified:
+                    evidence_parts.append(f"✅ Doc: {doc_filename}")
                 else:
-                    evidence_parts.append(f"✅ Doc provided")
+                    # Document uploaded but has issues
+                    confidence_pct = int(doc_confidence * 100)
+                    evidence_parts.append(f"⚠️ Doc: {doc_filename} ({confidence_pct}%)")
             else:
                 evidence_parts.append("❌ No doc")
             
@@ -867,12 +1152,22 @@ class SoFAssessmentEngine:
             
             # Outreach questions - based on verification status
             if doc_verified:
-                # Document is verified, check what else might be needed
+                # Document is fully verified
+                outreach = "✅ Verified"
+            elif has_document:
+                # Document provided but has issues
                 issues = doc_verification.get('issues', [])
                 if issues:
-                    outreach = f"Clarify: {issues[0][:25]}"
+                    # Show the first issue
+                    first_issue = issues[0]
+                    if "distribution" in first_issue.lower() or "amount" in first_issue.lower():
+                        outreach = "Verify amount in document"
+                    elif "date" in first_issue.lower():
+                        outreach = "Verify date in document"
+                    else:
+                        outreach = f"Review: {first_issue[:20]}..."
                 else:
-                    outreach = "✅ Verified"
+                    outreach = "Review document details"
             else:
                 # Still need documents
                 if 'inheritance' in evidence['claim_source'].lower():
@@ -895,8 +1190,15 @@ class SoFAssessmentEngine:
                 summary = "✅ VERIFIED"
             elif doc_verified and not evidence['verified']:
                 summary = "⚠️ Doc OK, no bank txn"
-            elif evidence['verified'] and not doc_verified:
+            elif evidence['verified'] and has_document and not doc_verified:
+                # Bank txn found, doc provided but not fully verified
+                summary = "⚠️ Review doc"
+            elif evidence['verified'] and not has_document:
+                # Bank txn found but no document
                 summary = "⚠️ Bank txn, need doc"
+            elif has_document and not evidence['verified']:
+                # Doc provided but no bank txn
+                summary = "⚠️ Doc, no bank txn"
             else:
                 summary = "❌ MISSING"
             
@@ -906,7 +1208,29 @@ class SoFAssessmentEngine:
         
         # SoF Summary
         sof_section.append("\nSOURCE OF FUNDS SUMMARY:\n")
-        if verified_claims == total_claims:
+        
+        # Count fully verified claims (both bank + docs)
+        fully_verified_count = sum(
+            1 for e in evidence_matches 
+            if e.get('verified') 
+            and e.get('document_verified')
+            and e.get('confidence', 0) >= 0.999  # Require 100% confidence
+        )
+        
+        if fully_verified_count == total_claims:
+            # ALL claims have both bank AND documents
+            sof_section.append(
+                f"✅ All {total_claims} SoF claims have matching bank statement evidence.\n"
+                f"✅ All {total_claims} SoF claims have supporting document verification.\n"
+                f"✅ FULLY VERIFIED: Both bank transactions and source documents confirm all claims.\n\n"
+                f"The source of funds has been thoroughly verified with:\n"
+                f"  • Bank statement evidence showing receipt of funds\n"
+                f"  • Supporting documents proving legitimacy and lawful origin\n"
+                f"  • Complete audit trail connecting funds to their claimed source\n\n"
+                f"AML compliance requirements for source documentation have been met.\n"
+            )
+        elif verified_claims == total_claims and fully_verified_count < total_claims:
+            # All have bank, but not all have documents
             sof_section.append(
                 f"✅ All {total_claims} SoF claims have matching bank statement evidence. "
                 f"However, bank statements alone are INSUFFICIENT for regulatory compliance.\n\n"
@@ -1109,25 +1433,60 @@ class SoFAssessmentEngine:
         documents = []
         
         # 1. Transaction Review issues - HIGHEST PRIORITY
-        tr_alerts = transaction_review_data.get('alerts', [])
-        critical_tr = [a for a in tr_alerts if a['severity'] == 'CRITICAL']
-        high_tr = [a for a in tr_alerts if a['severity'] == 'HIGH']
+        # Use individual alert objects to generate specific, actionable questions
+        # Check both 'alert_details' (from DB) and 'alerts' (from direct bank statement analysis)
+        tr_alerts = transaction_review_data.get('alert_details', transaction_review_data.get('alerts', []))
         
-        if critical_tr:
-            for alert in critical_tr[:3]:  # Top 3 critical
-                txn = alert['transaction']
-                reason = alert['reasons'][0] if alert['reasons'] else "AML concern"
-                questions.append(
-                    f"URGENT: Transaction Review flagged £{txn['amount']:,.2f} transaction "
-                    f"on {txn['date']} as CRITICAL - {reason}. Provide immediate explanation."
-                )
-            documents.append("Written explanation and supporting evidence for all CRITICAL flagged transactions")
-        
-        if high_tr:
-            questions.append(
-                f"{len(high_tr)} HIGH risk transaction(s) identified by AML monitoring. "
-                f"Please review Transaction Review tab and provide explanations."
-            )
+        if tr_alerts:
+            critical_tr = [a for a in tr_alerts if a['severity'] == 'CRITICAL']
+            high_tr = [a for a in tr_alerts if a['severity'] == 'HIGH']
+            
+            # Generate specific questions for each CRITICAL alert
+            if critical_tr:
+                for alert in critical_tr[:3]:  # Top 3 critical alerts
+                    # Handle both new format (flat fields) and old format (nested transaction object)
+                    if 'transaction' in alert:
+                        # Old format from database
+                        txn = alert['transaction']
+                        amount = txn['amount']
+                        date = txn['date']
+                    else:
+                        # New format from direct bank statement analysis
+                        amount = alert['amount']
+                        date = alert['date']
+                    
+                    reason = alert['reasons'][0] if alert['reasons'] else "AML concern"
+                    questions.append(
+                        f"URGENT: Transaction of £{amount:,.2f} on {date} "
+                        f"flagged as CRITICAL - {reason}. Provide immediate explanation."
+                    )
+                
+                # Add document request for all critical alerts
+                if any('sanction' in str(a.get('reasons', [])).lower() or 
+                       'prohibited' in str(a.get('reasons', [])).lower() 
+                       for a in critical_tr):
+                    documents.append("Written explanation and supporting evidence for all transactions to sanctioned/prohibited countries")
+            
+            # Generate specific questions for each HIGH alert
+            if high_tr:
+                for alert in high_tr[:5]:  # Top 5 high alerts
+                    # Handle both formats
+                    if 'transaction' in alert:
+                        amount = alert['transaction']['amount']
+                        date = alert['transaction']['date']
+                    else:
+                        amount = alert['amount']
+                        date = alert['date']
+                    
+                    reason = alert['reasons'][0] if alert['reasons'] else "High-risk transaction"
+                    questions.append(
+                        f"HIGH RISK: Transaction of £{amount:,.2f} on {date} "
+                        f"requires explanation - {reason}."
+                    )
+                
+                # Add document request for cash transactions
+                if any('cash' in str(a.get('reasons', [])).lower() for a in high_tr):
+                    documents.append("Source documentation for all cash transactions over £10,000")
         
         # 2. Document requirements for ALL claims (verified and unverified)
         # Bank payments alone are insufficient - we need source documents
@@ -1141,6 +1500,17 @@ class SoFAssessmentEngine:
                     f"No bank statement evidence found for your claimed {claim['source_type']} "
                     f"of £{claim['expected_amount']:,.2f}. Please provide supporting documentation."
                 )
+            
+            # Check if this specific claim is fully verified
+            claim_fully_verified = (
+                evidence.get('verified', False) and 
+                evidence.get('document_verified', False) and
+                evidence.get('document_verification', {}).get('confidence', 0) >= 0.99
+            )
+            
+            # Skip document requests for fully verified claims (100% confidence)
+            if claim_fully_verified:
+                continue
             
             # Source-specific documents required for ALL claims to prove legitimacy
             if 'inheritance' in source_lower:
@@ -1166,12 +1536,13 @@ class SoFAssessmentEngine:
                     documents.append(f"Historical bank statements showing savings accumulation (for {claim['source_type']} claim)")
         
         # 3. Red flags from analysis
+        # Skip transaction-related red flags as they're covered by Transaction Review above
         for flag in red_flags:
             if flag['source'] == 'SoF_ANALYSIS':
-                if 'unexplained credit' in flag['flag'].lower():
+                # Only add questions for non-transaction red flags
+                if 'unexplained credit' not in flag['flag'].lower() and 'cash deposit' not in flag['flag'].lower():
+                    # Other SoF analysis flags
                     questions.append(f"Explain the {flag['flag']}")
-                elif 'cash deposit' in flag['flag'].lower():
-                    questions.append(f"Provide source documentation for {flag['flag']}")
         
         # 4. Risk-specific requirements
         if risk_rating == 'high':
@@ -1181,14 +1552,23 @@ class SoFAssessmentEngine:
                 documents.append("Source of wealth statement covering last 5 years")
         
         # 5. Standard documents if not already provided
-        standard_docs = {
-            "Bank statements": "Complete bank statements covering receipt and payment periods",
-            "ID verification": "Certified copies of photo ID and proof of address"
-        }
+        # BUT: Skip if all evidence is fully verified (100% confidence)
+        all_fully_verified = all(
+            match.get('verified', False) and 
+            match.get('document_verified', False) and
+            match.get('document_verification', {}).get('confidence', 0) >= 0.99
+            for match in evidence_matches
+        ) if evidence_matches else False
         
-        for doc_type, doc_desc in standard_docs.items():
-            if doc_type.lower() not in [d.lower() for d in known_documents]:
-                documents.append(doc_desc)
+        if not all_fully_verified:
+            standard_docs = {
+                "Bank statements": "Complete bank statements covering receipt and payment periods",
+                "ID verification": "Certified copies of photo ID and proof of address"
+            }
+            
+            for doc_type, doc_desc in standard_docs.items():
+                if doc_type.lower() not in [d.lower() for d in known_documents]:
+                    documents.append(doc_desc)
         
         # Deduplicate
         questions = list(dict.fromkeys(questions))
@@ -1230,21 +1610,58 @@ class SoFAssessmentEngine:
         # Claims summary
         note_parts.append("\nCLIENT'S SoF EXPLANATION:")
         for claim in claims:
-            verified = "VERIFIED" if evidence_matches[claim['claim_id']-1]['verified'] else "NOT VERIFIED"
+            evidence = evidence_matches[claim['claim_id']-1]
+            has_bank = evidence.get('verified', False)
+            has_doc = evidence.get('document_verified', False)
+            
+            if has_bank and has_doc:
+                status = "VERIFIED"
+            elif has_bank:
+                status = "REQUIRES DOCUMENTATION"
+            elif has_doc:
+                status = "REQUIRES BANK EVIDENCE"
+            else:
+                status = "NOT VERIFIED"
+            
             note_parts.append(
-                f"- {claim['source_type']}: £{claim['expected_amount']:,.2f} [{verified}]"
+                f"- {claim['source_type']}: £{claim['expected_amount']:,.2f} [{status}]"
             )
         
         # Evidence review with clear distinction
         note_parts.append("\nEVIDENCE REVIEW (Claim-by-Claim):")
-        verified_count = sum(1 for e in evidence_matches if e['verified'])
+        bank_verified_count = sum(1 for e in evidence_matches if e.get('verified', False))
         doc_verified_count = sum(1 for e in evidence_matches if e.get('document_verified', False))
+        
+        # FULLY VERIFIED requires: bank + docs + 100% confidence
+        fully_verified_count = sum(
+            1 for e in evidence_matches 
+            if e.get('verified', False) 
+            and e.get('document_verified', False)
+            and e.get('document_verification', {}).get('confidence', 0) >= 1.0
+        )
+        
         note_parts.append(
-            f"Bank transactions: {verified_count}/{len(claims)} claims matched."
+            f"Bank transactions: {bank_verified_count}/{len(claims)} claims matched."
         )
         note_parts.append(
             f"Supporting documents: {doc_verified_count}/{len(claims)} claims verified with source documentation."
         )
+        note_parts.append(
+            f"FULLY VERIFIED (bank + docs + 100% confidence): {fully_verified_count}/{len(claims)} claims."
+        )
+        
+        # Show warning if any claims have less than 100% confidence
+        partial_verified = sum(
+            1 for e in evidence_matches 
+            if e.get('verified', False) 
+            and e.get('document_verified', False)
+            and e.get('document_verification', {}).get('confidence', 0) < 1.0
+        )
+        if partial_verified > 0:
+            note_parts.append(
+                f"⚠️ REQUIRES REVIEW: {partial_verified} claim(s) have document issues (confidence < 100%)."
+            )
+        
         note_parts.append("")
         
         for evidence in evidence_matches:
@@ -1255,9 +1672,17 @@ class SoFAssessmentEngine:
             if evidence['verified']:
                 txns = evidence['transactions']
                 first_txn = txns[0]
+                
+                # Determine status based on confidence
+                confidence = doc_verification.get('confidence', 0)
+                is_fully_verified = doc_verified and confidence >= 1.0
+                
+                status_icon = '✅' if is_fully_verified else '⚠️'
+                status_text = 'FULLY VERIFIED' if is_fully_verified else 'REQUIRES REVIEW'
+                
                 note_parts.append(
-                    f"{'✅' if doc_verified else '⚠️'} Claim {evidence['claim_id']} ({evidence['claim_source']}): "
-                    f"£{evidence['expected_amount']:,.2f}"
+                    f"{status_icon} Claim {evidence['claim_id']} ({evidence['claim_source']}): "
+                    f"£{evidence['expected_amount']:,.2f} - {status_text}"
                 )
                 note_parts.append(
                     f"   • Bank Transaction: £{first_txn['amount']:,.2f} on {first_txn['date']}"
@@ -1273,11 +1698,84 @@ class SoFAssessmentEngine:
                 if doc_verified:
                     verification_details = doc_verification.get('verification_details', {})
                     checks_passed = verification_details.get('checks_passed', [])
+                    document_used = verification_details.get('document_used', {})
+                    
                     note_parts.append(f"   • ✅ SUPPORTING DOCUMENT VERIFIED:")
+                    
+                    # AUDIT TRAIL: Show which document was used
+                    if document_used:
+                        note_parts.append(f"      📄 Document: {document_used.get('filename', 'Unknown')}")
+                        note_parts.append(f"      📋 Type: {document_used.get('document_type', 'Unknown')}")
+                        if document_used.get('probate_reference'):
+                            note_parts.append(f"      🔖 Reference: {document_used['probate_reference']}")
+                        if document_used.get('title_number'):
+                            note_parts.append(f"      🔖 Title Number: {document_used['title_number']}")
+                        if document_used.get('solicitor_firm'):
+                            note_parts.append(f"      ⚖️ Solicitor: {document_used['solicitor_firm']}")
+                    
                     for check in checks_passed[:3]:  # Show first 3 checks
                         note_parts.append(f"      - {check}")
                     if doc_verification.get('confidence'):
-                        note_parts.append(f"      - Verification confidence: {doc_verification['confidence']*100:.0f}%")
+                        confidence_pct = doc_verification['confidence']*100
+                        note_parts.append(f"      - Verification confidence: {confidence_pct:.0f}%")
+                        
+                        # FLAG if confidence < 100%
+                        if confidence_pct < 100:
+                            note_parts.append(f"      ⚠️ ATTENTION: Confidence below 100% - review required")
+                            issues = doc_verification.get('issues', [])
+                            if issues:
+                                note_parts.append(f"      📋 Issues found:")
+                                for issue in issues:
+                                    note_parts.append(f"         • {issue}")
+                    
+                    # ADD COMPARISON: Customer Claim vs Document Evidence
+                    comparison = verification_details.get('comparison', {})
+                    if comparison:
+                        note_parts.append(f"\n   • 📊 EVIDENCE COMPARISON:")
+                        
+                        customer_claim = comparison.get('customer_claim', {})
+                        doc_evidence = comparison.get('document_evidence', {})
+                        matches = comparison.get('matches', {})
+                        
+                        # Customer's claim
+                        note_parts.append(f"      👤 Customer stated:")
+                        note_parts.append(f"         • Source: {customer_claim.get('source_type')}")
+                        note_parts.append(f"         • Amount: £{customer_claim.get('claimed_amount', 0):,.2f}")
+                        if customer_claim.get('description') and customer_claim['description'] != 'Not provided':
+                            desc = customer_claim['description']
+                            # Limit to 200 chars for readability
+                            if len(desc) > 200:
+                                desc = desc[:197] + "..."
+                            note_parts.append(f"         • Explanation: \"{desc}\"")
+                        
+                        # Document confirms
+                        note_parts.append(f"      ✅ Document confirms:")
+                        if doc_evidence.get('deceased_name'):
+                            note_parts.append(f"         • Estate of: {doc_evidence['deceased_name']}")
+                        if doc_evidence.get('executor'):
+                            note_parts.append(f"         • Executor/Beneficiary: {doc_evidence['executor']}")
+                        if doc_evidence.get('distribution_amount'):
+                            note_parts.append(f"         • Distribution: £{doc_evidence['distribution_amount']:,.2f}")
+                        if doc_evidence.get('payment_date'):
+                            note_parts.append(f"         • Payment date: {doc_evidence['payment_date']}")
+                        if doc_evidence.get('property_address'):
+                            note_parts.append(f"         • Property: {doc_evidence['property_address']}")
+                        if doc_evidence.get('vendor_name'):
+                            note_parts.append(f"         • Vendor: {doc_evidence['vendor_name']}")
+                        if doc_evidence.get('net_proceeds'):
+                            note_parts.append(f"         • Net proceeds: £{doc_evidence['net_proceeds']:,.2f}")
+                        if doc_evidence.get('completion_date'):
+                            note_parts.append(f"         • Completion: {doc_evidence['completion_date']}")
+                        
+                        # Match status
+                        if matches.get('amount_matches'):
+                            diff = matches.get('amount_difference', 0)
+                            if diff < 100:
+                                note_parts.append(f"      ✅ Amount matches exactly")
+                            else:
+                                note_parts.append(f"      ✅ Amount matches (difference: £{diff:,.2f})")
+                        else:
+                            note_parts.append(f"      ⚠️ Amount mismatch detected")
                 else:
                     note_parts.append(
                         f"   • ⚠️ REQUIRES: Source documentation to prove legitimacy"
@@ -1300,7 +1798,7 @@ class SoFAssessmentEngine:
                 f"Total funding traced: {best_path['coverage']}% of purchase amount.\n"
             )
             
-            if best_path['coverage'] >= 90 and verified_count < len(claims):
+            if best_path['coverage'] >= 90 and fully_verified_count < len(claims):
                 note_parts.append(
                     "INTERPRETATION: While not all individual claims have direct evidence in the "
                     "provided statements, sufficient aggregate funding has been traced to cover the "
