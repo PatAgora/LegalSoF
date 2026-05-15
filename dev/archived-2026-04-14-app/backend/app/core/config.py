@@ -1,6 +1,7 @@
 """
 Application configuration using Pydantic settings.
 """
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import os
@@ -8,12 +9,23 @@ import os
 
 class Settings(BaseSettings):
     """Application settings."""
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def _ensure_asyncpg_driver(cls, v: str) -> str:
+        # Railway / Heroku expose postgres URLs without the SQLAlchemy
+        # driver scheme. Normalise to asyncpg so the app runs unchanged.
+        if v.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + v[len("postgresql://"):]
+        if v.startswith("postgres://"):
+            return "postgresql+asyncpg://" + v[len("postgres://"):]
+        return v
     
     # Environment
     ENVIRONMENT: str = "development"
