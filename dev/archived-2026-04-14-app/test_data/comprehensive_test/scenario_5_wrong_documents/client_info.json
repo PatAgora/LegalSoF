@@ -1,0 +1,52 @@
+{
+  "client_info": {
+    "client_name": "Startup Ventures Ltd",
+    "client_id": "TEST-005",
+    "client_risk_rating": "medium",
+    "is_pep": false,
+    "business_sector": "Business Services",
+    "high_risk_jurisdictions": []
+  },
+  "purchase": {
+    "description": "Purchase of commercial property / business acquisition",
+    "amount": 320000,
+    "currency": "GBP",
+    "expected_payment_date": "2024-01-15"
+  },
+  "sof_explanation": {
+    "total_funds": 320000,
+    "currency": "GBP",
+    "sources": [
+      {
+        "source_type": "gift",
+        "amount": 100000,
+        "currency": "GBP",
+        "description": "Gift from parents John and Sarah Mitchell",
+        "donor_name": "John and Sarah Mitchell",
+        "gift_date": "2023-10-01"
+      },
+      {
+        "source_type": "savings",
+        "amount": 220000,
+        "currency": "GBP",
+        "description": "Savings from salary over 10 years",
+        "bank": "NatWest",
+        "account_number": "****7890"
+      }
+    ]
+  },
+  "bank_statement_period": {
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31"
+  },
+  "known_documents": [
+    {
+      "type": "gift_letter",
+      "description": "Gift Letter from John and Sarah Mitchell"
+    },
+    {
+      "type": "bank_statements",
+      "description": "Bank statements from NatWest"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "client_info": {
+    "client_name": "Sarah Jane Thompson",
+    "client_risk_rating": "low",
+    "pep_status": false,
+    "business_sector": "Healthcare - NHS Nurse"
+  },
+  "purchase": {
+    "amount": 269280,
+    "currency": "GBP",
+    "expected_payment_date": "2025-11-15",
+    "description": "Purchase of residential property at 27 Willow Lane, Sale, M33 5RT"
+  },
+  "sof_explanation": "The funds for this purchase are coming from the sale of my previous property at 42 Oakwood Drive, Chorlton, Manchester M20 4QP. The property was sold for £425,000 with net proceeds of £269,280 after deducting the mortgage redemption and associated fees. The completion took place on 15 October 2025, handled by Harrison & Co Solicitors.",
+  "claims": [
+    {
+      "source_type": "Property sale",
+      "amount": 269280,
+      "currency": "GBP",
+      "description": "Sale of 42 Oakwood Drive, Chorlton, Manchester M20 4QP - net proceeds after mortgage redemption and fees",
+      "property_address": "42 Oakwood Drive, Chorlton, Manchester M20 4QP",
+      "completion_date": "2025-10-15"
+    }
+  ],
+  "known_documents": [
+    "completion statement"
+  ],
+  "flags": {
+    "pep": false,
+    "high_risk_jurisdictions": []
+  },
+  "constraints": {
+    "statement_start_date": "2025-10-01",
+    "statement_end_date": "2025-10-31"
+  }
+}

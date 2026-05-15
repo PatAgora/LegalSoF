@@ -1,0 +1,56 @@
+{
+  "client_info": {
+    "client_name": "Tech Acquisitions Ltd",
+    "client_id": "TEST-004",
+    "client_risk_rating": "medium",
+    "is_pep": false,
+    "business_sector": "Business Services",
+    "high_risk_jurisdictions": []
+  },
+  "purchase": {
+    "description": "Purchase of commercial property / business acquisition",
+    "amount": 890000,
+    "currency": "GBP",
+    "expected_payment_date": "2024-01-15"
+  },
+  "sof_explanation": {
+    "total_funds": 890000,
+    "currency": "GBP",
+    "sources": [
+      {
+        "source_type": "inheritance",
+        "amount": 350000,
+        "currency": "GBP",
+        "description": "Inheritance from Estate of Robert James Wilson",
+        "deceased_name": "Robert James Wilson",
+        "probate_reference": "2023/5432",
+        "date_of_death": "2023-01-10",
+        "distribution_date": "2023-06-15"
+      },
+      {
+        "source_type": "business_sale",
+        "amount": 540000,
+        "currency": "GBP",
+        "description": "Sale of Software Development Ltd",
+        "company_name": "Software Development Ltd",
+        "company_number": "09876543",
+        "completion_date": "2023-09-30",
+        "solicitor_firm": "Legal Partners LLP"
+      }
+    ]
+  },
+  "bank_statement_period": {
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31"
+  },
+  "known_documents": [
+    {
+      "type": "probate_grant",
+      "description": "Probate Grant for Robert James Wilson"
+    },
+    {
+      "type": "business_sale_agreement",
+      "description": "Sale Agreement for Software Development Ltd"
+    }
+  ]
+}

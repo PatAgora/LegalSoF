@@ -1,74 +1,51 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+**/.env
+!**/.env.example
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
-venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.eggs/
+.coverage
+htmlcov/
+.pytest_cache/
 
-# Environment
-.env
-.env.local
-.env.*.local
+# Virtual environments
+venv/
+.venv/
+env/
 
-# IDEs
+# Node / frontend
+node_modules/
+dist/
+build/
+.next/
+.vite/
+
+# IDE / OS
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
 
-# Logs
-*.log
-logs/
-
-# Database
-*.db
-*.sqlite
-
-# Uploads
+# Local data / uploads
 uploads/
-*.pdf
-*.docx
-*.xlsx
+*.db
+*.sqlite3
+*.log
+backups/
 
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-dist/
-.cache/
-
-# Docker
+# Docker overrides
 docker-compose.override.yml
 
-# Alembic
-alembic/versions/*_*.py
-
-# OS
-Thumbs.db
+# Claude Code local config
+.claude/

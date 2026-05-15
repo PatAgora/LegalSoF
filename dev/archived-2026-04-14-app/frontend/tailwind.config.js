@@ -1,0 +1,103 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+      },
+      fontSize: {
+        'page-title': ['1.75rem', { lineHeight: '2.25rem', fontWeight: '600', letterSpacing: '-0.025em' }],
+        'section-title': ['1.125rem', { lineHeight: '1.75rem', fontWeight: '600', letterSpacing: '-0.01em' }],
+        'body': ['0.875rem', { lineHeight: '1.5rem', fontWeight: '400' }],
+        'caption': ['0.75rem', { lineHeight: '1.125rem', fontWeight: '500' }],
+        'overline': ['0.6875rem', { lineHeight: '1rem', fontWeight: '600', letterSpacing: '0.05em' }],
+      },
+      colors: {
+        primary: {
+          50: '#f0f4f8',
+          100: '#d9e2ec',
+          200: '#bcccdc',
+          300: '#9fb3c8',
+          400: '#6b8bad',
+          500: '#3B5374',
+          600: '#2D4059',
+          700: '#2c3f4f',
+          800: '#1a2536',
+          900: '#111827',
+        },
+        accent: {
+          50: '#fff8f0',
+          100: '#ffe8cc',
+          200: '#ffd199',
+          300: '#ffba66',
+          400: '#f0a243',
+          500: '#E8922D',
+          600: '#d07a1a',
+          700: '#b06210',
+          800: '#8c4e0d',
+          900: '#6b3a0a',
+        },
+        status: {
+          success: {
+            50:  '#f4f7f5',
+            100: '#e3ebe5',
+            200: '#c7d6ca',
+            500: '#6b8f72',
+            700: '#4a6b50',
+            900: '#2d4231',
+          },
+          warning: {
+            50:  '#faf8f5',
+            100: '#f0ebe3',
+            200: '#e0d5c7',
+            500: '#9c8b74',
+            700: '#756652',
+            900: '#4a3f33',
+          },
+          danger: {
+            50:  '#faf5f5',
+            100: '#f0e5e5',
+            200: '#ddc9c9',
+            500: '#9c6b6b',
+            700: '#7a4f4f',
+            900: '#4a2f2f',
+          },
+          info: {
+            50:  '#f5f7fa',
+            100: '#e5eaf0',
+            200: '#c9d3e0',
+            500: '#6b7f9c',
+            700: '#4f6180',
+            900: '#2f3c4d',
+          },
+        },
+        brand: {
+          dark: '#2D4059',
+          surface: '#faf9f7',
+          'surface-alt': '#f5f3ef',
+          panel: '#ffffff',
+          muted: '#e8e5e0',
+          ink: '#1a1a1a',
+          'ink-secondary': '#5c5c5c',
+          'ink-tertiary': '#8c8c8c',
+        },
+      },
+      borderRadius: {
+        'card': '0.375rem',
+        'button': '0.25rem',
+        'badge': '0.25rem',
+        'input': '0.25rem',
+      },
+      boxShadow: {
+        'card': 'none',
+        'elevated': '0 1px 3px 0 rgb(0 0 0 / 0.04)',
+        'dropdown': '0 4px 12px -2px rgb(0 0 0 / 0.08)',
+      },
+    },
+  },
+  plugins: [],
+}

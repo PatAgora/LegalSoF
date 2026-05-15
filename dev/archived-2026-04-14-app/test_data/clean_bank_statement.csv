@@ -1,0 +1,5 @@
+Date,Description,Amount,Balance,Account
+2023-05-15,Estate Distribution - Probate Grant 2023/4521 from Smith & Partners Solicitors,250000.00,250000.00,Barclays_****1234
+2023-06-15,Transfer to HSBC,200000.00,50000.00,Barclays_****1234
+2023-06-15,Transfer from Barclays,200000.00,200000.00,HSBC_****5678
+2023-07-01,Property Sale Proceeds - 45 Oak Street London from Taylor & Brown Solicitors,300000.00,500000.00,HSBC_****5678
