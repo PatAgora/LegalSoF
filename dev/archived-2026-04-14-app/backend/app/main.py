@@ -1,9 +1,11 @@
 """
 Main FastAPI application entry point.
 """
+from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -120,16 +122,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "service": "Agora Consulting AI API",
-        "version": "1.0.0",
-        "status": "operational",
-    }
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -141,6 +133,36 @@ async def health_check():
 
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
+
+
+# Serve the React frontend if a build is present (single-service deploys).
+_STATIC_DIR = (Path(__file__).resolve().parent.parent / "static").resolve()
+
+if _STATIC_DIR.is_dir():
+    _ASSETS_DIR = _STATIC_DIR / "assets"
+    if _ASSETS_DIR.is_dir():
+        app.mount("/assets", StaticFiles(directory=_ASSETS_DIR), name="frontend_assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        if full_path.startswith("api/") or full_path == "health":
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        candidate = (_STATIC_DIR / full_path).resolve()
+        try:
+            candidate.relative_to(_STATIC_DIR)
+        except ValueError:
+            return FileResponse(_STATIC_DIR / "index.html")
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_STATIC_DIR / "index.html")
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "service": "Agora Consulting AI API",
+            "version": "1.0.0",
+            "status": "operational",
+        }
 
 
 if __name__ == "__main__":
