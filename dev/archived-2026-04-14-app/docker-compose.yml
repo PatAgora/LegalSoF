@@ -51,13 +51,13 @@ services:
   # React Frontend
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../docker/Dockerfile.frontend
+      context: ./backend/frontend
+      dockerfile: ../../docker/Dockerfile.frontend
     container_name: sof-frontend
     environment:
       - VITE_API_BASE_URL=
     volumes:
-      - ./frontend:/app
+      - ./backend/frontend:/app
       - /app/node_modules
     depends_on:
       - backend
