@@ -1,4 +1,28 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+// Resolve the API base URL.
+//
+// Production (single-service deploy): backend serves the frontend bundle, so
+// the API lives at the SAME origin as the page — base URL must be empty so
+// fetch('/api/v1/...') stays on this host.
+//
+// We deliberately ignore VITE_API_BASE_URL when running on a *.railway.app
+// host. A previous build accidentally baked a stale separate-backend URL into
+// the bundle, and env-var changes only take effect on the next rebuild —
+// this guard makes the running bundle robust regardless of what was baked.
+//
+// Local dev still honours VITE_API_BASE_URL if you point the frontend at a
+// detached backend.
+function resolveApiBase(): string {
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const host = window.location.hostname
+    if (host.endsWith('.railway.app') || host.endsWith('.up.railway.app')) {
+      return ''
+    }
+  }
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  return (envUrl && typeof envUrl === 'string') ? envUrl : ''
+}
+
+export const API_BASE_URL = resolveApiBase()
 
 export function getAuthHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
