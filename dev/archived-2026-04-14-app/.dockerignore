@@ -1,0 +1,37 @@
+# Build-context exclusions when this dir is the Docker context.
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Secrets — never bake into images.
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+backend/frontend/.env
+backend/frontend/.env.local
+
+# Runtime data
+uploads/
+backend/uploads/
+*.db
+*.sqlite3
+*.log
+backups/
+
+# Frontend artefacts — built fresh in the Node stage.
+backend/frontend/node_modules/
+backend/frontend/dist/
+backend/frontend/.next/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
