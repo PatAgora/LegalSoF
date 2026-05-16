@@ -107,13 +107,31 @@ def run_migrations():
 
 
 async def seed_admin(engine):
-    """Seed the admin user.
+    """Seed/refresh the admin user with a known password on every deploy.
 
-    Behaviour:
-      - User does not exist            -> create with ADMIN_PASSWORD env (or generated).
-      - User exists, ADMIN_PASSWORD set -> reset password and re-assert admin flags.
-      - User exists, no env var        -> leave alone.
+    The login is deterministic so the operator always has a way in:
+      Email:    admin@agora.ai
+      Password: ADMIN_PASSWORD env var if set, otherwise DEFAULT_ADMIN_PASSWORD below.
+
+    On every run this also enforces role=ADMIN + is_superuser=True and clears
+    any lockout state. To stop the auto-reset later, remove this function
+    from main() or guard it behind an env flag.
     """
+    # NOTE: this default is visible in the public repo. Change it once you
+    # no longer need the deterministic-login behaviour, or always set
+    # ADMIN_PASSWORD in the deploy env to override.
+    DEFAULT_ADMIN_PASSWORD = "Agora-Login-2026!"
+
+    from app.core.security import validate_password_policy
+
+    env_pw = os.environ.get("ADMIN_PASSWORD")
+    password = env_pw or DEFAULT_ADMIN_PASSWORD
+    source = "ADMIN_PASSWORD env var" if env_pw else "default in init_db.py"
+
+    valid, msg = validate_password_policy(password)
+    if not valid:
+        raise ValueError(f"Admin password does not meet policy ({source}): {msg}")
+
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
@@ -123,44 +141,32 @@ async def seed_admin(engine):
         existing = result.scalar_one_or_none()
 
         if existing:
-            env_pw = os.environ.get("ADMIN_PASSWORD")
-            if not env_pw:
-                print(f"[=] Admin user ({ADMIN_EMAIL}) already exists — leaving as-is.")
-                print("    To reset the password, set ADMIN_PASSWORD env var and redeploy.")
-                return
-
-            from app.core.security import validate_password_policy
-            valid, msg = validate_password_policy(env_pw)
-            if not valid:
-                raise ValueError(f"ADMIN_PASSWORD does not meet policy: {msg}")
-
-            existing.hashed_password = get_password_hash(env_pw)
+            existing.hashed_password = get_password_hash(password)
             existing.role = UserRole.ADMIN
             existing.is_active = True
             existing.is_superuser = True
-            # Clear any lockout state from previous failed login attempts
             existing.failed_login_attempts = 0
             existing.locked_until = None
             await session.commit()
             print(f"[+] Admin user reset  —  {ADMIN_EMAIL}")
-            print("    Password updated from ADMIN_PASSWORD env var; role=ADMIN, is_superuser=True.")
-            return
+        else:
+            admin = User(
+                email=ADMIN_EMAIL,
+                hashed_password=get_password_hash(password),
+                full_name=ADMIN_FULL_NAME,
+                role=UserRole.ADMIN,
+                is_active=True,
+                is_superuser=True,
+            )
+            session.add(admin)
+            await session.commit()
+            print(f"[+] Admin user created  —  {ADMIN_EMAIL}")
 
-        password, was_generated = _get_admin_password()
-        admin = User(
-            email=ADMIN_EMAIL,
-            hashed_password=get_password_hash(password),
-            full_name=ADMIN_FULL_NAME,
-            role=UserRole.ADMIN,
-            is_active=True,
-            is_superuser=True,
-        )
-        session.add(admin)
-        await session.commit()
-        print(f"[+] Admin user created  —  {ADMIN_EMAIL}")
-        if was_generated:
-            print(f"[+] Generated password: {password}")
-            print("[!] Save this password — it will not be shown again.")
+        print(f"    Password source: {source}")
+        if not env_pw:
+            print(f"    Login: {ADMIN_EMAIL} / {DEFAULT_ADMIN_PASSWORD}")
+            print("    To change: edit DEFAULT_ADMIN_PASSWORD in init_db.py OR")
+            print("    set ADMIN_PASSWORD in Railway env vars, then redeploy.")
 
 
 async def main():
