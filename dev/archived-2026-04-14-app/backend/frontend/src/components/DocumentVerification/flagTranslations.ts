@@ -220,6 +220,34 @@ export const FLAG_TRANSLATIONS: Record<string, { headline: string; explanation: 
     headline: 'Statement end date does not match',
     explanation: 'The latest transaction does not align with the stated statement period end date.',
   },
+
+  // OCR consistency (Phase 1.1)
+  TEXT_LAYER_OCR_MISMATCH: {
+    headline: 'Visible text does not match the document text layer',
+    explanation: 'The text shown on the page differs from the text encoded in the PDF. This is a classic indicator that someone has laid edited text over an image of the original document.',
+  },
+  OCR_CONSISTENCY_OK: {
+    headline: 'OCR matches the document text layer',
+    explanation: 'The visible text matches what is encoded in the PDF. No text-over-image tampering detected on the sampled pages.',
+  },
+  OCR_UNAVAILABLE: {
+    headline: 'OCR check could not run',
+    explanation: 'OCR libraries are not available in this environment; the text-over-image tamper check was skipped.',
+  },
+
+  // Cross-document corroboration (Phase 1.2)
+  ACCOUNT_NAME_MISMATCH: {
+    headline: 'Account holder name disagrees with other documents',
+    explanation: 'The name on this document does not match the account holder name seen across other documents in this matter.',
+  },
+  ACCOUNT_NUMBER_MISMATCH: {
+    headline: 'Account number disagrees with other documents',
+    explanation: 'The account number/sort code on this document does not match the figures used on other documents in this matter.',
+  },
+  PERIOD_GAP_VS_OTHER_STATEMENTS: {
+    headline: 'Statement period leaves a gap',
+    explanation: 'The dates covered by this statement leave an unexplained gap relative to the other statements supplied for this matter.',
+  },
 };
 
 export const translateFlag = (flag: { code: string; message: string; severity: string }) => {

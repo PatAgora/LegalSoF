@@ -2263,9 +2263,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           </div>
                           {docVerOverrideModalOpen === v.id ? (
                             <div className="bg-white rounded-card p-3 border border-brand-muted space-y-2">
-                              <label className="block text-xs font-semibold text-brand-ink-secondary">
-                                Admin Override Rationale (required, min 10 chars):
-                              </label>
+                              <div className="flex items-baseline justify-between">
+                                <label className="block text-xs font-semibold text-brand-ink-secondary">
+                                  Admin Override Rationale (required, min 10 chars):
+                                </label>
+                                <span
+                                  className={`text-[10px] font-medium ${
+                                    docVerOverrideRationale.length >= 10
+                                      ? 'text-status-success-700'
+                                      : 'text-brand-ink-tertiary'
+                                  }`}
+                                >
+                                  {docVerOverrideRationale.length} / 10 min
+                                </span>
+                              </div>
                               <textarea
                                 className="w-full border border-brand-muted rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
                                 rows={3}

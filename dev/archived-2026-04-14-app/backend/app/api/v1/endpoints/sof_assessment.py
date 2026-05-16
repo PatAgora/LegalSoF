@@ -23,6 +23,7 @@ from app.models.statement_validation import (
 )
 from app.services.document_verification_pipeline import document_verification_pipeline, VerificationResult as DocVerResult
 from app.services.statement_validation_pipeline import StatementValidationPipeline, ValidationResult as StmtValResult
+from app.services.cross_document_corroborator import corroborate as corroborate_verification
 from app.models.document_verification import (
     DocumentVerification, DocumentVerificationFlag, DocumentVerificationTransaction,
     VerificationVerdict,
@@ -774,6 +775,38 @@ async def upload_sof_files(
             db.commit()
             print(f"   PDF verification: {doc_ver_result.verdict} (score: {doc_ver_result.authenticity_score})")
 
+            # Cross-document corroboration — does this PDF agree with the
+            # other documents on the matter (client name, period gaps)?
+            try:
+                pdf_text = ""
+                try:
+                    import fitz
+                    _doc = fitz.open(stream=file_content_for_verification, filetype="pdf")
+                    pdf_text = "\n".join(p.get_text() or "" for p in _doc)
+                    _doc.close()
+                except Exception:
+                    pdf_text = ""
+                corr_flags = corroborate_verification(
+                    db, matter_id, doc_ver_record.id,
+                    new_doc_text=pdf_text,
+                    new_period_start=doc_ver_record.period_start,
+                    new_period_end=doc_ver_record.period_end,
+                )
+                for cf in corr_flags:
+                    db.add(DocumentVerificationFlag(
+                        verification_id=doc_ver_record.id,
+                        pipeline_stage=cf.pipeline_stage,
+                        code=cf.code,
+                        severity=cf.severity,
+                        message=cf.message,
+                        details=cf.details,
+                    ))
+                if corr_flags:
+                    db.commit()
+                    print(f"   Cross-doc corroboration raised {len(corr_flags)} flag(s)")
+            except Exception as corr_err:
+                print(f"   Cross-document corroboration skipped ({corr_err})")
+
         elif file_category == "bank_statement" and not is_pdf:
             # --- CSV bank statement: run statement validation pipeline for math check ---
             loop = asyncio.get_event_loop()
@@ -856,6 +889,34 @@ async def upload_sof_files(
 
             db.commit()
             print(f"   CSV verification: {csv_method} (score: {csv_score})")
+
+            # Cross-document corroboration for CSV uploads. We use the raw
+            # bytes decoded as text — good enough for a name-tokens search.
+            try:
+                try:
+                    csv_text = file_content_for_verification.decode("utf-8", errors="ignore")
+                except Exception:
+                    csv_text = ""
+                corr_flags = corroborate_verification(
+                    db, matter_id, doc_ver_record.id,
+                    new_doc_text=csv_text,
+                    new_period_start=doc_ver_record.period_start,
+                    new_period_end=doc_ver_record.period_end,
+                )
+                for cf in corr_flags:
+                    db.add(DocumentVerificationFlag(
+                        verification_id=doc_ver_record.id,
+                        pipeline_stage=cf.pipeline_stage,
+                        code=cf.code,
+                        severity=cf.severity,
+                        message=cf.message,
+                        details=cf.details,
+                    ))
+                if corr_flags:
+                    db.commit()
+                    print(f"   Cross-doc corroboration raised {len(corr_flags)} flag(s)")
+            except Exception as corr_err:
+                print(f"   Cross-document corroboration skipped ({corr_err})")
 
         else:
             # Non-PDF, non-bank-statement files (e.g. client_info.json) — skip verification

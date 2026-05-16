@@ -29,7 +29,19 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def _normalise_for_compare(s: str) -> str:
+    """Strip whitespace runs and most punctuation so OCR and text-layer
+    comparisons aren't tripped up by trivial formatting differences."""
+    if not s:
+        return ""
+    # Lowercase, collapse whitespace, drop punctuation that OCR mis-handles
+    lowered = s.lower()
+    cleaned = re.sub(r"[^a-z0-9£$.,/\-\s]", " ", lowered)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -250,6 +262,12 @@ class DocumentVerificationPipeline:
 
             # Stage 8 - Hidden Content Detection
             self._stage_hidden_content_detection(doc, result)
+
+            # Stage 8b - OCR vs text-layer consistency check.
+            # Catches text-over-image tampering where the producer/creator
+            # metadata looks clean but the visible glyphs disagree with the
+            # PDF text layer (a classic forgery technique).
+            self._stage_ocr_consistency(doc, result)
 
             # Stage 9 - Authenticity Scoring
             self._stage_scoring(result)
@@ -1526,6 +1544,121 @@ class DocumentVerificationPipeline:
             "whiteout_pages": sorted(set(whiteout_pages)),
         }
         result.flags.extend(flags)
+
+    # ------------------------------------------------------------------
+    # STAGE 8b - OCR vs text-layer consistency
+    # ------------------------------------------------------------------
+    def _stage_ocr_consistency(self, doc, result: VerificationResult):
+        """Compare the PDF text layer against an OCR pass over the rendered page.
+
+        A common forgery is to lay edited text on top of an image of the
+        original document. The visible glyphs differ from the embedded text
+        layer. We catch that by rasterising each page at 150 dpi, running
+        Tesseract on the image, and comparing the two strings.
+
+        Performance-sensitive — capped at the first 10 pages with a text
+        layer, 150 dpi, and a 1.5s per-page Tesseract budget. The stage is
+        wrapped in a single try/except so any OCR/runtime failure degrades
+        gracefully without breaking the rest of the pipeline.
+        """
+        MAX_PAGES = 10
+        DPI = 150
+        # Mismatch thresholds (per page)
+        MIN_LEN_FOR_CHECK = 80          # below this the text layer is too short to compare meaningfully
+        LEN_DELTA_THRESHOLD = 0.25       # relative length difference
+        RATIO_THRESHOLD = 0.60           # difflib similarity ratio
+
+        try:
+            import fitz  # PyMuPDF
+            import pytesseract
+            from PIL import Image
+            import io
+        except ImportError as exc:
+            # OCR libraries not installed — record an info flag and bail.
+            result.flags.append(VerificationFlag(
+                "ocr_consistency", "OCR_UNAVAILABLE", "info",
+                f"OCR check skipped (missing dependency: {exc.name}).",
+                {"error": str(exc)},
+            ))
+            return
+
+        suspicious_pages: List[Dict[str, Any]] = []
+        pages_checked = 0
+        ocr_errors = 0
+
+        for page_num, page in enumerate(doc):
+            if pages_checked >= MAX_PAGES:
+                break
+
+            text_layer = (page.get_text() or "").strip()
+            if len(text_layer) < MIN_LEN_FOR_CHECK:
+                # Image-only or near-empty page — different category of issue,
+                # not what this stage is looking for.
+                continue
+
+            try:
+                pix = page.get_pixmap(dpi=DPI, alpha=False)
+                img_bytes = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_bytes))
+                # `timeout` is supported by Tesseract via the wrapper; if the
+                # OCR call hangs on a page we move on.
+                ocr_text = pytesseract.image_to_string(img, timeout=15) or ""
+            except RuntimeError:
+                # pytesseract raises RuntimeError on timeout
+                ocr_errors += 1
+                continue
+            except Exception:
+                ocr_errors += 1
+                continue
+
+            pages_checked += 1
+
+            norm_text = _normalise_for_compare(text_layer)
+            norm_ocr = _normalise_for_compare(ocr_text)
+            if not norm_ocr or len(norm_ocr) < MIN_LEN_FOR_CHECK:
+                # OCR couldn't read enough — skip rather than false-positive
+                continue
+
+            len_delta = abs(len(norm_text) - len(norm_ocr)) / max(len(norm_text), 1)
+            ratio = SequenceMatcher(None, norm_text, norm_ocr).ratio()
+
+            if len_delta > LEN_DELTA_THRESHOLD and ratio < RATIO_THRESHOLD:
+                suspicious_pages.append({
+                    "page": page_num + 1,                     # 1-indexed for display
+                    "text_layer_chars": len(norm_text),
+                    "ocr_chars": len(norm_ocr),
+                    "length_delta_pct": round(len_delta * 100, 1),
+                    "similarity_ratio": round(ratio, 3),
+                })
+
+        details: Dict[str, Any] = {
+            "pages_checked": pages_checked,
+            "ocr_errors": ocr_errors,
+            "suspicious_pages": suspicious_pages,
+            "thresholds": {
+                "length_delta_pct": LEN_DELTA_THRESHOLD * 100,
+                "min_similarity_ratio": RATIO_THRESHOLD,
+            },
+        }
+
+        if suspicious_pages:
+            page_list = ", ".join(str(p["page"]) for p in suspicious_pages)
+            result.flags.append(VerificationFlag(
+                "ocr_consistency", "TEXT_LAYER_OCR_MISMATCH", "high",
+                f"PDF text layer disagrees with rendered text on page(s) {page_list}. "
+                "Common indicator of text-over-image tampering.",
+                {
+                    **details,
+                    # page_numbers in flag.details lets the UI highlight pages
+                    "page_numbers": [p["page"] - 1 for p in suspicious_pages],
+                },
+            ))
+        elif pages_checked > 0:
+            result.flags.append(VerificationFlag(
+                "ocr_consistency", "OCR_CONSISTENCY_OK", "info",
+                f"OCR matches text layer on {pages_checked} sampled page(s).",
+                details,
+            ))
 
     # ------------------------------------------------------------------
     # STAGE 9 - Scoring & Classification

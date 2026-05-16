@@ -87,13 +87,73 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
   };
 
   const verdictLabel = verification.verdict === 'Verified' ? 'VERIFIED'
-    : verification.verdict === 'Suspicious' ? 'NEEDS REVIEW'
-    : verification.verdict === 'LikelyTampered' ? 'FAILED'
+    : verification.verdict === 'Suspicious' ? 'SUSPICIOUS — REVIEW BEFORE APPROVING'
+    : verification.verdict === 'LikelyTampered' ? 'LIKELY TAMPERED — DO NOT ACCEPT'
     : verification.verdict;
 
   const verdictColor = verification.verdict === 'Verified' ? 'bg-status-success-200 text-status-success-900'
     : verification.verdict === 'Suspicious' ? 'bg-status-warning-200 text-status-warning-900'
     : 'bg-status-danger-200 text-status-danger-900';
+
+  // Top-issue action hint — shown above the flag list to point reviewers
+  // at the highest-severity flag without needing to scroll.
+  const topIssueHint = sortedFlags.length > 0
+    ? (() => {
+        const top = sortedFlags[0];
+        const t = translateFlag(top);
+        const action = top.severity === 'critical'
+          ? 'Block this document — '
+          : top.severity === 'high'
+          ? 'Investigate before approving — '
+          : 'Worth checking — ';
+        return `${action}${t.headline.toLowerCase()}.`;
+      })()
+    : null;
+
+  // Render flag.details as a small key/value table beneath an active flag.
+  // Most callers stash useful diagnostics in details (page_numbers, DPI
+  // values, off-by amounts, mismatched fields). page_numbers is already
+  // shown as the "Pages" hint, so we hide it here.
+  const renderFlagDetails = (details: Record<string, any> | undefined) => {
+    if (!details) return null;
+    const entries = Object.entries(details).filter(
+      ([k]) => k !== 'page_numbers'
+    );
+    if (entries.length === 0) return null;
+
+    const fmtValue = (v: any): string => {
+      if (v === null || v === undefined) return '—';
+      if (typeof v === 'boolean') return v ? 'yes' : 'no';
+      if (Array.isArray(v)) {
+        // Array of primitives → comma-separated. Array of objects → JSON.
+        if (v.every(x => typeof x !== 'object' || x === null)) {
+          return v.map(x => String(x)).join(', ') || '—';
+        }
+        return JSON.stringify(v);
+      }
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    };
+
+    return (
+      <div className="mt-2 rounded border border-brand-muted bg-white/60 text-[11px]">
+        <table className="w-full">
+          <tbody>
+            {entries.map(([k, v]) => (
+              <tr key={k} className="border-b border-brand-muted last:border-0">
+                <td className="px-2 py-1 font-medium text-brand-ink-secondary align-top w-1/3">
+                  {k.replace(/_/g, ' ')}
+                </td>
+                <td className="px-2 py-1 text-brand-ink break-all">
+                  {fmtValue(v)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-50">
@@ -200,6 +260,11 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                 <div className="text-xs font-semibold text-brand-ink uppercase tracking-wide mb-3">
                   Verification Checks ({sortedFlags.length} issue{sortedFlags.length !== 1 ? 's' : ''})
                 </div>
+                {topIssueHint && (
+                  <div className="mb-3 px-3 py-2 rounded border border-primary-200 bg-primary-50 text-xs text-primary-900">
+                    <span className="font-semibold">Next step:</span> {topIssueHint}
+                  </div>
+                )}
                 {sortedFlags.length === 0 ? (
                   <div className="text-center py-8">
                     <svg className="w-10 h-10 text-status-success-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -242,6 +307,7 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                                   Pages: {flag.details!.page_numbers.map((p: number) => p + 1).join(', ')} — click to view
                                 </div>
                               )}
+                              {isActive && renderFlagDetails(flag.details)}
                             </div>
                           </div>
                         </button>

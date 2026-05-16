@@ -93,9 +93,9 @@ export default function DocumentVerificationPage({ matterId }: Props) {
       case 'Verified':
         return { label: 'VERIFIED', bgClass: 'bg-status-success-200', textClass: 'text-status-success-900', borderClass: 'border-status-success-200', cardBg: 'bg-white' };
       case 'Suspicious':
-        return { label: 'NEEDS REVIEW', bgClass: 'bg-status-warning-200', textClass: 'text-status-warning-900', borderClass: 'border-status-warning-200', cardBg: 'bg-white' };
+        return { label: 'SUSPICIOUS — REVIEW', bgClass: 'bg-status-warning-200', textClass: 'text-status-warning-900', borderClass: 'border-status-warning-200', cardBg: 'bg-white' };
       case 'LikelyTampered':
-        return { label: 'FAILED', bgClass: 'bg-status-danger-200', textClass: 'text-status-danger-900', borderClass: 'border-status-danger-200', cardBg: 'bg-white' };
+        return { label: 'LIKELY TAMPERED', bgClass: 'bg-status-danger-200', textClass: 'text-status-danger-900', borderClass: 'border-status-danger-200', cardBg: 'bg-white' };
       default:
         return { label: verdict, bgClass: 'bg-brand-surface-alt', textClass: 'text-brand-ink', borderClass: 'border-brand-muted', cardBg: 'bg-white' };
     }
