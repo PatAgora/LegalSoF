@@ -10,7 +10,7 @@ Provides:
 """
 import os
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timezone
@@ -20,13 +20,15 @@ from app.api.dependencies.auth import require_analyst, require_admin
 from app.models.user import User
 from app.models import Matter
 from app.models.document_verification import (
-    DocumentVerification, DocumentVerificationFlag, VerificationVerdict,
+    DocumentVerification, DocumentVerificationFlag, DocumentVerificationTransaction,
+    VerificationVerdict,
 )
 from app.models.audit import AuditLog, AuditLogAction
 from app.schemas.document_verification import (
     DocumentVerificationResponse, AdminOverrideRequest, AdminOverrideResponse,
     VerificationSummaryResponse, VerificationFlagResponse,
 )
+from app.services.evidence_pack_builder import build_evidence_pack
 
 router = APIRouter()
 
@@ -192,6 +194,190 @@ def admin_override(
         admin_override_rationale=body.rationale,
         blocked=False,
         message=f"Verification #{verification_id} has been overridden by {body.admin_user}. Downstream processing unblocked.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# TRANSACTIONS extracted for a verification
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/matters/{matter_id}/document-verifications/{verification_id}/transactions",
+    tags=["document-verification"],
+)
+def get_verification_transactions(
+    matter_id: int,
+    verification_id: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Return all extracted transactions for a verification — used by the
+    reviewer UI to preview CSV / statement-only uploads."""
+    v = (
+        db.query(DocumentVerification)
+        .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
+        .first()
+    )
+    if not v:
+        raise HTTPException(404, "Verification not found")
+
+    rows = (
+        db.query(DocumentVerificationTransaction)
+        .filter(DocumentVerificationTransaction.verification_id == verification_id)
+        .order_by(DocumentVerificationTransaction.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": t.id,
+            "date": t.date,
+            "description": t.description,
+            "amount": t.amount,
+            "direction": t.direction,
+            "balance": t.balance,
+            "transaction_type": t.transaction_type,
+        }
+        for t in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# AUDIT TRAIL for a verification
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/matters/{matter_id}/document-verifications/{verification_id}/audit-trail",
+    tags=["document-verification"],
+)
+def get_verification_audit_trail(
+    matter_id: int,
+    verification_id: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Return the audit log entries for a single verification."""
+    v = (
+        db.query(DocumentVerification)
+        .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
+        .first()
+    )
+    if not v:
+        raise HTTPException(404, "Verification not found")
+
+    rows = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.entity_type == "document_verification",
+            AuditLog.entity_id == verification_id,
+        )
+        .order_by(AuditLog.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "action": r.action.value if r.action else None,
+            "description": r.description,
+            "details": r.details,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "user": (r.details or {}).get("admin_user") if isinstance(r.details, dict) else None,
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# EVIDENCE PACK export
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/matters/{matter_id}/document-verifications/{verification_id}/evidence-pack.pdf",
+    tags=["document-verification"],
+)
+def download_evidence_pack(
+    matter_id: int,
+    verification_id: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Generate a PDF report covering the verification: header, all flags
+    with severity and details, and the audit trail. Streams the bytes
+    directly so we don't write a temp file to disk."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(404, "Matter not found")
+    v = (
+        db.query(DocumentVerification)
+        .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
+        .first()
+    )
+    if not v:
+        raise HTTPException(404, "Verification not found")
+
+    flag_rows = (
+        db.query(DocumentVerificationFlag)
+        .filter(DocumentVerificationFlag.verification_id == verification_id)
+        .all()
+    )
+    audit_rows = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.entity_type == "document_verification",
+            AuditLog.entity_id == verification_id,
+        )
+        .order_by(AuditLog.created_at.asc())
+        .all()
+    )
+
+    pdf_bytes = build_evidence_pack(
+        matter={
+            "id": matter.id,
+            "reference_number": getattr(matter, "reference_number", None),
+            "client_name": getattr(matter, "client_name", None),
+        },
+        verification={
+            "id": v.id,
+            "filename": v.filename,
+            "file_category": v.file_category,
+            "file_hash": v.file_hash,
+            "identified_bank_template": v.identified_bank_template,
+            "verdict": v.verdict.value if v.verdict else None,
+            "authenticity_score": v.authenticity_score,
+            "structural_pipeline_score": v.structural_pipeline_score,
+            "statement_pipeline_score": v.statement_pipeline_score,
+            "verification_phase": v.verification_phase,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "admin_override": bool(v.admin_override),
+            "admin_override_by": v.admin_override_by,
+            "admin_override_rationale": v.admin_override_rationale,
+            "admin_override_at": v.admin_override_at.isoformat() if v.admin_override_at else None,
+        },
+        flags=[
+            {
+                "code": f.code,
+                "severity": f.severity,
+                "message": f.message,
+                "pipeline_stage": f.pipeline_stage,
+                "details": f.details,
+            }
+            for f in flag_rows
+        ],
+        audit_entries=[
+            {
+                "timestamp": a.created_at.isoformat() if a.created_at else "",
+                "action": a.action.value if a.action else "",
+                "description": a.description or "",
+                "user": (a.details or {}).get("admin_user") if isinstance(a.details, dict) else "",
+            }
+            for a in audit_rows
+        ],
+    )
+
+    safe_filename = f"verification-{verification_id}-evidence-pack.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
     )
 
 

@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import PDFViewer, { scrollPDFToPage } from './PDFViewer';
 import { translateFlag } from './flagTranslations';
-import { API_BASE_URL } from '../../lib/api';
+import { API_BASE_URL, authFetch } from '../../lib/api';
 
 interface VerificationData {
   id: number;
@@ -35,9 +35,34 @@ interface Props {
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
+interface TransactionRow {
+  id: number;
+  date?: string;
+  description?: string;
+  amount?: number;
+  direction?: string;
+  balance?: number;
+  transaction_type?: string;
+}
+
+interface AuditEntry {
+  id: number;
+  action?: string;
+  description?: string;
+  timestamp?: string;
+  user?: string;
+  details?: Record<string, any>;
+}
+
+type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
+
 export default function DocumentVerificationModal({ verification, isOpen, onClose }: Props) {
   const [activeFlagIdx, setActiveFlagIdx] = useState<number | null>(null);
   const [highlightPages, setHighlightPages] = useState<number[]>([]);
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
+  const [transactions, setTransactions] = useState<TransactionRow[]>([]);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [downloadingPack, setDownloadingPack] = useState(false);
 
   const isPDF = verification.verification_phase !== 'statement_only';
   const fileUrl = verification.disk_filename
@@ -45,12 +70,82 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
     : null;
   const authToken = localStorage.getItem('access_token') || '';
 
-  // Sort flags by severity
+  // Load audit trail + (statement-only) transactions when the modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await authFetch(
+          `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/audit-trail`
+        );
+        if (!cancelled && r.ok) setAudit(await r.json());
+      } catch {
+        /* non-blocking */
+      }
+      if (!isPDF) {
+        try {
+          const r = await authFetch(
+            `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/transactions`
+          );
+          if (!cancelled && r.ok) setTransactions(await r.json());
+        } catch {
+          /* non-blocking */
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, verification.id, verification.matter_id, isPDF]);
+
+  // Sort flags by severity, then apply user filter
+  const filteredFlags = useMemo(() => {
+    const base = [...(verification.flags || [])]
+      .filter(f => f.severity !== 'info' && !f.code?.endsWith('_OK') && f.code !== 'FINAL_SCORE' && f.code !== 'NON_PDF_FILE' && f.code !== 'SINGLE_EOF')
+      .sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 5) - (SEVERITY_ORDER[b.severity] ?? 5));
+    if (severityFilter === 'all') return base;
+    return base.filter(f => f.severity === severityFilter);
+  }, [verification.flags, severityFilter]);
+
+  // Sorted flags (no filter applied) — used for the top-issue hint so it
+  // always reflects the truly most important problem.
   const sortedFlags = useMemo(() => {
     return [...(verification.flags || [])]
       .filter(f => f.severity !== 'info' && !f.code?.endsWith('_OK') && f.code !== 'FINAL_SCORE' && f.code !== 'NON_PDF_FILE' && f.code !== 'SINGLE_EOF')
       .sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 5) - (SEVERITY_ORDER[b.severity] ?? 5));
   }, [verification.flags]);
+
+  // Severity counts for filter chips
+  const severityCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: sortedFlags.length, critical: 0, high: 0, medium: 0, low: 0 };
+    sortedFlags.forEach(f => {
+      if (counts[f.severity] !== undefined) counts[f.severity]++;
+    });
+    return counts;
+  }, [sortedFlags]);
+
+  const handleDownloadEvidencePack = async () => {
+    setDownloadingPack(true);
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/evidence-pack.pdf`
+      );
+      if (!r.ok) {
+        alert('Evidence pack download failed.');
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `verification-${verification.id}-evidence-pack.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingPack(false);
+    }
+  };
 
   // Donut chart data
   const score = Math.round(verification.authenticity_score ?? 0);
@@ -176,20 +271,30 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                 {verdictLabel}
               </span>
             </div>
-            <button
-              onClick={onClose}
-              className="p-1 rounded hover:bg-brand-surface-alt text-brand-ink-tertiary hover:text-brand-ink transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDownloadEvidencePack}
+                disabled={downloadingPack}
+                className="px-3 py-1 text-xs font-semibold rounded border border-primary-300 text-primary-700 bg-white hover:bg-primary-50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                title="Download a PDF report with verdict, flags and audit trail"
+              >
+                {downloadingPack ? 'Building…' : 'Download evidence pack'}
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1 rounded hover:bg-brand-surface-alt text-brand-ink-tertiary hover:text-brand-ink transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Body: split layout */}
           <div className="flex-1 flex overflow-hidden">
-            {/* Left: PDF Viewer (or placeholder) */}
-            <div className={`${isPDF && fileUrl ? 'w-[60%]' : 'hidden'} border-r border-brand-muted overflow-hidden`}>
+            {/* Left: PDF viewer OR statement transaction table */}
+            <div className={`${isPDF && fileUrl ? 'w-[60%]' : (!isPDF ? 'w-[60%]' : 'hidden')} border-r border-brand-muted overflow-hidden`}>
               {isPDF && fileUrl && (
                 <PDFViewer
                   fileUrl={fileUrl}
@@ -197,10 +302,60 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                   highlightPages={highlightPages}
                 />
               )}
+              {!isPDF && (
+                <div className="h-full overflow-y-auto">
+                  <div className="px-4 py-3 border-b border-brand-muted bg-brand-surface-alt sticky top-0">
+                    <h3 className="text-xs font-semibold text-brand-ink uppercase tracking-wide">
+                      Extracted transactions ({transactions.length})
+                    </h3>
+                    <p className="text-[11px] text-brand-ink-tertiary mt-1">
+                      Parsed from the uploaded statement file. Sort order is original document order.
+                    </p>
+                  </div>
+                  {transactions.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-brand-ink-tertiary">
+                      No transactions to show.
+                    </div>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead className="bg-brand-surface-alt text-brand-ink-secondary sticky top-[58px]">
+                        <tr>
+                          <th className="px-2 py-2 text-left font-semibold">Date</th>
+                          <th className="px-2 py-2 text-left font-semibold">Description</th>
+                          <th className="px-2 py-2 text-right font-semibold">In</th>
+                          <th className="px-2 py-2 text-right font-semibold">Out</th>
+                          <th className="px-2 py-2 text-right font-semibold">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transactions.map((t) => {
+                          const credit = t.direction === 'credit' || (t.amount ?? 0) > 0;
+                          const amt = Math.abs(t.amount ?? 0);
+                          return (
+                            <tr key={t.id} className="border-b border-brand-muted hover:bg-brand-surface-alt/40">
+                              <td className="px-2 py-1.5 whitespace-nowrap text-brand-ink-secondary">{t.date || '—'}</td>
+                              <td className="px-2 py-1.5 text-brand-ink">{t.description || ''}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-status-success-700">
+                                {credit && amt ? amt.toFixed(2) : ''}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-status-danger-700">
+                                {!credit && amt ? amt.toFixed(2) : ''}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-brand-ink">
+                                {t.balance != null ? t.balance.toFixed(2) : ''}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Right: Score + Checks */}
-            <div className={`${isPDF && fileUrl ? 'w-[40%]' : 'w-full'} flex flex-col overflow-hidden`}>
+            <div className={`${(isPDF && fileUrl) || !isPDF ? 'w-[40%]' : 'w-full'} flex flex-col overflow-hidden`}>
               {/* Donut Score */}
               <div className="px-6 py-4 border-b border-brand-muted flex items-center gap-6">
                 <div className="w-24 h-24 flex-shrink-0">
@@ -265,6 +420,28 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                     <span className="font-semibold">Next step:</span> {topIssueHint}
                   </div>
                 )}
+                {sortedFlags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {(['all', 'critical', 'high', 'medium', 'low'] as SeverityFilter[]).map((sev) => {
+                      const isActive = severityFilter === sev;
+                      const count = severityCounts[sev] || 0;
+                      const baseClass = 'px-2 py-0.5 text-[10px] font-semibold rounded-full border transition-colors';
+                      const activeClass = isActive
+                        ? 'bg-primary-700 text-white border-primary-700'
+                        : 'bg-white text-brand-ink-secondary border-brand-muted hover:bg-brand-surface-alt';
+                      return (
+                        <button
+                          key={sev}
+                          onClick={() => setSeverityFilter(sev)}
+                          disabled={count === 0 && sev !== 'all'}
+                          className={`${baseClass} ${activeClass} disabled:opacity-30 disabled:cursor-not-allowed`}
+                        >
+                          {sev === 'all' ? 'All' : sev.charAt(0).toUpperCase() + sev.slice(1)} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {sortedFlags.length === 0 ? (
                   <div className="text-center py-8">
                     <svg className="w-10 h-10 text-status-success-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -272,9 +449,13 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                     </svg>
                     <p className="text-sm text-brand-ink-secondary">All checks passed. No issues detected.</p>
                   </div>
+                ) : filteredFlags.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-brand-ink-tertiary">
+                    No {severityFilter} flags. Clear the filter to see all {sortedFlags.length}.
+                  </div>
                 ) : (
                   <div className="space-y-2">
-                    {sortedFlags.map((flag, idx) => {
+                    {filteredFlags.map((flag, idx) => {
                       const sc = severityConfig(flag.severity);
                       const t = translateFlag(flag);
                       const hasPageData = flag.details?.page_numbers && Array.isArray(flag.details.page_numbers) && flag.details.page_numbers.length > 0;
@@ -314,6 +495,32 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
                       );
                     })}
                   </div>
+                )}
+              </div>
+
+              {/* Audit trail */}
+              <div className="border-t border-brand-muted bg-brand-surface-alt/40 px-6 py-3 max-h-48 overflow-y-auto">
+                <div className="text-xs font-semibold text-brand-ink uppercase tracking-wide mb-2">
+                  Audit trail ({audit.length})
+                </div>
+                {audit.length === 0 ? (
+                  <p className="text-[11px] text-brand-ink-tertiary">No audit entries yet for this verification.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {audit.map((e) => (
+                      <li key={e.id} className="text-[11px] text-brand-ink-secondary">
+                        <span className="font-mono text-brand-ink-tertiary">
+                          {e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}
+                        </span>
+                        {' · '}
+                        <span className="font-semibold text-brand-ink">{e.action || 'event'}</span>
+                        {e.user && <span className="text-brand-ink-tertiary"> by {e.user}</span>}
+                        {e.description && (
+                          <div className="ml-2 text-brand-ink-secondary mt-0.5">{e.description}</div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </div>
