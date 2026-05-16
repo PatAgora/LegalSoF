@@ -269,6 +269,42 @@ class DocumentVerificationPipeline:
             # PDF text layer (a classic forgery technique).
             self._stage_ocr_consistency(doc, result)
 
+            # Stage 8c - Image-level forensics (ELA, JPEG quant tables, pHash).
+            # Stays scoring-weight-neutral; flags feed verdict via severity.
+            try:
+                from app.services.image_forensics import run_image_forensics
+                result.flags.extend(run_image_forensics(file_bytes))
+            except Exception as exc:
+                result.flags.append(VerificationFlag(
+                    "image_forensics", "IMAGE_FORENSICS_ERROR", "info",
+                    f"Image forensics raised an unexpected error: {exc}",
+                ))
+
+            # Stage 8d - PDF digital signature validation.
+            try:
+                from app.services.pdf_signature_validator import validate_pdf_signature
+                result.flags.extend(validate_pdf_signature(file_bytes))
+            except Exception as exc:
+                result.flags.append(VerificationFlag(
+                    "signature_validation", "SIGNATURE_CHECK_ERROR", "info",
+                    f"Signature validation raised an unexpected error: {exc}",
+                ))
+
+            # Stage 8e - Bank template visual fingerprint match.
+            try:
+                from app.services.template_fingerprint import check_template_match
+                bank = getattr(result, "identified_bank_template", None)
+                # Many call sites don't populate this; pull from signature
+                # stage result instead if available.
+                if not bank and result.signature_result:
+                    bank = result.signature_result.get("identified_bank") if isinstance(result.signature_result, dict) else None
+                result.flags.extend(check_template_match(file_bytes, bank))
+            except Exception as exc:
+                result.flags.append(VerificationFlag(
+                    "template_fingerprint", "TEMPLATE_CHECK_ERROR", "info",
+                    f"Template fingerprint check raised an unexpected error: {exc}",
+                ))
+
             # Stage 9 - Authenticity Scoring
             self._stage_scoring(result)
         finally:

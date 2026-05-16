@@ -248,6 +248,64 @@ export const FLAG_TRANSLATIONS: Record<string, { headline: string; explanation: 
     headline: 'Statement period leaves a gap',
     explanation: 'The dates covered by this statement leave an unexplained gap relative to the other statements supplied for this matter.',
   },
+
+  // Image forensics (Phase 3.10)
+  IMAGE_ELA_ANOMALY: {
+    headline: 'Embedded image shows signs of editing',
+    explanation: 'Error-level analysis detected re-compression patterns consistent with image editing. Tampered patches typically reveal themselves as a localised brightness anomaly when the document is re-saved at a different JPEG quality.',
+  },
+  IMAGE_QUANT_TABLE_MIXED: {
+    headline: 'Embedded images use different compression profiles',
+    explanation: 'The JPEG quantisation tables across the embedded images are not all identical. Genuine bank statements are exported once with a single profile — mixed profiles are a strong indicator of image splicing.',
+  },
+  IMAGE_PHASH_RECORDED: {
+    headline: 'Image fingerprints recorded',
+    explanation: 'Perceptual hashes for the embedded images have been recorded for later cross-document lookup.',
+  },
+  IMAGE_FORENSICS_UNAVAILABLE: {
+    headline: 'Image forensics not available',
+    explanation: 'Image forensics libraries are not installed in this environment; the ELA/quant-table checks were skipped.',
+  },
+  IMAGE_FORENSICS_OPEN_FAILED: {
+    headline: 'Image forensics could not open the document',
+    explanation: 'The PDF could not be opened for image-level analysis. Other checks still ran.',
+  },
+  IMAGE_FORENSICS_ERROR: {
+    headline: 'Image forensics ran into an error',
+    explanation: 'The image-forensics stage raised an unexpected error and was skipped. Other checks still ran.',
+  },
+
+  // Template fingerprint (Phase 3.11)
+  TEMPLATE_VISUAL_MISMATCH: {
+    headline: 'Document does not match the registered template',
+    explanation: 'This document claims to be from a known bank, but its visual layout does not match the registered template for that bank. This is a strong indicator that the document has been hand-built rather than issued by the bank.',
+  },
+  TEMPLATE_CHECK_ERROR: {
+    headline: 'Template fingerprint check failed',
+    explanation: 'The template-fingerprint stage raised an unexpected error and was skipped. Other checks still ran.',
+  },
+
+  // Digital signature validation (Phase 3.12)
+  SIGNATURE_VALID: {
+    headline: 'Digital signature is valid',
+    explanation: 'The document carries a digital signature that has been validated. This is a strong positive indicator that the document has not been altered since signing.',
+  },
+  SIGNATURE_PRESENT_UNVERIFIED: {
+    headline: 'Digital signature present but not verified',
+    explanation: 'The document is digitally signed, but the certificate chain could not be verified in this environment. Treat as unverified.',
+  },
+  SIGNATURE_INVALID: {
+    headline: 'Digital signature is invalid',
+    explanation: 'The document has a digital signature that failed validation. Either the document has been modified after signing, or the signing certificate chain is broken/forged.',
+  },
+  SIGNATURE_ABSENT: {
+    headline: 'No digital signature',
+    explanation: 'The document has no digital signature. This is not by itself suspicious — many genuine documents are unsigned — but it provides no positive assurance.',
+  },
+  SIGNATURE_CHECK_ERROR: {
+    headline: 'Signature validation ran into an error',
+    explanation: 'The signature-validation stage raised an unexpected error and was skipped. Other checks still ran.',
+  },
 };
 
 export const translateFlag = (flag: { code: string; message: string; severity: string }) => {

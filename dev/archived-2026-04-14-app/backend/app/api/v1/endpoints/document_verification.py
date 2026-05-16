@@ -142,6 +142,64 @@ def get_verification(matter_id: int, verification_id: int, current_user: User = 
 # ---------------------------------------------------------------------------
 
 @router.post(
+    "/matters/{matter_id}/document-verifications/{verification_id}/propose-override",
+    tags=["document-verification"],
+)
+def propose_override(
+    matter_id: int,
+    verification_id: int,
+    body: AdminOverrideRequest,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Step 1 of the 4-eyes flow: any analyst proposes lifting the block,
+    with a rationale. A DIFFERENT admin must then call admin-override to
+    approve it."""
+    v = (
+        db.query(DocumentVerification)
+        .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
+        .first()
+    )
+    if not v:
+        raise HTTPException(404, "Verification not found")
+    if not v.blocked:
+        raise HTTPException(409, "Verification is not blocked — nothing to propose")
+
+    v.override_proposed_by = body.admin_user or current_user.email
+    v.override_proposed_at = datetime.now(timezone.utc)
+    v.override_proposed_rationale = body.rationale
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        action=AuditLogAction.UPDATED,
+        entity_type="document_verification",
+        entity_id=verification_id,
+        description=(
+            f"Override proposed for verification #{verification_id} by "
+            f"{v.override_proposed_by}. Rationale: {body.rationale}"
+        ),
+        details={
+            "verification_id": verification_id,
+            "proposer": v.override_proposed_by,
+            "rationale": body.rationale,
+            "stage": "proposed",
+        },
+    ))
+    db.commit()
+
+    return {
+        "verification_id": verification_id,
+        "override_proposed_by": v.override_proposed_by,
+        "override_proposed_at": v.override_proposed_at.isoformat(),
+        "override_proposed_rationale": v.override_proposed_rationale,
+        "message": (
+            "Override proposed. A second reviewer (different admin) must "
+            "now approve via /admin-override."
+        ),
+    }
+
+
+@router.post(
     "/matters/{matter_id}/document-verifications/{verification_id}/admin-override",
     response_model=AdminOverrideResponse,
     tags=["document-verification"],
@@ -153,6 +211,12 @@ def admin_override(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_sync_db),
 ):
+    """Step 2 of the 4-eyes flow (or step 1 for single-step legacy use):
+    an admin approves the override and unblocks downstream processing.
+
+    Four-eyes rule: if `override_proposed_by` is set, the admin
+    approving here must be DIFFERENT from the proposer.
+    """
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -161,10 +225,19 @@ def admin_override(
     if not v:
         raise HTTPException(404, "Verification not found")
 
+    approver = body.admin_user or current_user.email
+    proposer = v.override_proposed_by
+    if proposer and proposer.strip().lower() == (approver or "").strip().lower():
+        raise HTTPException(
+            403,
+            "Four-eyes rule: the override must be approved by a different "
+            "user than the one who proposed it.",
+        )
+
     previous_verdict = v.verdict.value if v.verdict else "unknown"
 
     v.admin_override = True
-    v.admin_override_by = body.admin_user
+    v.admin_override_by = approver
     v.admin_override_rationale = body.rationale
     v.admin_override_at = datetime.now(timezone.utc)
     v.blocked = False  # unblock
@@ -175,12 +248,18 @@ def admin_override(
         action=AuditLogAction.APPROVED,
         entity_type="document_verification",
         entity_id=verification_id,
-        description=f"Admin override on document verification #{verification_id} (was {previous_verdict}). Rationale: {body.rationale}",
+        description=(
+            f"Admin override on document verification #{verification_id} "
+            f"(was {previous_verdict}). Rationale: {body.rationale}"
+            + (f" [proposed by {proposer}]" if proposer else "")
+        ),
         details={
             "verification_id": verification_id,
             "previous_verdict": previous_verdict,
-            "admin_user": body.admin_user,
+            "admin_user": approver,
             "rationale": body.rationale,
+            "proposed_by": proposer,
+            "stage": "approved",
         },
     )
     db.add(audit)
@@ -190,10 +269,13 @@ def admin_override(
         verification_id=verification_id,
         previous_verdict=previous_verdict,
         admin_override=True,
-        admin_override_by=body.admin_user,
+        admin_override_by=approver,
         admin_override_rationale=body.rationale,
         blocked=False,
-        message=f"Verification #{verification_id} has been overridden by {body.admin_user}. Downstream processing unblocked.",
+        message=(
+            f"Verification #{verification_id} has been overridden by "
+            f"{approver}. Downstream processing unblocked."
+        ),
     )
 
 

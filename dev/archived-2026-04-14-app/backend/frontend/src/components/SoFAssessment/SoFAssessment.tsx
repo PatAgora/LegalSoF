@@ -2261,6 +2261,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           <div className="flex items-center gap-2 text-sm text-status-danger-700 mb-2">
                             <span className="font-semibold">Upload blocked -- downstream processing halted.</span>
                           </div>
+                          {v.override_proposed_by && !v.admin_override && (
+                            <div className="mb-3 px-3 py-2 rounded border border-status-warning-200 bg-status-warning-50 text-xs text-status-warning-900">
+                              <div className="font-semibold">Awaiting second-reviewer approval (four-eyes).</div>
+                              <div className="mt-1">
+                                Override proposed by <span className="font-mono">{v.override_proposed_by}</span>
+                                {v.override_proposed_at && (
+                                  <span> on {new Date(v.override_proposed_at).toLocaleString()}</span>
+                                )}.
+                              </div>
+                              {v.override_proposed_rationale && (
+                                <div className="mt-1 italic">"{v.override_proposed_rationale}"</div>
+                              )}
+                              <div className="mt-1 text-status-warning-700">
+                                A different admin must now click Override to approve.
+                              </div>
+                            </div>
+                          )}
                           {docVerOverrideModalOpen === v.id ? (
                             <div className="bg-white rounded-card p-3 border border-brand-muted space-y-2">
                               <div className="flex items-baseline justify-between">

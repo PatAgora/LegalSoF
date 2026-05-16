@@ -78,6 +78,15 @@ class DocumentVerification(Base):
     admin_override_rationale = Column(Text)
     admin_override_at = Column(DateTime(timezone=True))
 
+    # Two-reviewer ("4-eyes") override workflow. propose-* gets filled
+    # when an analyst proposes lifting the block; approve-* gets filled
+    # when a DIFFERENT admin approves. Once approve-* is set, the regular
+    # admin_override_* fields above are populated too and `blocked` is
+    # cleared.
+    override_proposed_by = Column(String(200))
+    override_proposed_at = Column(DateTime(timezone=True))
+    override_proposed_rationale = Column(Text)
+
     # Downstream blocking
     blocked = Column(Boolean, default=False)
 
@@ -140,6 +149,9 @@ class DocumentVerification(Base):
             "admin_override_by": self.admin_override_by,
             "admin_override_rationale": self.admin_override_rationale,
             "admin_override_at": self.admin_override_at.isoformat() if self.admin_override_at else None,
+            "override_proposed_by": self.override_proposed_by,
+            "override_proposed_at": self.override_proposed_at.isoformat() if self.override_proposed_at else None,
+            "override_proposed_rationale": self.override_proposed_rationale,
             "blocked": self.blocked,
             "flags": [f.to_dict() for f in self.flags] if self.flags else [],
             "transactions_count": len(self.transactions) if self.transactions else 0,
