@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import { translateFlag } from '../DocumentVerification/flagTranslations';
+import { FileUploader, StatusChip } from '../ui';
 
 // Helper to format dates as dd/mm/yyyy
 const formatDate = (dateStr: string | undefined): string => {
@@ -1903,65 +1904,83 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
 
             {/* Bank Statements Upload */}
-            <div className="border border-dashed border-zinc-200 rounded-md p-6 hover:border-zinc-500 transition-colors">
-              <div className="text-center">
-                <div className="text-4xl mb-3">🏦</div>
-                <h3 className="text-lg font-semibold text-zinc-900 mb-2">Bank Statements</h3>
-                <p className="text-sm text-zinc-600 mb-4">
-                  CSV or PDF bank statements (can upload multiple)
+            <div className="bg-white border border-zinc-200 rounded-md p-5">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-zinc-900">Bank statements</h3>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  CSV or PDF. Multiple uploads supported.
                 </p>
-                <label className="cursor-pointer">
-                  <input
-                    type="file"
-                    accept=".csv,.pdf"
-                    onChange={(e) => handleFileUpload(e, 'bank_statement')}
-                    className="hidden"
-                    disabled={uploadingFiles.bank_statement}
-                  />
-                  <span className="inline-flex items-center px-4 py-2 border border-zinc-200 rounded-md text-sm font-medium text-zinc-600 bg-white hover:bg-zinc-50 disabled:opacity-50">
-                    {uploadingFiles.bank_statement ? 'Uploading...' : 'Choose CSV/PDF'}
-                  </span>
-                </label>
-                {status && status.files_summary && status.files_summary.bank_statements_count > 0 && (
-                  <div className="mt-3 text-green-700 text-sm font-medium">
-                    ✓ {status.files_summary.bank_statements_count} transaction(s)
-                  </div>
-                )}
-                {errors.bank_statement && (
-                  <div className="mt-3 text-red-700 text-sm">{errors.bank_statement}</div>
-                )}
               </div>
+              <FileUploader
+                key={`bank-${status?.files_summary?.bank_statements_count ?? 0}`}
+                category="Bank statement"
+                uploadUrl={`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/upload`}
+                accept=".csv,.pdf"
+                maxSizeMb={25}
+                extraFormFields={{ file_category: 'bank_statement' }}
+                helper="CSV or PDF, up to 25 MB"
+                onComplete={(payload) => {
+                  if (payload?.verification_verdict && payload?.filename) {
+                    setFileVerificationResults(prev => ({
+                      ...prev,
+                      [payload.filename]: {
+                        verdict: payload.verification_verdict,
+                        score: payload.verification_score,
+                        method: payload.verification_method,
+                      },
+                    }));
+                  }
+                  fetchStatus();
+                }}
+                extractVerdict={(payload) => payload?.verification_verdict
+                  ? { verdict: payload.verification_verdict }
+                  : null}
+              />
+              {status && status.files_summary && status.files_summary.bank_statements_count > 0 && (
+                <div className="mt-3 text-xs text-zinc-500">
+                  {status.files_summary.bank_statements_count} transaction record(s) extracted so far.
+                </div>
+              )}
             </div>
 
             {/* Supporting Docs Upload */}
-            <div className="border border-dashed border-zinc-200 rounded-md p-6 hover:border-zinc-500 transition-colors">
-              <div className="text-center">
-                <div className="text-4xl mb-3">📄</div>
-                <h3 className="text-lg font-semibold text-zinc-900 mb-2">Supporting Docs</h3>
-                <p className="text-sm text-zinc-600 mb-4">
-                  PDF documents (probate, completion statements, etc.)
+            <div className="bg-white border border-zinc-200 rounded-md p-5">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-zinc-900">Supporting documents</h3>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Probate grant, completion statement, gift letter, etc.
                 </p>
-                <label className="cursor-pointer">
-                  <input
-                    type="file"
-                    accept=".pdf"
-                    onChange={(e) => handleFileUpload(e, 'supporting_doc')}
-                    className="hidden"
-                    disabled={uploadingFiles.supporting_doc}
-                  />
-                  <span className="inline-flex items-center px-4 py-2 border border-zinc-200 rounded-md text-sm font-medium text-zinc-600 bg-white hover:bg-zinc-50 disabled:opacity-50">
-                    {uploadingFiles.supporting_doc ? 'Uploading...' : 'Choose PDF'}
-                  </span>
-                </label>
-                {status && status.files_summary && status.files_summary.supporting_docs_count > 0 && (
-                  <div className="mt-3 text-green-700 text-sm font-medium">
-                    ✓ {status.files_summary.supporting_docs_count} doc(s)
-                  </div>
-                )}
-                {errors.supporting_doc && (
-                  <div className="mt-3 text-red-700 text-sm">{errors.supporting_doc}</div>
-                )}
               </div>
+              <FileUploader
+                key={`doc-${status?.files_summary?.supporting_docs_count ?? 0}`}
+                category="Supporting document"
+                uploadUrl={`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/upload`}
+                accept=".pdf"
+                maxSizeMb={25}
+                extraFormFields={{ file_category: 'supporting_doc' }}
+                helper="PDF, up to 25 MB"
+                onComplete={(payload) => {
+                  if (payload?.verification_verdict && payload?.filename) {
+                    setFileVerificationResults(prev => ({
+                      ...prev,
+                      [payload.filename]: {
+                        verdict: payload.verification_verdict,
+                        score: payload.verification_score,
+                        method: payload.verification_method,
+                      },
+                    }));
+                  }
+                  fetchStatus();
+                }}
+                extractVerdict={(payload) => payload?.verification_verdict
+                  ? { verdict: payload.verification_verdict }
+                  : null}
+              />
+              {status && status.files_summary && status.files_summary.supporting_docs_count > 0 && (
+                <div className="mt-3 text-xs text-zinc-500">
+                  {status.files_summary.supporting_docs_count} document(s) uploaded so far.
+                </div>
+              )}
             </div>
           </div>
 
