@@ -56,12 +56,23 @@ interface FundsLineageData {
     externalOrigins: number;
     requiresEvidence: number;
     accumulationPeriodDays: number;
+    ambiguousAccounts?: number;
+    circularReferences?: number;
   };
   unresolved_items?: Array<{
     date: string;
     amount: number;
     description: string;
     account: string;
+    reason?: string;
+    severity?: string;
+    message?: string;
+  }>;
+  ambiguous_accounts?: Array<{
+    account_id: string;
+    classified_as: string;
+    confidence: string;
+    transaction_count: number;
   }>;
   run_at?: string;
 }
@@ -2266,6 +2277,49 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       )}
                     </div>
 
+                    {/* Circular references — high-priority callout */}
+                    {(s.circularReferences ?? 0) > 0 && (
+                      <div className="px-6 py-4 border-t border-zinc-100 bg-red-50/50">
+                        <div className="flex items-start gap-3">
+                          <span className="mt-1 h-2 w-2 rounded-full bg-red-500 shrink-0" />
+                          <div>
+                            <div className="text-sm font-semibold text-red-900">
+                              {s.circularReferences} circular reference{(s.circularReferences ?? 0) !== 1 ? 's' : ''} detected
+                            </div>
+                            <p className="text-xs text-red-700 mt-0.5">
+                              One or more transactions reference funding that loops back to an earlier point in the chain.
+                              This can indicate round-tripping. Open the full lineage to review.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ambiguous account classification — medium-priority */}
+                    {((s.ambiguousAccounts ?? 0) > 0 || (fundsLineageData.ambiguous_accounts?.length ?? 0) > 0) && (
+                      <div className="px-6 py-4 border-t border-zinc-100 bg-amber-50/50">
+                        <div className="flex items-start gap-3">
+                          <span className="mt-1 h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-amber-900">
+                              Account type could not be confidently identified
+                            </div>
+                            <p className="text-xs text-amber-800 mt-0.5">
+                              The classifier wasn't sure whether the following account(s) were savings or current —
+                              this can break matching between accounts. Rename / re-upload with a clearer filename.
+                            </p>
+                            <ul className="mt-2 space-y-1 text-xs text-amber-900">
+                              {(fundsLineageData.ambiguous_accounts || []).slice(0, 3).map((acc, idx) => (
+                                <li key={idx} className="font-mono">
+                                  {acc.account_id} — guessed as <span className="font-semibold">{acc.classified_as}</span> ({acc.confidence} confidence)
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Unresolved items preview (top 3) */}
                     {unresolvedCount > 0 && (
                       <div className="px-6 py-4 border-t border-zinc-100">
@@ -2277,7 +2331,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             <li key={idx} className="text-sm text-zinc-700 flex items-baseline justify-between gap-3">
                               <span className="truncate">
                                 <span className="text-zinc-400 mr-2 tabular-nums">{item.date}</span>
-                                {item.description || '—'}
+                                {item.reason === 'circular_reference' && (
+                                  <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-100 text-red-700">
+                                    CIRCULAR
+                                  </span>
+                                )}
+                                {item.description || item.message || '—'}
                               </span>
                               <span className="text-amber-700 tabular-nums font-medium shrink-0">{fmt(item.amount)}</span>
                             </li>

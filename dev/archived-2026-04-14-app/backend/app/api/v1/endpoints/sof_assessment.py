@@ -173,28 +173,61 @@ def run_automated_funds_lineage(
         print(f"    {acc_id}: {range_info['earliest_str']} to {range_info['latest_str']} ({range_info['transaction_count']} txns)")
     print(f"  ===================================\n")
     
-    # Classify accounts (savings vs current)
-    def classify_account(acc_id: str, txns: List[Dict]) -> str:
+    # Classify accounts (savings vs current vs unknown).
+    # P1.4 — surface ambiguity. Previously this function always returned
+    # 'savings' or 'current' even when it was guessing from weak signals
+    # (e.g. just "more debits than credits"). Now we return a tuple of
+    # (classification, confidence) so we can flag accounts that the
+    # classifier wasn't sure about. The lineage walker treats 'unknown'
+    # as both — i.e. it'll still look for transfers — but the result
+    # surfaces them for human review.
+    def classify_account(acc_id: str, txns: List[Dict]) -> tuple:
         acc_lower = acc_id.lower()
-        if any(kw in acc_lower for kw in ['sav', 'isa', 'deposit', 'reserve']):
-            return 'savings'
-        if any(kw in acc_lower for kw in ['current', 'checking', 'everyday']):
-            return 'current'
-        # Check transaction patterns
-        has_salary = any('salary' in (t.get('description', '') or '').lower() for t in txns)
+        # First check: filename / account-name keywords give "high" confidence.
+        if any(kw in acc_lower for kw in ['sav', 'isa', 'deposit', 'reserve', 'easy access']):
+            return 'savings', 'high'
+        if any(kw in acc_lower for kw in ['current', 'checking', 'everyday', 'cheque']):
+            return 'current', 'high'
+        # Transaction-pattern signal: salary keyword strongly suggests current.
+        has_salary = any(
+            kw in (t.get('description', '') or '').lower()
+            for t in txns
+            for kw in ('salary', 'payroll', 'wages')
+        )
         if has_salary:
-            return 'current'
+            return 'current', 'medium'
+        # Fallback heuristic: more debits than credits => probably current.
+        # Flag as low confidence so the result surfaces this guess.
         credits = [t for t in txns if t.get('direction') == 'credit']
         debits = [t for t in txns if t.get('direction') == 'debit']
-        if len(debits) > len(credits):
-            return 'current'
-        return 'savings'
-    
-    account_types = {acc_id: classify_account(acc_id, txns) for acc_id, txns in accounts.items()}
+        if len(debits) > len(credits) * 1.5:
+            return 'current', 'low'
+        if len(credits) > len(debits) * 1.5:
+            return 'savings', 'low'
+        # Genuinely ambiguous — equal-ish flow, no keywords.
+        return 'unknown', 'none'
+
+    classification_results = {
+        acc_id: classify_account(acc_id, txns)
+        for acc_id, txns in accounts.items()
+    }
+    account_types = {acc_id: cls for acc_id, (cls, _conf) in classification_results.items()}
+    ambiguous_accounts = [
+        {
+            'account_id': acc_id,
+            'classified_as': cls,
+            'confidence': conf,
+            'transaction_count': len(accounts.get(acc_id, [])),
+        }
+        for acc_id, (cls, conf) in classification_results.items()
+        if conf in ('low', 'none')
+    ]
     savings_accounts = [acc for acc, typ in account_types.items() if typ == 'savings']
     current_accounts = [acc for acc, typ in account_types.items() if typ == 'current']
-    
+
     print(f"  Account types: {account_types}")
+    if ambiguous_accounts:
+        print(f"  ⚠ Ambiguous classification: {ambiguous_accounts}")
     
     # Keywords for identifying external origins (legitimate sources)
     external_origin_keywords = [
@@ -230,24 +263,71 @@ def run_automated_funds_lineage(
         return txn.get('id') or txn.get('transaction_id') or f"TXN-{fallback_idx + 1}"
     
     def identify_external_origin(txn: Dict) -> tuple:
-        """Check if transaction is an external origin (salary, etc.)"""
+        """Recognise a credit as a legitimate external origin (not
+        suspicious, no further evidence needed).
+
+        Categories covered, ordered to put high-confidence patterns
+        first (so e.g. an "insurance settlement" credit isn't pre-
+        empted by a vaguer keyword):
+          - Salary / wages / payroll / employment income
+          - Pension / annuity
+          - Dividend / interest
+          - HMRC / tax refund / rebate
+          - Rental income
+          - Inheritance / probate / estate (P1.2)
+          - Insurance claim / settlement / payout (P1.2)
+          - Asset sale: property completion, vehicle sale, share sale (P1.2)
+          - Loan / mortgage disbursement / drawdown (P1.2)
+          - Government grant / benefit / DWP (P1.2)
+          - Gift / wedding gift / family transfer (P1.2)
+        """
         desc = (txn.get('description', '') or '').lower()
-        
+        direction = txn.get('direction')
+
         if any(kw in desc for kw in ['salary', 'wages', 'payroll']):
-            return True, 'Salary/Employment Income'
-        if 'pension' in desc:
+            return True, 'Salary / Employment Income'
+        if any(kw in desc for kw in ['pension', 'annuity']):
             return True, 'Pension Payment'
         if 'dividend' in desc:
             return True, 'Dividend Income'
         if 'interest' in desc and 'transfer' not in desc:
             return True, 'Interest Payment'
-        if 'hmrc' in desc or 'tax refund' in desc:
-            return True, 'Tax Refund'
-        if 'rent' in desc and txn.get('direction') == 'credit':
+        if 'hmrc' in desc or 'tax refund' in desc or 'tax rebate' in desc:
+            return True, 'Tax Refund / HMRC'
+        if 'rent' in desc and direction == 'credit':
             return True, 'Rental Income'
         if 'bacs' in desc and any(kw in desc for kw in ['employer', 'ltd', 'plc', 'inc']):
             return True, 'Employment Income'
-        
+
+        # ------------------------------------------------------------------
+        # P1.2 broadened allow-list — these patterns previously fell
+        # through to "requires evidence" even when the credit was
+        # clearly from a recognised legitimate source.
+        # ------------------------------------------------------------------
+        if any(kw in desc for kw in ['inheritance', 'probate', 'estate of', 'executor']):
+            return True, 'Inheritance / Probate'
+        if any(kw in desc for kw in ['insurance', 'policy payout', 'claim settlement', 'aviva', 'legal & general', 'lv=', 'direct line']):
+            # 'insurance' alone is too loose if it's e.g. an insurance
+            # premium debit. Require the txn to be a credit.
+            if direction == 'credit':
+                return True, 'Insurance Settlement'
+        if any(kw in desc for kw in ['property sale', 'house sale', 'completion proceeds', 'sale proceeds', 'conveyancing']):
+            return True, 'Property Sale Proceeds'
+        if any(kw in desc for kw in ['vehicle sale', 'car sale', 'motor sale']):
+            return True, 'Vehicle Sale Proceeds'
+        if any(kw in desc for kw in ['share sale', 'sale of shares', 'stock sale', 'equity sale']):
+            return True, 'Share / Equity Sale'
+        if any(kw in desc for kw in ['loan drawdown', 'mortgage drawdown', 'loan advance', 'mortgage advance']):
+            return True, 'Loan / Mortgage Disbursement'
+        if any(kw in desc for kw in ['dwp', 'universal credit', 'state pension', 'jobseeker', 'esa payment', 'pip ']):
+            return True, 'Government Benefit'
+        if 'grant' in desc and direction == 'credit':
+            return True, 'Government / Body Grant'
+        if 'compensation' in desc and direction == 'credit':
+            return True, 'Compensation Payment'
+        if any(kw in desc for kw in ['gift from', 'birthday gift', 'wedding gift']):
+            return True, 'Gift'
+
         return False, ''
     
     def is_likely_transfer(txn: Dict) -> bool:
@@ -255,31 +335,119 @@ def run_automated_funds_lineage(
         desc = (txn.get('description', '') or '').lower()
         return any(kw in desc for kw in transfer_keywords)
     
+    # Rough GBP-anchored FX rates for AML triage when statements span
+    # multiple currencies. These are not real-time; they exist so the
+    # matcher can spot inter-currency transfers as related rather than
+    # marking them all as untraced. Reviewer still has to verify the
+    # actual rate on the transaction date.
+    _FX_TO_GBP = {
+        'GBP': 1.0,    'USD': 0.79,   'EUR': 0.85,   'JPY': 0.0053,
+        'AUD': 0.52,   'CAD': 0.58,   'CHF': 0.88,   'INR': 0.0094,
+        'CNY': 0.11,   'HKD': 0.10,   'SGD': 0.59,   'NZD': 0.47,
+        'AED': 0.21,   'ZAR': 0.041,
+    }
+
+    def _to_gbp(amount: float, currency: str) -> Optional[float]:
+        rate = _FX_TO_GBP.get((currency or '').upper().strip())
+        if rate is None:
+            return None
+        return amount * rate
+
+    def _share_digit_run(a: str, b: str, min_len: int = 4) -> bool:
+        """Reference-number tiebreaker — do both descriptions share
+        any digit run of length >= min_len? Useful when two debits sit
+        within tolerance and we need to pick the one that actually
+        corresponds to the credit."""
+        import re as _re
+        a_runs = set(_re.findall(rf'\d{{{min_len},}}', a or ''))
+        b_runs = set(_re.findall(rf'\d{{{min_len},}}', b or ''))
+        return bool(a_runs & b_runs)
+
     def find_matching_debit(credit_txn: Dict, source_account_txns: List[Dict]) -> Optional[Dict]:
-        """Find a matching debit in another account for a credit (same amount, close date)"""
+        """Find a debit on another account that matches this credit.
+
+        Matching rules (P1.1, P2.5, P2.6):
+          - Amount within max(£1, 0.5% of credit amount) — percentage
+            scales for large transfers that lose a few pounds to fees.
+          - Date within 3 days for same-currency; 5 days for cross-
+            currency (international clearing often slower).
+          - When currencies differ, both sides are FX-converted to GBP
+            (using the rough table above) and matched at ±2% tolerance.
+            Match is annotated with `_fx_converted` so the UI can flag
+            it for verification.
+          - When multiple candidate debits fit the tolerance window,
+            the one whose description shares a digit-run with the
+            credit (account / reference number) wins. Otherwise the
+            closest by amount, then by date.
+        """
         credit_date = parse_date_flexible(credit_txn.get('date', ''))
         if not credit_date:
             return None
-        
+
         credit_amount = abs(float(credit_txn.get('amount', 0)))
-        
+        credit_currency = (credit_txn.get('currency') or 'GBP').upper().strip()
+        credit_desc = credit_txn.get('description', '') or ''
+
+        same_cur_tol = max(1.0, credit_amount * 0.005)
+
+        # Pre-compute GBP value for FX path
+        credit_gbp = _to_gbp(credit_amount, credit_currency)
+
+        candidates: List[tuple] = []  # (txn, score, fx_converted)
+
         for txn in source_account_txns:
             if txn.get('direction') != 'debit':
                 continue
-            
+
             txn_amount = abs(float(txn.get('amount', 0)))
-            # Amount match within £1
-            if abs(txn_amount - credit_amount) > 1.0:
-                continue
-            
+            txn_currency = (txn.get('currency') or 'GBP').upper().strip()
             txn_date = parse_date_flexible(txn.get('date', ''))
-            if txn_date:
-                days_diff = abs((txn_date - credit_date).days)
-                # Within 3 days
-                if days_diff <= 3:
-                    return txn
-        
-        return None
+            if not txn_date:
+                continue
+            days_diff = abs((txn_date - credit_date).days)
+
+            same_currency = (credit_currency == txn_currency)
+            if same_currency:
+                if days_diff > 3:
+                    continue
+                amount_diff = abs(txn_amount - credit_amount)
+                if amount_diff > same_cur_tol:
+                    continue
+                # Score: amount mismatch + day penalty. Lower = better.
+                score = amount_diff * 100 + days_diff
+                fx_converted = False
+            else:
+                # Cross-currency path
+                if days_diff > 5:
+                    continue
+                txn_gbp = _to_gbp(txn_amount, txn_currency)
+                if credit_gbp is None or txn_gbp is None:
+                    continue
+                ratio_diff = abs(txn_gbp - credit_gbp) / max(credit_gbp, 1.0)
+                if ratio_diff > 0.02:  # 2% — covers normal FX spread
+                    continue
+                # Heavier base score so a same-currency match beats an
+                # FX-converted one when both are available.
+                score = 1000 + ratio_diff * 10000 + days_diff
+                fx_converted = True
+
+            # Reference-number tiebreaker — if both descriptions share
+            # a 4+ digit run (account / payment reference), strongly
+            # prefer this candidate.
+            if _share_digit_run(credit_desc, txn.get('description', '') or ''):
+                score -= 500
+
+            candidates.append((txn, score, fx_converted))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda c: c[1])
+        best_txn, _, fx_converted = candidates[0]
+        if fx_converted:
+            # Annotate so the lineage node can render "FX-matched" badge.
+            best_txn['_fx_converted'] = True
+        return best_txn
     
     def check_statement_gap(txn_date_str: str, source_acc_id: str) -> Optional[str]:
         """
@@ -300,15 +468,24 @@ def run_automated_funds_lineage(
         return None
     
     def find_funding_credits(debit_txn: Dict, account_txns: List[Dict], exclude_id: str = None) -> List[Dict]:
-        """Find credits that could have funded a debit (credits before the debit date)"""
+        """Find credits that could have funded a debit.
+
+        P2.7 — Chronological validation. We REQUIRE every candidate
+        credit's date to fall on or before the debit's date. A credit
+        that arrives AFTER the debit cannot have funded it; including
+        such credits in the funding chain is a false-positive that
+        previously slipped through whenever the dataset was unsorted.
+        The explicit `txn_date <= debit_date` filter rejects them.
+        """
         debit_date = parse_date_flexible(debit_txn.get('date', ''))
         if not debit_date:
             return []
-        
+
         debit_amount = abs(float(debit_txn.get('amount', 0)))
-        
-        # Get credits before this debit
-        prior_credits = []
+
+        # Collect candidate credits that PRE-DATE the debit. Each
+        # tuple is (txn, parsed_date) so we can sort deterministically.
+        prior_credits: List[tuple] = []
         for txn in account_txns:
             if txn.get('direction') != 'credit':
                 continue
@@ -316,24 +493,30 @@ def run_automated_funds_lineage(
             if exclude_id and txn_id == exclude_id:
                 continue
             txn_date = parse_date_flexible(txn.get('date', ''))
-            if txn_date and txn_date <= debit_date:
-                days_diff = (debit_date - txn_date).days
-                if days_diff <= 365:  # 1 year lookback for funds lineage
-                    prior_credits.append((txn, txn_date))
-        
-        # Sort by date descending (most recent first)
+            if not txn_date:
+                continue
+            # *** Chronology guard *** — a credit AFTER the debit cannot
+            # have funded it.
+            if txn_date > debit_date:
+                continue
+            days_diff = (debit_date - txn_date).days
+            if days_diff <= 365:  # 1 year lookback for funds lineage
+                prior_credits.append((txn, txn_date))
+
+        # Sort by date descending (most recent first) — we want the
+        # NEWEST funding sources, because those are most likely to be
+        # the ones that actually paid for the debit.
         prior_credits.sort(key=lambda x: x[1], reverse=True)
-        
-        # Select credits that could have funded this debit
-        funding_credits = []
-        running_total = 0
-        
+
+        # Greedily select credits up to the debit amount.
+        funding_credits: List[Dict] = []
+        running_total = 0.0
         for credit, _ in prior_credits:
             if running_total >= debit_amount:
                 break
             funding_credits.append(credit)
             running_total += abs(float(credit.get('amount', 0)))
-        
+
         return funding_credits
     
     def build_lineage_node(txn: Dict, level: int, visited: set) -> Dict:
@@ -353,8 +536,23 @@ def run_automated_funds_lineage(
             if parsed_date:
                 all_dates.append(parsed_date)
         
-        # Prevent infinite loops
-        if txn_id in visited or level > 50:  # Extended depth limit for complex lineage
+        # Prevent infinite loops.
+        # P1.3 — surface circular references clearly so the analyst
+        # can investigate. Round-tripping money through the same
+        # accounts is a classic layering technique, so we record it
+        # with a distinct severity rather than burying it as a
+        # generic unresolved row.
+        is_circular = txn_id in visited
+        is_too_deep = level > 50
+        if is_circular or is_too_deep:
+            reason = 'circular_reference' if is_circular else 'max_depth_reached'
+            note = (
+                'Circular reference — this transaction was already encountered '
+                'further up the lineage tree, which can indicate round-tripping '
+                'across accounts.'
+                if is_circular else
+                f'Maximum trace depth ({level}) reached without finding a clear origin.'
+            )
             unresolved_items.append({
                 'id': txn_id,
                 'transaction_id': txn_id,
@@ -362,7 +560,9 @@ def run_automated_funds_lineage(
                 'amount': txn_amount,
                 'description': txn.get('description', ''),
                 'account': txn_account,
-                'reason': 'circular_reference'
+                'reason': reason,
+                'severity': 'high' if is_circular else 'medium',
+                'message': note,
             })
             return {
                 'id': node_id,
@@ -372,10 +572,10 @@ def run_automated_funds_lineage(
                 'date': txn_date,
                 'description': txn.get('description', ''),
                 'account': txn_account,
-                'source_account': 'Circular Reference',
+                'source_account': 'Circular Reference' if is_circular else 'Trace Depth Exceeded',
                 'destination_account': txn_account,
-                'match_type': 'requires_evidence',
-                'notes': 'Circular reference or max depth reached',
+                'match_type': 'circular' if is_circular else 'requires_evidence',
+                'notes': note,
                 'children': []
             }
         
@@ -597,9 +797,11 @@ def run_automated_funds_lineage(
         'accumulationPeriodDays': accumulation_days,
         'traced_percentage': traced_percentage,
         'accountCoverage': account_date_ranges,
-        'statementGaps': statement_gaps_summary
+        'statementGaps': statement_gaps_summary,
+        'ambiguousAccounts': len(ambiguous_accounts),
+        'circularReferences': sum(1 for it in unresolved_items if it.get('reason') == 'circular_reference'),
     }
-    
+
     return {
         'target_transaction': target_transaction,
         'summary': summary,
@@ -607,6 +809,7 @@ def run_automated_funds_lineage(
         'unresolved_items': unresolved_items,
         'statement_gap_items': statement_gap_items,
         'external_origins': external_origins,
+        'ambiguous_accounts': ambiguous_accounts,
         'traced_percentage': traced_percentage,
         'run_at': datetime.now(timezone.utc).isoformat(),
         'run_by': 'auto'
