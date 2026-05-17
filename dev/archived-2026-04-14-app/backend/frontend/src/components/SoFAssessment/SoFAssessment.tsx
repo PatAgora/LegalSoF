@@ -2069,28 +2069,52 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Results Step */}
       {activeStep === 'results' && result && (
         <div className="space-y-6">
-          {/* Overall Decision Badge with Comprehensive Summary */}
-          <div className={`rounded-md p-6 ${getStatusColor(result.outcome.status)}`}>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-2xl font-bold mb-2 text-zinc-900">
-                  {result.outcome.status.toUpperCase()}
-                </h3>
+          {/* Verdict summary card — the top-of-page "what's the answer" panel.
+              Replaces the previous emoji-decorated bold-text header. */}
+          {(() => {
+            const status = (result.outcome.status || '').toLowerCase();
+            const verdictMap: Record<string, { label: string; severity: 'critical' | 'high' | 'medium' | 'info'; headline: string }> = {
+              sufficient: { label: 'PASS',           severity: 'info',    headline: 'Source of funds is sufficiently evidenced.' },
+              borderline: { label: 'REVIEW REQUIRED',severity: 'high',    headline: 'Manual review required before approval.' },
+              insufficient:{label: 'FAIL',           severity: 'critical',headline: 'Source of funds is not adequately evidenced.' },
+            };
+            const v = verdictMap[status] || { label: status.toUpperCase() || 'UNKNOWN', severity: 'medium' as const, headline: 'Assessment complete.' };
+            const total = result.evidence_matches?.length || 0;
+            const verified = result.evidence_matches?.filter((e: any) => e.verified).length || 0;
+            const flagged = result.evidence_matches?.filter((e: any) => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length || 0;
+            return (
+              <div className="bg-white border border-zinc-200 rounded-md">
+                <div className="px-6 py-5 flex items-start gap-6 border-b border-zinc-100">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-serif text-3xl font-normal text-zinc-900 tracking-tight">
+                      {v.label}
+                    </div>
+                    <p className="mt-2 text-sm text-zinc-600">{v.headline}</p>
+                  </div>
+                  <StatusChip severity={v.severity} label={v.label} />
+                </div>
+                <div className="grid grid-cols-3 divide-x divide-zinc-100">
+                  <div className="px-6 py-4">
+                    <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{verified}<span className="text-zinc-300"> / {total}</span></div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims verified</div>
+                  </div>
+                  <div className="px-6 py-4">
+                    <div className={`font-serif text-2xl font-normal tabular-nums ${flagged > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{flagged}</div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims requiring review</div>
+                  </div>
+                  <div className="px-6 py-4">
+                    <div className={`font-serif text-2xl font-normal tabular-nums ${(docVerificationSummary?.likely_tampered_count ?? 0) > 0 ? 'text-red-700' : 'text-zinc-900'}`}>
+                      {docVerificationSummary?.total_documents ?? 0}
+                    </div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Documents verified</div>
+                  </div>
+                </div>
+                <div className="px-6 py-4 border-t border-zinc-100 text-sm text-zinc-700 leading-relaxed">
+                  {buildComprehensiveSummary(result)}
+                </div>
               </div>
-              <div className="text-5xl">
-                {result.outcome.status === 'sufficient' ? '✅' :
-                 result.outcome.status === 'borderline' ? '⚠️' : '❌'}
-              </div>
-            </div>
-            
-            {/* Comprehensive Assessment Summary */}
-            <div className="mt-4 pt-4 border-t border-zinc-200">
-              <h4 className="text-lg font-semibold mb-3 text-zinc-900">Assessment Summary</h4>
-              <div className="text-zinc-900 text-sm leading-relaxed">
-                {buildComprehensiveSummary(result)}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Parsed Rationale Sections */}
           {renderStructuredRationale(result)}
