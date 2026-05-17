@@ -138,10 +138,10 @@ export default function Layout() {
 
   const SidebarBody = (
     <>
-      {/* Sidebar header — logo */}
+      {/* Sidebar header — wordmark */}
       <div className="flex items-center h-16 px-4 border-b border-zinc-200">
-        <Link to="/" className="flex items-center" onClick={() => setSidebarOpen(false)}>
-          <img src="/agora-logo.svg" alt="Agora Consulting AI" className="h-8" />
+        <Link to="/" className="flex items-baseline gap-2" onClick={() => setSidebarOpen(false)}>
+          <span className="text-xl font-bold tracking-tight text-zinc-900">Agora</span>
         </Link>
       </div>
 
