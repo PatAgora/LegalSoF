@@ -1704,13 +1704,33 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Upload Step */}
       {activeStep === 'upload' && (
         <div className="space-y-6">
-          {/* Upload Boxes */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Client Info Upload */}
-            <div className="border border-dashed border-zinc-200 rounded-md p-6 hover:border-zinc-500 transition-colors">
-              <div className="text-center">
-                <div className="text-4xl mb-3">📋</div>
-                <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
+          {/* Upload tiles — full-width accordion rows. Each tile collapses
+              once its category has at least one upload, so reviewers see
+              counts at a glance and only expand the section they're
+              working on. Uses native <details> for the open/close
+              behaviour (no extra state needed). */}
+          <div className="space-y-3">
+            {/* Client Info — tile #1 */}
+            <details
+              className="bg-white border border-zinc-200 rounded-md group"
+              open={!(status && status.files_summary && status.files_summary.client_info === 'uploaded')}
+            >
+              <summary className="px-5 py-3 flex items-center justify-between cursor-pointer hover:bg-zinc-50/60 list-none">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-sm font-semibold text-zinc-900">Client info</span>
+                  <span className="text-xs text-zinc-500">
+                    {status && status.files_summary && status.files_summary.client_info === 'uploaded'
+                      ? 'Provided'
+                      : 'Not provided'}
+                  </span>
+                </div>
+                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
+                <div className="text-center">
+                  <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
                 
                 {/* Show success state if already uploaded */}
                 {status && status.files_summary && status.files_summary.client_info === 'uploaded' ? (
@@ -1902,12 +1922,29 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 )}
               </div>
             </div>
+            </details>
 
-            {/* Bank Statements Upload */}
-            <div className="bg-white border border-zinc-200 rounded-md p-5">
+            {/* Bank Statements — tile #2 */}
+            <details
+              className="bg-white border border-zinc-200 rounded-md group"
+              open={!status || !status.files_summary || status.files_summary.bank_statements_count === 0}
+            >
+              <summary className="px-5 py-3 flex items-center justify-between cursor-pointer hover:bg-zinc-50/60 list-none">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-sm font-semibold text-zinc-900">Bank statements</span>
+                  <span className="text-xs text-zinc-500">
+                    {status && status.files_summary && status.files_summary.bank_statements_count > 0
+                      ? `${status.files_summary.bank_statements_count} transaction record${status.files_summary.bank_statements_count !== 1 ? 's' : ''} extracted`
+                      : 'None uploaded'}
+                  </span>
+                </div>
+                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
               <div className="mb-4">
-                <h3 className="text-sm font-semibold text-zinc-900">Bank statements</h3>
-                <p className="text-xs text-zinc-500 mt-0.5">
+                <p className="text-xs text-zinc-500">
                   CSV or PDF. Multiple uploads supported.
                 </p>
               </div>
@@ -1941,13 +1978,30 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   {status.files_summary.bank_statements_count} transaction record(s) extracted so far.
                 </div>
               )}
-            </div>
+              </div>
+            </details>
 
-            {/* Supporting Docs Upload */}
-            <div className="bg-white border border-zinc-200 rounded-md p-5">
+            {/* Supporting Documents — tile #3 */}
+            <details
+              className="bg-white border border-zinc-200 rounded-md group"
+              open={!status || !status.files_summary || status.files_summary.supporting_docs_count === 0}
+            >
+              <summary className="px-5 py-3 flex items-center justify-between cursor-pointer hover:bg-zinc-50/60 list-none">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-sm font-semibold text-zinc-900">Supporting documents</span>
+                  <span className="text-xs text-zinc-500">
+                    {status && status.files_summary && status.files_summary.supporting_docs_count > 0
+                      ? `${status.files_summary.supporting_docs_count} document${status.files_summary.supporting_docs_count !== 1 ? 's' : ''} uploaded`
+                      : 'None uploaded'}
+                  </span>
+                </div>
+                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
               <div className="mb-4">
-                <h3 className="text-sm font-semibold text-zinc-900">Supporting documents</h3>
-                <p className="text-xs text-zinc-500 mt-0.5">
+                <p className="text-xs text-zinc-500">
                   Probate grant, completion statement, gift letter, etc.
                 </p>
               </div>
@@ -1981,7 +2035,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   {status.files_summary.supporting_docs_count} document(s) uploaded so far.
                 </div>
               )}
-            </div>
+              </div>
+            </details>
           </div>
 
           {/* Uploaded Files List */}
