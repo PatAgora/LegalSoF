@@ -73,6 +73,37 @@ async def create_tables(engine):
     print("[+] All database tables created (or already exist).")
 
 
+# Columns added to existing models after the initial create_all run.
+# Base.metadata.create_all DOES NOT ALTER existing tables, so we
+# explicitly ADD COLUMN IF NOT EXISTS for every drift point here.
+# Each tuple is (table, column, type) — all nullable so existing rows
+# are unaffected. Idempotent: safe to run on every boot.
+_SCHEMA_PATCHES: list[tuple[str, str, str]] = [
+    # Four-eyes override flow (added 2026-05)
+    ("document_verifications", "override_proposed_by",        "VARCHAR(200)"),
+    ("document_verifications", "override_proposed_at",        "TIMESTAMP WITH TIME ZONE"),
+    ("document_verifications", "override_proposed_rationale", "TEXT"),
+]
+
+
+async def patch_schema(engine):
+    """Apply idempotent ALTER TABLE ADD COLUMN IF NOT EXISTS for any
+    columns that were added to SQLAlchemy models after the table was
+    first created. Postgres-only syntax (IF NOT EXISTS on ADD COLUMN)."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        for table, column, coltype in _SCHEMA_PATCHES:
+            stmt = f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {coltype}'
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                # Log and continue — a missing column failure will surface
+                # via the API anyway; we don't want one bad patch to abort
+                # the whole boot.
+                print(f"[!] Schema patch skipped ({table}.{column}): {exc}")
+        print("[+] Schema patches applied (idempotent ADD COLUMN IF NOT EXISTS).")
+
+
 def run_migrations():
     """Run Alembic migrations to HEAD.
 
@@ -176,6 +207,9 @@ async def main():
 
     # 1. Create tables
     await create_tables(engine)
+
+    # 1b. Patch schema for columns added after first deploy
+    await patch_schema(engine)
 
     # 2. Run Alembic migrations
     run_migrations()
