@@ -960,22 +960,73 @@ async def upload_sof_files(
             import re as _re
             filename_lower = (file.filename or '').lower()
 
-            # Try to extract a real account-number-like token from the
-            # combined transaction descriptions / metadata. 8-digit run is
-            # the UK bank-account-number shape.
+            # ------------------------------------------------------------
+            # Extract a real UK bank account number so two statements
+            # from the SAME account merge into one logical account, and
+            # statements from DIFFERENT accounts stay separate.
+            #
+            # Order of preference:
+            #   1. Full PDF text (account number usually sits in the
+            #      header band — most reliable place to find it).
+            #   2. CSV/PDF-extracted transaction fields, in case the
+            #      parser already pulled an explicit account_number.
+            #   3. Any 8-digit run in description / narrative as a
+            #      last-ditch search.
+            #   4. Fall back to "file:<filename>" if nothing matches.
+            #
+            # We look for the canonical UK shape: an isolated 8-digit
+            # run, optionally preceded by an "account" label. The
+            # lookbehind for "account number"/"acct no"/"a/c"/"sort
+            # code" rejects 8-digit runs that are clearly NOT the
+            # account number (e.g. a date or transaction ref). When the
+            # labelled form isn't present we fall back to a free 8-
+            # digit run.
+            # ------------------------------------------------------------
             account_number = None
-            for txn in new_transactions[:50]:
-                for field in ('account_number', 'account_id', 'description', 'narrative'):
-                    val = str(txn.get(field, ''))
-                    m = _re.search(r'\b(\d{8})\b', val)
-                    if m:
-                        account_number = m.group(1)
-                        break
-                if account_number:
-                    break
+            try:
+                if is_pdf:
+                    import fitz as _fitz
+                    _d = _fitz.open(stream=file_content_for_verification, filetype="pdf")
+                    pdf_text_full = "\n".join((p.get_text() or "") for p in _d)
+                    _d.close()
+                else:
+                    pdf_text_full = file_content_for_verification.decode('utf-8', errors='ignore')
+            except Exception:
+                pdf_text_full = ''
 
-            # Per-file identifier — falls back to filename when no
-            # account-number-shaped token shows up in the parsed data.
+            # Prefer labelled matches like "Account number: 12345678" /
+            # "A/C 12345678" — these are far more reliable than a bare
+            # 8-digit run.
+            labelled = _re.search(
+                r'(?:account\s*(?:number|no\.?)|a/?c(?:count)?\s*(?:no\.?|number)?|account)\s*[:#]?\s*(\d{8})',
+                pdf_text_full,
+                _re.IGNORECASE,
+            )
+            if labelled:
+                account_number = labelled.group(1)
+
+            # Fall back to ANY isolated 8-digit run in the header (first
+            # 1000 chars) — most banks print the number near the top.
+            if not account_number and pdf_text_full:
+                m = _re.search(r'\b(\d{8})\b', pdf_text_full[:1000])
+                if m:
+                    account_number = m.group(1)
+
+            # Last-ditch: scan the parsed transaction fields.
+            if not account_number:
+                for txn in new_transactions[:50]:
+                    for field in ('account_number', 'description', 'narrative'):
+                        val = str(txn.get(field, ''))
+                        m = _re.search(r'\b(\d{8})\b', val)
+                        if m:
+                            account_number = m.group(1)
+                            break
+                    if account_number:
+                        break
+
+            # Per-file identifier — falls back to filename when no real
+            # account number could be extracted, so different uploads
+            # still register as distinct accounts.
             file_account_id = (
                 account_number
                 or f"file:{file.filename or 'unknown'}"
