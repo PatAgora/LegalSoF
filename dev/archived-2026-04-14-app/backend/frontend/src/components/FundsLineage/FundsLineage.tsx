@@ -620,19 +620,19 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
     const hasChildren = Array.isArray(node.children) && node.children.length > 0;
     
     const bgColor =
-      node.matchType === 'matched' ? 'bg-primary-50 border-primary-300' :
-      node.matchType === 'external_origin' ? 'bg-status-success-50 border-status-success-200' :
-      node.matchType === 'requires_evidence' ? 'bg-status-warning-50 border-status-warning-200' :
-      node.matchType === 'statement_gap' ? 'bg-status-warning-50 border-status-warning-200' :
-      'bg-brand-surface-alt border-brand-muted';
+      node.matchType === 'matched' ? 'bg-zinc-50 border-zinc-300' :
+      node.matchType === 'external_origin' ? 'bg-green-50 border-green-200' :
+      node.matchType === 'requires_evidence' ? 'bg-amber-50 border-amber-200' :
+      node.matchType === 'statement_gap' ? 'bg-amber-50 border-amber-200' :
+      'bg-zinc-50 border-zinc-200';
     
     // Use simple colored dots instead of emojis for consistent display
     const statusColor =
-      node.matchType === 'matched' ? 'bg-primary-400' :
-      node.matchType === 'external_origin' ? 'bg-status-success-500' :
-      node.matchType === 'requires_evidence' ? 'bg-status-warning-500' :
-      node.matchType === 'statement_gap' ? 'bg-status-warning-500' :
-      'bg-brand-ink-tertiary';
+      node.matchType === 'matched' ? 'bg-zinc-400' :
+      node.matchType === 'external_origin' ? 'bg-green-500' :
+      node.matchType === 'requires_evidence' ? 'bg-amber-500' :
+      node.matchType === 'statement_gap' ? 'bg-amber-500' :
+      'bg-zinc-400';
 
     // Get transaction safely
     const txn = node.transaction || {};
@@ -645,19 +645,19 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
       <div key={node.id} className="relative">
         {/* Connection line */}
         {(node.level || 0) > 0 && (
-          <div className="absolute left-4 -top-3 w-0.5 h-3 bg-brand-muted"></div>
+          <div className="absolute left-4 -top-3 w-0.5 h-3 bg-zinc-200"></div>
         )}
         
         {/* Node card */}
         <div className={`ml-${Math.min((node.level || 0) * 4, 16)} mb-2`} style={{ marginLeft: `${(node.level || 0) * 24}px` }}>
-          <div className={`border-l-4 rounded-card p-3 ${bgColor}`}>
+          <div className={`border-l-4 rounded-md p-3 ${bgColor}`}>
             {/* Header row */}
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2">
                 {hasChildren && (
                   <button 
                     onClick={() => toggleNode(node.id)}
-                    className="text-brand-ink-tertiary hover:text-brand-ink-secondary font-mono text-sm"
+                    className="text-zinc-400 hover:text-zinc-600 font-mono text-sm"
                   >
                     {isExpanded ? '▼' : '▶'}
                   </button>
@@ -667,7 +667,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                   style={{ minWidth: '16px', minHeight: '16px' }}
                 ></span>
                 <div>
-                  <div className="font-semibold text-brand-ink">
+                  <div className="font-semibold text-zinc-900">
                     {(() => {
                       // Try to extract meaningful account names from various sources
                       let source = node.sourceAccount;
@@ -707,37 +707,37 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                       return `${source} → ${dest}`;
                     })()}
                   </div>
-                  <div className="text-xs text-brand-ink-secondary">{txnDate}</div>
+                  <div className="text-xs text-zinc-600">{txnDate}</div>
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-lg font-bold text-brand-ink">
+                <div className="text-lg font-bold text-zinc-900">
                   £{Math.abs(txnAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </div>
-                <div className="text-xs text-brand-ink-tertiary">TXN-{txnId}</div>
+                <div className="text-xs text-zinc-400">TXN-{txnId}</div>
               </div>
             </div>
             
             {/* Transaction description */}
-            <div className="mt-2 text-sm text-brand-ink-secondary bg-white/50 rounded p-2">
+            <div className="mt-2 text-sm text-zinc-600 bg-white/50 rounded p-2">
               {txnDesc}
             </div>
             
             {/* Match details */}
             {node.matchedTransaction && (
-              <div className="mt-2 text-xs bg-primary-100 rounded p-2">
+              <div className="mt-2 text-xs bg-zinc-100 rounded p-2">
                 <span className="font-semibold">Matched with:</span> {node.matchedTransaction.description}
-                <span className="ml-2 text-brand-ink-secondary">({formatDate(node.matchedTransaction.date)})</span>
+                <span className="ml-2 text-zinc-600">({formatDate(node.matchedTransaction.date)})</span>
               </div>
             )}
             
             {/* Notes */}
             <div className={`mt-2 text-xs ${
-              node.matchType === 'external_origin' ? 'text-status-success-700' :
-              node.matchType === 'requires_evidence' ? 'text-status-warning-700' :
-              node.matchType === 'statement_gap' ? 'text-status-warning-700' :
-              node.matchType === 'matched' ? 'text-primary-500' :
-              'text-brand-ink-secondary'
+              node.matchType === 'external_origin' ? 'text-green-700' :
+              node.matchType === 'requires_evidence' ? 'text-amber-700' :
+              node.matchType === 'statement_gap' ? 'text-amber-700' :
+              node.matchType === 'matched' ? 'text-zinc-500' :
+              'text-zinc-600'
             }`}>
               {node.notes || ''}
             </div>
@@ -762,45 +762,45 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white border border-brand-muted rounded-card p-6">
+      <div className="bg-white border border-zinc-200 rounded-md p-6">
         <div className="flex items-center gap-3 mb-4">
           <span className="text-2xl">🔗</span>
-          <h2 className="text-xl font-bold text-brand-ink">Backward Funds Lineage</h2>
+          <h2 className="text-xl font-bold text-zinc-900">Backward Funds Lineage</h2>
         </div>
         
-        <p className="text-sm text-brand-ink-secondary mb-4">
+        <p className="text-sm text-zinc-600 mb-4">
           Trace funds backward from a credit transaction to identify where the money came from.
           The system cross-references between uploaded account statements to match transfers
           and trace funds to their ultimate origin (salary, investments, etc.).
         </p>
 
         {/* Account Summary */}
-        <div className="bg-brand-surface-alt border border-brand-muted rounded-card p-4 mb-4">
-          <h3 className="font-semibold text-brand-ink mb-3">📊 Uploaded Account Statements</h3>
+        <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4 mb-4">
+          <h3 className="font-semibold text-zinc-900 mb-3">📊 Uploaded Account Statements</h3>
           
           {accountSummaries.length === 0 ? (
-            <div className="text-status-warning-700 text-sm">
+            <div className="text-amber-700 text-sm">
               ⚠️ No transaction data available. Please upload bank statements in the Transaction Review tab.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {accountSummaries.map(account => (
-                <div key={account.accountId} className="bg-white rounded-card border border-brand-muted p-3">
-                  <div className="font-medium text-brand-ink">{account.accountName}</div>
-                  <div className="text-xs text-brand-ink-tertiary mb-2">{account.accountId}</div>
+                <div key={account.accountId} className="bg-white rounded-md border border-zinc-200 p-3">
+                  <div className="font-medium text-zinc-900">{account.accountName}</div>
+                  <div className="text-xs text-zinc-400 mb-2">{account.accountId}</div>
                   <div className="text-sm">
-                    <span className="text-status-danger-700">↓ £{account.totalDebits.toLocaleString()}</span>
-                    <span className="mx-2 text-brand-ink-tertiary">|</span>
-                    <span className="text-status-success-700">↑ £{account.totalCredits.toLocaleString()}</span>
+                    <span className="text-red-700">↓ £{account.totalDebits.toLocaleString()}</span>
+                    <span className="mx-2 text-zinc-400">|</span>
+                    <span className="text-green-700">↑ £{account.totalCredits.toLocaleString()}</span>
                   </div>
-                  <div className="text-xs text-brand-ink-tertiary">{account.transactions.length} transactions</div>
+                  <div className="text-xs text-zinc-400">{account.transactions.length} transactions</div>
                 </div>
               ))}
             </div>
           )}
           
           {accountSummaries.length === 1 && (
-            <div className="mt-3 p-2 bg-status-warning-50 border border-status-warning-200 rounded text-sm text-status-warning-700">
+            <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
               ⚠️ <strong>Only one account uploaded.</strong> For proper funds lineage tracing between accounts 
               (e.g., savings → current), please upload statements for all relevant accounts.
             </div>
@@ -808,17 +808,17 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         </div>
 
         {/* Transaction Selection */}
-        <div className="bg-brand-surface-alt border border-brand-muted rounded-card p-4 mb-4">
-          <h3 className="font-semibold text-brand-ink mb-3">Select Target Credit to Trace</h3>
+        <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4 mb-4">
+          <h3 className="font-semibold text-zinc-900 mb-3">Select Target Credit to Trace</h3>
           
           {significantCredits.length === 0 ? (
-            <div className="text-status-warning-700 text-sm">
+            <div className="text-amber-700 text-sm">
               ⚠️ No credit transactions found.
             </div>
           ) : (
             <div className="space-y-2">
               <select
-                className="w-full p-2 border border-brand-muted rounded-card text-sm"
+                className="w-full p-2 border border-zinc-200 rounded-md text-sm"
                 value={targetTransaction?.id || ''}
                 onChange={(e) => {
                   const selected = significantCredits.find(t => t.id === e.target.value);
@@ -836,9 +836,9 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
               </select>
 
               {targetTransaction && (
-                <div className="bg-brand-surface-alt border border-brand-muted rounded-card p-3 mt-2">
-                  <div className="text-sm font-semibold text-primary-700">Selected Transaction:</div>
-                  <div className="text-sm text-primary-600 mt-1">
+                <div className="bg-zinc-50 border border-zinc-200 rounded-md p-3 mt-2">
+                  <div className="text-sm font-semibold text-zinc-900">Selected Transaction:</div>
+                  <div className="text-sm text-zinc-700 mt-1">
                     <div>• Amount: <strong>£{Math.abs(targetTransaction.amount).toLocaleString()}</strong></div>
                     <div>• Date: {formatDate(targetTransaction.date)}</div>
                     <div>• Account: {targetTransaction.account}</div>
@@ -855,10 +855,10 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           <button
             onClick={generateLineage}
             disabled={!targetTransaction || isProcessing || isSaving}
-            className={`px-6 py-2 rounded-button font-semibold transition-colors ${
+            className={`px-6 py-2 rounded font-semibold transition-colors ${
               !targetTransaction || isProcessing || isSaving
-                ? 'bg-brand-muted text-brand-ink-tertiary cursor-not-allowed'
-                : 'bg-primary-700 text-white hover:bg-primary-800'
+                ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                : 'bg-zinc-900 text-white hover:bg-zinc-900'
             }`}
           >
             {isProcessing ? '⏳ Tracing Funds...' : isSaving ? '💾 Saving...' : '🔍 Trace Backward Lineage'}
@@ -867,7 +867,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           {lineageSummary && (
             <button
               onClick={reRunLineage}
-              className="px-4 py-2 rounded-button font-semibold bg-primary-700 text-white hover:bg-primary-800 transition-colors"
+              className="px-4 py-2 rounded font-semibold bg-zinc-900 text-white hover:bg-zinc-900 transition-colors"
             >
               🔄 Re-run Analysis
             </button>
@@ -876,7 +876,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         
         {/* Saved Status Indicator */}
         {savedLineageDate && (
-          <div className="mt-3 flex items-center gap-2 text-sm text-status-success-700 bg-status-success-50 px-3 py-2 rounded-card">
+          <div className="mt-3 flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-md">
             <span>✅</span>
             <span>
               Analysis saved on {new Date(savedLineageDate).toLocaleDateString('en-GB')} at {new Date(savedLineageDate).toLocaleTimeString('en-GB')}
@@ -885,13 +885,13 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         )}
         
         {isLoadingSaved && (
-          <div className="mt-3 text-sm text-brand-ink-tertiary">
+          <div className="mt-3 text-sm text-zinc-400">
             ⏳ Loading saved analysis...
           </div>
         )}
 
         {error && (
-          <div className="mt-4 p-3 bg-status-danger-50 border border-status-danger-200 rounded-card text-status-danger-700 text-sm">
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
             ⚠️ {error}
           </div>
         )}
@@ -899,19 +899,19 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
 
       {/* Lineage Results */}
       {lineageTree.length > 0 && lineageSummary && (
-        <div className="bg-white border border-brand-muted rounded-card overflow-hidden">
+        <div className="bg-white border border-zinc-200 rounded-md overflow-hidden">
           {/* Header */}
-          <div className="bg-brand-surface-alt border-b border-brand-muted px-6 py-4">
+          <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-bold text-brand-ink">📋 Backward Funds Lineage Ledger</h3>
-                <p className="text-xs text-brand-ink-secondary mt-1">
+                <h3 className="text-lg font-bold text-zinc-900">📋 Backward Funds Lineage Ledger</h3>
+                <p className="text-xs text-zinc-600 mt-1">
                   Tracing origin of £{Math.abs(targetTransaction?.amount || 0).toLocaleString()} credited on {formatDate(targetTransaction?.date)}
                 </p>
               </div>
               <button
                 onClick={expandAll}
-                className="px-3 py-1 text-xs bg-white border border-brand-muted rounded-button hover:bg-brand-surface-alt"
+                className="px-3 py-1 text-xs bg-white border border-zinc-200 rounded hover:bg-zinc-50"
               >
                 Expand All
               </button>
@@ -919,34 +919,34 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           </div>
 
           {/* Summary Stats */}
-          <div className="px-6 py-4 bg-brand-surface-alt border-b border-brand-muted">
+          <div className="px-6 py-4 bg-zinc-50 border-b border-zinc-200">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
               <div>
-                <div className="text-xl font-bold text-brand-ink">
+                <div className="text-xl font-bold text-zinc-900">
                   £{lineageSummary.totalAmount.toLocaleString()}
                 </div>
-                <div className="text-xs text-brand-ink-secondary">Total Amount</div>
+                <div className="text-xs text-zinc-600">Total Amount</div>
               </div>
               <div>
-                <div className="text-xl font-bold text-status-success-700">
+                <div className="text-xl font-bold text-green-700">
                   £{lineageSummary.tracedAmount.toLocaleString()}
                 </div>
-                <div className="text-xs text-brand-ink-secondary">Traced to Origin</div>
+                <div className="text-xs text-zinc-600">Traced to Origin</div>
               </div>
               <div>
-                <div className="text-xl font-bold text-status-warning-700">
+                <div className="text-xl font-bold text-amber-700">
                   £{lineageSummary.untracedAmount.toLocaleString()}
                 </div>
-                <div className="text-xs text-brand-ink-secondary">Requires Evidence</div>
+                <div className="text-xs text-zinc-600">Requires Evidence</div>
               </div>
               <div>
-                <div className="text-xl font-bold text-primary-500">
+                <div className="text-xl font-bold text-zinc-500">
                   {lineageSummary.matchedTransfers}
                 </div>
-                <div className="text-xs text-brand-ink-secondary">Matched Transfers</div>
+                <div className="text-xs text-zinc-600">Matched Transfers</div>
               </div>
               <div>
-                <div className="text-xl font-bold text-brand-ink-secondary">
+                <div className="text-xl font-bold text-zinc-600">
                   {(() => {
                     const days = lineageSummary.accumulationPeriodDays || 0;
                     const years = Math.floor(days / 365);
@@ -957,7 +957,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                     return `${days} days`;
                   })()}
                 </div>
-                <div className="text-xs text-brand-ink-secondary">Statement Period</div>
+                <div className="text-xs text-zinc-600">Statement Period</div>
               </div>
             </div>
           </div>
@@ -970,22 +970,22 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           </div>
 
           {/* Legend */}
-          <div className="px-6 py-3 bg-brand-surface-alt border-t border-brand-muted">
+          <div className="px-6 py-3 bg-zinc-50 border-t border-zinc-200">
             <div className="flex flex-wrap gap-4 text-xs">
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-status-success-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
+                <span className="inline-block w-3 h-3 bg-green-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
                 <span>External Origin (Verified)</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-primary-400 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
+                <span className="inline-block w-3 h-3 bg-zinc-400 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
                 <span>Internal Transfer (Matched)</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-status-warning-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
+                <span className="inline-block w-3 h-3 bg-amber-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
                 <span>Requires Evidence</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-status-warning-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
+                <span className="inline-block w-3 h-3 bg-amber-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
                 <span>Statement Gap (Need Earlier Statements)</span>
               </div>
             </div>
@@ -993,11 +993,11 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
 
           {/* Action Items */}
           {lineageSummary.requiresEvidence > 0 && (
-            <div className="px-6 py-4 bg-status-warning-50 border-t border-status-warning-200">
-              <div className="text-sm font-semibold text-status-warning-700 mb-2">
+            <div className="px-6 py-4 bg-amber-50 border-t border-amber-200">
+              <div className="text-sm font-semibold text-amber-700 mb-2">
                 ⚠️ Evidence Required for {lineageSummary.requiresEvidence} Transaction(s)
               </div>
-              <p className="text-sm text-status-warning-700">
+              <p className="text-sm text-amber-700">
                 Some funds could not be traced to a verified origin. Obtain source documentation 
                 (bank statements, contracts, etc.) to verify these payments.
               </p>
@@ -1005,15 +1005,15 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           )}
 
           {/* Compliance Footer */}
-          <div className="px-6 py-4 bg-brand-surface-alt border-t border-brand-muted">
-            <div className="text-xs text-brand-ink-secondary">
+          <div className="px-6 py-4 bg-zinc-50 border-t border-zinc-200">
+            <div className="text-xs text-zinc-600">
               <div className="font-semibold mb-1">📜 Compliance Statement</div>
               <p>
                 This backward funds lineage traces credited funds through uploaded bank statements.
                 Funds traced to external origins (salary, investments, etc.) are marked as verified.
                 Unmatched transactions require additional source documentation.
               </p>
-              <div className="mt-2 text-brand-ink-tertiary">
+              <div className="mt-2 text-zinc-400">
                 Generated: {new Date().toLocaleString('en-GB')} | Matter: MAT-{matterId}
               </div>
             </div>
@@ -1022,17 +1022,17 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
       )}
 
       {/* Help Panel */}
-      <div className="bg-brand-surface-alt border border-brand-muted rounded-card p-4">
-        <div className="text-sm text-primary-700">
+      <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4">
+        <div className="text-sm text-zinc-900">
           <div className="font-semibold mb-2">💡 How Backward Funds Lineage Works</div>
-          <ol className="list-decimal list-inside space-y-2 text-primary-600">
+          <ol className="list-decimal list-inside space-y-2 text-zinc-700">
             <li><strong>Upload all relevant statements</strong> - Current account, savings account, ISA, etc.</li>
             <li><strong>Select the credit to trace</strong> - Usually the large transfer that matches your SoF claim</li>
             <li><strong>System matches transfers</strong> - Automatically finds matching debits/credits between accounts</li>
             <li><strong>Traces to origin</strong> - Follows the chain until it reaches external sources (salary, etc.)</li>
             <li><strong>Flags gaps</strong> - Any funds without a clear origin are marked for manual evidence</li>
           </ol>
-          <div className="mt-3 p-2 bg-primary-100 rounded text-xs">
+          <div className="mt-3 p-2 bg-zinc-100 rounded text-xs">
             <strong>Example:</strong> £100k credit to current account ← matched to £100k debit from savings ← 
             traced to multiple salary credits over 12 months = ✅ Verified accumulation from employment income
           </div>

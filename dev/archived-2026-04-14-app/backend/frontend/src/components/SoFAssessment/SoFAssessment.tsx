@@ -434,19 +434,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
   const getStatusColor = (status: string) => {
     // Use cream/tan color to match the screenshot
-    return 'bg-primary-100';
+    return 'bg-zinc-100';
   };
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'CRITICAL':
-        return 'bg-status-danger-700';
+        return 'bg-red-700';
       case 'HIGH':
-        return 'bg-status-warning-500'; // Warm tan/brown for high severity
+        return 'bg-amber-500'; // Warm tan/brown for high severity
       case 'MEDIUM':
-        return 'bg-primary-50'; // Light cream for medium
+        return 'bg-zinc-50'; // Light cream for medium
       default:
-        return 'bg-brand-muted';
+        return 'bg-zinc-200';
     }
   };
 
@@ -468,7 +468,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
         {/* Claims Overview */}
         <div>
-          <h5 className="font-semibold text-brand-ink mb-2">Client's SoF Explanation:</h5>
+          <h5 className="font-semibold text-zinc-900 mb-2">Client's SoF Explanation:</h5>
           <ul className="space-y-1 text-sm">
             {result.claims.map((claim, idx) => {
               const evidence = result.evidence_matches[idx];
@@ -528,7 +528,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     </span>
                   </div>
                   {details && (
-                    <div className="ml-6 text-xs text-brand-ink-secondary">
+                    <div className="ml-6 text-xs text-zinc-600">
                       {details}
                     </div>
                   )}
@@ -540,17 +540,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
         {/* Evidence Summary */}
         <div>
-          <h5 className="font-semibold text-brand-ink mb-2">Evidence Review:</h5>
-          <p className="text-sm mb-2 text-brand-ink">
+          <h5 className="font-semibold text-zinc-900 mb-2">Evidence Review:</h5>
+          <p className="text-sm mb-2 text-zinc-900">
             Bank transactions: {verified_count}/{total_claims} claims matched to bank statement entries.
           </p>
-          <p className="text-sm mb-2 text-brand-ink">
+          <p className="text-sm mb-2 text-zinc-900">
             Supporting documents: {result.evidence_matches.filter(e => e.document_verified).length}/{total_claims} claims verified with source documentation.
           </p>
           
           {/* Show requires review count if any */}
           {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length > 0 && (
-            <p className="text-sm mb-2 text-status-warning-700 font-semibold">
+            <p className="text-sm mb-2 text-amber-700 font-semibold">
               ⚠️ REQUIRES REVIEW: {result.evidence_matches.filter(e => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length}/{total_claims} claims require manual review.
             </p>
           )}
@@ -572,9 +572,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     <div>
                       {/* Show different message if manually accepted vs auto-verified */}
                       {evidence.document_verification?.manual_review_status === 'accepted' ? (
-                        <div className="font-medium text-status-success-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED (following acceptance of differences)</div>
+                        <div className="font-medium text-green-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED (following acceptance of differences)</div>
                       ) : (
-                        <div className="font-medium text-status-success-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED</div>
+                        <div className="font-medium text-green-700">✅ Claim {idx + 1} ({evidence.claim_source}): FULLY VERIFIED</div>
                       )}
                       {evidence.transactions.length > 0 && (
                         <div className="ml-6 mt-1 space-y-1">
@@ -588,13 +588,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           ))}
                           {evidence.document_verification && (
                             <div className="ml-2 mt-2 space-y-1">
-                              <div className="text-status-success-700 font-semibold">
+                              <div className="text-green-700 font-semibold">
                                 ✅ SUPPORTING DOCUMENT VERIFIED
                               </div>
                               {evidence.document_verification.verification_details && (
-                                <div className="text-xs text-brand-ink-secondary space-y-0.5">
+                                <div className="text-xs text-zinc-600 space-y-0.5">
                                   {evidence.document_verification.verification_details.comparison && (
-                                    <div className="mt-1 pt-1 border-t border-brand-muted">
+                                    <div className="mt-1 pt-1 border-t border-zinc-200">
                                       <div className="font-semibold">📊 Evidence Comparison:</div>
                                       <div className="ml-2 space-y-0.5">
                                         {evidence.document_verification.verification_details.comparison.customer_claim && (
@@ -617,7 +617,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                           </>
                                         )}
                                         {evidence.document_verification.verification_details.comparison.matches?.amount_matches && (
-                                          <div className="text-status-success-700 font-semibold">✅ Amount matches exactly</div>
+                                          <div className="text-green-700 font-semibold">✅ Amount matches exactly</div>
                                         )}
                                       </div>
                                     </div>
@@ -628,9 +628,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           )}
                           {/* Show manual acceptance details AFTER document verification */}
                           {evidence.document_verification?.manual_review_status === 'accepted' && (
-                            <div className="mt-2 p-2 bg-status-success-50 border border-status-success-200 rounded text-xs">
-                              <div className="font-semibold text-status-success-700">✅ Differences Accepted:</div>
-                              <div className="ml-2 text-brand-ink-secondary">
+                            <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs">
+                              <div className="font-semibold text-green-700">✅ Differences Accepted:</div>
+                              <div className="ml-2 text-zinc-600">
                                 <div>• Accepted by: {evidence.document_verification.manually_accepted_by || 'User'}</div>
                                 <div>• Date: {evidence.document_verification.manually_accepted_at ? new Date(evidence.document_verification.manually_accepted_at).toLocaleString('en-GB') : 'N/A'}</div>
                                 {evidence.document_verification.acceptance_reason && (
@@ -644,7 +644,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     </div>
                   ) : requiresReview ? (
                     <div>
-                      <div className="font-medium text-status-warning-700">⚠️ Claim {idx + 1} ({evidence.claim_source}): REQUIRES REVIEW</div>
+                      <div className="font-medium text-amber-700">⚠️ Claim {idx + 1} ({evidence.claim_source}): REQUIRES REVIEW</div>
                       {evidence.transactions.length > 0 && (
                         <div className="ml-6 mt-1 space-y-1">
                           {evidence.transactions.map((txn: any, tidx: number) => (
@@ -657,7 +657,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           ))}
                           {evidence.document_verification && (
                             <div className="ml-2 mt-2 space-y-1">
-                              <div className="text-status-warning-700 font-semibold">
+                              <div className="text-amber-700 font-semibold">
                                 ⚠️ DOCUMENT VERIFICATION INCOMPLETE
                               </div>
                               
@@ -665,8 +665,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               {evidence.document_verification.verification_details?.checks_passed && 
                                evidence.document_verification.verification_details.checks_passed.length > 0 && (
                                 <div className="mt-2">
-                                  <div className="font-medium text-brand-ink-secondary">Document Details Found:</div>
-                                  <div className="ml-2 space-y-0.5 text-xs text-brand-ink-secondary">
+                                  <div className="font-medium text-zinc-600">Document Details Found:</div>
+                                  <div className="ml-2 space-y-0.5 text-xs text-zinc-600">
                                     {evidence.document_verification.verification_details.checks_passed.map((check: string, cidx: number) => (
                                       <div key={cidx}>• {check}</div>
                                     ))}
@@ -676,8 +676,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               
                               {/* DETAILED DIFFERENCES SECTION (for document-specific issues) */}
                               {evidence.document_verification.differences && evidence.document_verification.differences.length > 0 && (
-                                <div className="bg-status-warning-50 border border-status-warning-200 rounded p-2 mb-2">
-                                  <div className="font-semibold text-status-warning-900 mb-1">📋 Specific Differences Identified:</div>
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-amber-700 mb-1">📋 Specific Differences Identified:</div>
                                   <div className="space-y-1">
                                     {evidence.document_verification.differences.map((diff: any, didx: number) => {
                                       const docName = evidence.document_verification?.verification_details?.document_used?.filename || 'document';
@@ -711,19 +711,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                         <div key={didx} className="text-xs bg-white rounded p-2 border border-status-warning-100">
                                           {isLineageAnalysis ? (
                                             <>
-                                              <div className="font-semibold text-status-warning-700">
+                                              <div className="font-semibold text-amber-700">
                                                 {tracedPct >= 80 ? '✅' : tracedPct >= 50 ? '⚠️' : '🔴'} Funds Lineage Analysis
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">
+                                              <div className="text-zinc-600 ml-3">
                                                 {tracedPct.toFixed(2)}% of {fmtCurrency(totalAmt)} traced to origin
                                               </div>
                                               
                                               {/* Key Metrics - bullet points under lineage */}
                                               {lineageSummary && (
-                                                <div className="ml-3 mt-2 space-y-1 text-brand-ink-secondary">
+                                                <div className="ml-3 mt-2 space-y-1 text-zinc-600">
                                                   <div>• <span className="font-medium">Total Amount to be Traced:</span> {fmtCurrency(totalAmt)}</div>
                                                   <div>• <span className="font-medium">Traced to Origin:</span> {fmtCurrency(tracedAmt)} ({tracedPct.toFixed(2)}%)</div>
-                                                  <div>• <span className="font-medium text-status-warning-700">Untraced Total:</span> <span className="text-status-warning-700">{fmtCurrency(untracedAmt)} ({untracedPct.toFixed(2)}%)</span></div>
+                                                  <div>• <span className="font-medium text-amber-700">Untraced Total:</span> <span className="text-amber-700">{fmtCurrency(untracedAmt)} ({untracedPct.toFixed(2)}%)</span></div>
                                                   <div>• <span className="font-medium">Statement Period:</span> {(() => {
                                                     const days = lineageSummary.accumulationPeriodDays || 0;
                                                     if (days === 0) return 'N/A';
@@ -743,10 +743,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                             </>
                                           ) : isUntracedFunds ? (
                                             <>
-                                              <div className="font-semibold text-status-warning-700">
+                                              <div className="font-semibold text-amber-700">
                                                 ⚠️ Untraced Funds
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">
+                                              <div className="text-zinc-600 ml-3">
                                                 {(() => {
                                                   // Parse the amount and date from the issue text
                                                   const match = diff.issue?.match(/£([\d,]+(?:\.\d+)?)\s+on\s+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/);
@@ -765,29 +765,29 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                                   return `Untraced: £${amount} on ${formattedDate}, Transaction ID: ${txnId}`;
                                                 })()}
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3 italic">{diff.found || diff.description || 'Source unknown'}</div>
+                                              <div className="text-zinc-600 ml-3 italic">{diff.found || diff.description || 'Source unknown'}</div>
                                             </>
                                           ) : isFundsDiscrepancy ? (
                                             <>
-                                              <div className="font-semibold text-status-danger-700">
+                                              <div className="font-semibold text-red-700">
                                                 🔴 Funds Discrepancy
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">
+                                              <div className="text-zinc-600 ml-3">
                                                 {diff.issue}
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">
+                                              <div className="text-zinc-600 ml-3">
                                                 {diff.expected}
                                               </div>
-                                              <div className="text-status-danger-700 ml-3 font-semibold">
+                                              <div className="text-red-700 ml-3 font-semibold">
                                                 → {diff.found}
                                               </div>
                                             </>
                                           ) : isStatementGap ? (
                                             <>
-                                              <div className="font-semibold text-primary-600">
+                                              <div className="font-semibold text-zinc-700">
                                                 📋 Additional Statements Required
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">
+                                              <div className="text-zinc-600 ml-3">
                                                 {(() => {
                                                   const match = diff.issue?.match(/£([\d,]+(?:\.\d+)?)\s+on\s+(\d{4}-\d{2}-\d{2})/);
                                                   const amount = match ? match[1] : diff.amount || '0';
@@ -803,28 +803,28 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                                   return `£${amount} on ${formattedDate} (ID: ${txnId})`;
                                                 })()}
                                               </div>
-                                              <div className="text-primary-500 ml-3 font-medium">
+                                              <div className="text-zinc-500 ml-3 font-medium">
                                                 → {diff.expected || `Need statements from ${diff.gap_account || 'source account'}`}
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3 italic">{diff.found || 'Transfer identified but source account statements needed'}</div>
+                                              <div className="text-zinc-600 ml-3 italic">{diff.found || 'Transfer identified but source account statements needed'}</div>
                                             </>
                                           ) : isStatementCoverage ? (
                                             <>
-                                              <div className="font-semibold text-brand-ink-secondary">
+                                              <div className="font-semibold text-zinc-600">
                                                 📅 Statement Coverage
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">{diff.found}</div>
+                                              <div className="text-zinc-600 ml-3">{diff.found}</div>
                                             </>
                                           ) : (
                                             <>
-                                              <div className="font-semibold text-status-warning-700">
+                                              <div className="font-semibold text-amber-700">
                                                 {diff.severity === 'missing' ? '🔴 Missing' : '⚠️ Mismatch'}: {diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                                               </div>
-                                              <div className="text-brand-ink-secondary ml-3">{diff.issue} (from {shortDocName})</div>
+                                              <div className="text-zinc-600 ml-3">{diff.issue} (from {shortDocName})</div>
                                             </>
                                           )}
                                           {diff.accepted && (
-                                            <div className="text-status-success-700 ml-3 mt-1">
+                                            <div className="text-green-700 ml-3 mt-1">
                                               ✅ Accepted by {diff.accepted_by} on {new Date(diff.accepted_at).toLocaleDateString('en-GB')}
                                             </div>
                                           )}
@@ -838,12 +838,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               {/* ISSUES SECTION (for non-document-specific issues like unknown source types) */}
                               {(!evidence.document_verification.differences || evidence.document_verification.differences.length === 0) && 
                                evidence.document_verification.issues && evidence.document_verification.issues.length > 0 && (
-                                <div className="bg-status-warning-50 border border-status-warning-200 rounded p-2 mb-2">
-                                  <div className="font-semibold text-status-warning-900 mb-1">📋 Specific Differences Identified:</div>
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                                  <div className="font-semibold text-amber-700 mb-1">📋 Specific Differences Identified:</div>
                                   <div className="space-y-1">
                                     {evidence.document_verification.issues.map((issue: string, iidx: number) => (
                                       <div key={iidx} className="text-xs bg-white rounded p-1 border border-status-warning-100">
-                                        <div className="font-semibold text-status-warning-700">
+                                        <div className="font-semibold text-amber-700">
                                           ⚠️ Issue: {issue}
                                         </div>
                                       </div>
@@ -856,30 +856,30 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               {((evidence.transactions && evidence.transactions.length > 0) || 
                                 (evidence.funds_lineage_verified || evidence.lineage_summary)) && 
                                evidence.document_verification.manual_review_status && (
-                                <div className={`${evidence.document_verification.manual_review_status === 'accepted' ? 'bg-status-success-50 border-status-success-200' : 'bg-primary-50 border-primary-200'} border rounded p-2 mb-2`}>
+                                <div className={`${evidence.document_verification.manual_review_status === 'accepted' ? 'bg-green-50 border-green-200' : 'bg-zinc-50 border-zinc-200'} border rounded p-2 mb-2`}>
                                   <div className="text-xs">
                                     {evidence.document_verification.manual_review_status === 'accepted' ? (
                                       <>
-                                        <div className="font-semibold text-status-success-700 text-sm mb-1">✅ VERIFIED - Claim Complete</div>
+                                        <div className="font-semibold text-green-700 text-sm mb-1">✅ VERIFIED - Claim Complete</div>
                                         <div className="ml-2 space-y-0.5">
-                                          <div className="text-status-success-700 font-medium">
+                                          <div className="text-green-700 font-medium">
                                             {evidence.document_verification.verification_note || 'Marked as verified post user acceptance of differences'}
                                           </div>
                                           {evidence.document_verification.manually_accepted_by && (
-                                            <div className="text-brand-ink-secondary">Accepted by: {evidence.document_verification.manually_accepted_by}</div>
+                                            <div className="text-zinc-600">Accepted by: {evidence.document_verification.manually_accepted_by}</div>
                                           )}
                                           {evidence.document_verification.manually_accepted_at && (
-                                            <div className="text-brand-ink-secondary">Date: {new Date(evidence.document_verification.manually_accepted_at).toLocaleString('en-GB')}</div>
+                                            <div className="text-zinc-600">Date: {new Date(evidence.document_verification.manually_accepted_at).toLocaleString('en-GB')}</div>
                                           )}
                                           {evidence.document_verification.acceptance_reason && (
-                                            <div className="text-brand-ink-secondary italic mt-1">Reason: {evidence.document_verification.acceptance_reason}</div>
+                                            <div className="text-zinc-600 italic mt-1">Reason: {evidence.document_verification.acceptance_reason}</div>
                                           )}
                                         </div>
                                       </>
                                     ) : (
                                       <>
-                                        <div className="font-semibold text-primary-600">Manual Review Status:</div>
-                                        <div className="ml-2 text-status-warning-700">⏳ Pending Manual Review</div>
+                                        <div className="font-semibold text-zinc-700">Manual Review Status:</div>
+                                        <div className="ml-2 text-amber-700">⏳ Pending Manual Review</div>
                                       </>
                                     )}
                                   </div>
@@ -918,11 +918,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                         }
                                       }
                                     }}
-                                    className="px-3 py-1.5 bg-primary-700 hover:bg-primary-800 text-white text-xs font-medium rounded transition-colors"
+                                    className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-900 text-white text-xs font-medium rounded transition-colors"
                                   >
                                     ✓ Accept Differences
                                   </button>
-                                  <p className="text-xs text-brand-ink-secondary mt-1 italic">
+                                  <p className="text-xs text-zinc-600 mt-1 italic">
                                     Review the differences above and click to accept if satisfied upon manual review
                                   </p>
                                 </div>
@@ -944,7 +944,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               <div>• Date: {formatDate(txn.date)}</div>
                               <div>• Transaction: {txn.description || 'N/A'}</div>
                               <div>• Counterparty: {txn.counterparty || 'Not specified'}</div>
-                              <div className="ml-2 text-brand-ink font-semibold mt-1">
+                              <div className="ml-2 text-zinc-900 font-semibold mt-1">
                                 ⚠️ REQUIRES: Source documentation to prove legitimacy
                               </div>
                             </div>
@@ -954,7 +954,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     </div>
                   ) : hasDocs ? (
                     <div>
-                      <div className="font-medium text-status-warning-700">⚠️ Claim {idx + 1} ({evidence.claim_source}): DOCUMENT VERIFIED - BANK PAYMENT REQUIRED</div>
+                      <div className="font-medium text-amber-700">⚠️ Claim {idx + 1} ({evidence.claim_source}): DOCUMENT VERIFIED - BANK PAYMENT REQUIRED</div>
                       
                       {/* DEBUG: Log what we have */}
                       {console.log('=== V17 DEBUG: Claim', idx + 1, '===', {
@@ -1004,11 +1004,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 <div>
                                   • Amount: £{Number(docAmount).toLocaleString()}
                                   {amountMatches ? (
-                                    <span className="text-status-success-700 font-semibold ml-2">✓ Matches SoF claim</span>
+                                    <span className="text-green-700 font-semibold ml-2">✓ Matches SoF claim</span>
                                   ) : claimAmount && Number(docAmount) > Number(claimAmount) ? (
-                                    <span className="text-status-success-700 font-semibold ml-2">✓ Higher than SoF claim (£{Number(claimAmount).toLocaleString()})</span>
+                                    <span className="text-green-700 font-semibold ml-2">✓ Higher than SoF claim (£{Number(claimAmount).toLocaleString()})</span>
                                   ) : claimAmount ? (
-                                    <span className="text-status-warning-700 font-semibold ml-2">⚠️ Lower than SoF claim (£{Number(claimAmount).toLocaleString()})</span>
+                                    <span className="text-amber-700 font-semibold ml-2">⚠️ Lower than SoF claim (£{Number(claimAmount).toLocaleString()})</span>
                                   ) : null}
                                 </div>
                               )}
@@ -1018,9 +1018,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 <div>
                                   • Date: {docDate}
                                   {dateMatches ? (
-                                    <span className="text-status-success-700 font-semibold ml-2">✓ Matches SoF claim</span>
+                                    <span className="text-green-700 font-semibold ml-2">✓ Matches SoF claim</span>
                                   ) : claimDate ? (
-                                    <span className="text-status-warning-700 font-semibold ml-2">⚠️ Differs from SoF claim ({claimDate})</span>
+                                    <span className="text-amber-700 font-semibold ml-2">⚠️ Differs from SoF claim ({claimDate})</span>
                                   ) : null}
                                 </div>
                               )}
@@ -1040,9 +1040,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 <div>
                                   • {extracted.vendor_name ? 'Vendor' : 'Beneficiary'}: {docBeneficiary}
                                   {beneficiaryMatches ? (
-                                    <span className="text-status-success-700 font-semibold ml-2">✓ Matches client name</span>
+                                    <span className="text-green-700 font-semibold ml-2">✓ Matches client name</span>
                                   ) : clientName ? (
-                                    <span className="text-status-warning-700 font-semibold ml-2">⚠️ Does not match client name ({clientName})</span>
+                                    <span className="text-amber-700 font-semibold ml-2">⚠️ Does not match client name ({clientName})</span>
                                   ) : null}
                                 </div>
                               )}
@@ -1072,9 +1072,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             </>
                           );
                         })() : (
-                          <div className="text-status-warning-700">
+                          <div className="text-amber-700">
                             <div>⚠️ Document verified but detailed extraction data not available</div>
-                            <div className="text-xs text-brand-ink-tertiary mt-1">
+                            <div className="text-xs text-zinc-400 mt-1">
                               Debug: verification_details keys: {JSON.stringify(Object.keys(evidence.document_verification?.verification_details || {}))}
                             </div>
                           </div>
@@ -1083,22 +1083,22 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       
                       {/* Document Verification Status */}
                       <div className="ml-6 mt-2 text-xs">
-                        <div className="text-status-success-700 font-semibold">
+                        <div className="text-green-700 font-semibold">
                           ✅ DOCUMENT VERIFICATION COMPLETE
                         </div>
                       </div>
                       
                       {/* Missing Bank Transaction Warning */}
-                      <div className="ml-6 mt-2 bg-status-warning-50 border border-status-warning-200 rounded p-3">
-                        <div className="flex items-center gap-2 font-semibold text-status-warning-700 mb-2">
+                      <div className="ml-6 mt-2 bg-amber-50 border border-amber-200 rounded p-3">
+                        <div className="flex items-center gap-2 font-semibold text-amber-700 mb-2">
                           <span>⚠️</span>
                           <span>Action Required:</span>
                         </div>
                         <div className="flex items-start gap-2">
-                          <span className="text-status-warning-700 mt-0.5">•</span>
+                          <span className="text-amber-700 mt-0.5">•</span>
                           <div>
-                            <div className="font-medium text-status-warning-700">Missing: Bank Transaction</div>
-                            <div className="text-brand-ink-secondary">No matching deposit found in bank statement for £{evidence.expected_amount?.toLocaleString() || 'N/A'}</div>
+                            <div className="font-medium text-amber-700">Missing: Bank Transaction</div>
+                            <div className="text-zinc-600">No matching deposit found in bank statement for £{evidence.expected_amount?.toLocaleString() || 'N/A'}</div>
                           </div>
                         </div>
                       </div>
@@ -1117,7 +1117,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {/* Transaction Review Summary */}
         {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
           <div>
-            <h5 className="font-semibold text-brand-ink mb-2">Automated Transaction Monitoring:</h5>
+            <h5 className="font-semibold text-zinc-900 mb-2">Automated Transaction Monitoring:</h5>
             <p className="text-sm mb-2">
               System identified {result.transaction_review_summary.total_alerts} alert(s): 
               {' '}{result.transaction_review_summary.critical_alerts} CRITICAL, 
@@ -1136,13 +1136,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             )}
             {Object.keys(alertSatisfied).some(key => alertSatisfied[parseInt(key)]) && (
               <>
-                <p className="text-sm font-medium mt-2 mb-1 text-status-success-700">✓ Satisfied Alerts:</p>
+                <p className="text-sm font-medium mt-2 mb-1 text-green-700">✓ Satisfied Alerts:</p>
                 <ul className="ml-4 space-y-1 text-sm mb-2">
                   {(result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details || []).map((alert, idx) => (
                     alertSatisfied[idx] && (
-                      <li key={idx} className="text-status-success-700">
+                      <li key={idx} className="text-green-700">
                         • Alert {idx + 1}: {alert.reasons?.[0] || 'AML concern'} 
-                        {alertRationales[idx] && <span className="text-brand-ink-secondary ml-2">({alertRationales[idx]})</span>}
+                        {alertRationales[idx] && <span className="text-zinc-600 ml-2">({alertRationales[idx]})</span>}
                       </li>
                     )
                   ))}
@@ -1156,12 +1156,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {/* Document Verification Summary */}
         {result.document_verification && (
           <div>
-            <h5 className="font-semibold text-brand-ink mb-2">📋 Document Verification:</h5>
+            <h5 className="font-semibold text-zinc-900 mb-2">📋 Document Verification:</h5>
             <p className="text-sm mb-1">
               Overall verification rate: <span className={`font-bold ${
-                result.document_verification.overall_verification_rate >= 0.75 ? 'text-status-success-700'
-                : result.document_verification.overall_verification_rate >= 0.5 ? 'text-status-warning-700' 
-                : 'text-status-danger-700'
+                result.document_verification.overall_verification_rate >= 0.75 ? 'text-green-700'
+                : result.document_verification.overall_verification_rate >= 0.5 ? 'text-amber-700' 
+                : 'text-red-700'
               }`}>{Math.round(result.document_verification.overall_verification_rate * 100)}%</span>
             </p>
             {result.document_verification.verifications && result.document_verification.verifications.length > 0 ? (
@@ -1170,17 +1170,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   <div key={idx} className="ml-2">
                     {ver.verified ? '✅' : '❌'} {ver.claim_source || ver.document_type || `Document ${idx + 1}`}
                     {ver.confidence !== undefined && (
-                      <span className="text-brand-ink-tertiary ml-1">(confidence: {Math.round((ver.confidence || 0) * 100)}%)</span>
+                      <span className="text-zinc-400 ml-1">(confidence: {Math.round((ver.confidence || 0) * 100)}%)</span>
                     )}
                     {ver.issues && ver.issues.length > 0 && (
-                      <span className="text-status-warning-700 ml-1">— {ver.issues[0]}</span>
+                      <span className="text-amber-700 ml-1">— {ver.issues[0]}</span>
                     )}
                   </div>
                 ))}
               </div>
             ) : (
               result.document_verification.missing_documents && result.document_verification.missing_documents.length > 0 && (
-                <div className="text-sm text-status-warning-700 mt-1">
+                <div className="text-sm text-amber-700 mt-1">
                   {result.document_verification.missing_documents.map((msg: string, idx: number) => (
                     <div key={idx} className="ml-2">⚠️ {msg}</div>
                   ))}
@@ -1193,32 +1193,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {/* Document Verification Summary (inline) */}
         {docVerificationSummary && docVerificationSummary.total_documents > 0 && (
           <div>
-            <h5 className="font-semibold text-brand-ink mb-2">Document Verification:</h5>
+            <h5 className="font-semibold text-zinc-900 mb-2">Document Verification:</h5>
             <div className="flex items-center gap-3 mb-2">
               <span className="text-sm">
                 {docVerificationSummary.total_documents} document{docVerificationSummary.total_documents !== 1 ? 's' : ''} checked
               </span>
               {docVerificationSummary.has_blocking_issues ? (
-                <span className="px-2 py-0.5 text-xs font-bold rounded bg-status-danger-100 text-status-danger-700 border border-status-danger-200">BLOCKED</span>
+                <span className="px-2 py-0.5 text-xs font-bold rounded bg-red-100 text-red-700 border border-red-200">BLOCKED</span>
               ) : docVerificationSummary.suspicious_count > 0 ? (
-                <span className="px-2 py-0.5 text-xs font-bold rounded bg-status-warning-100 text-status-warning-700 border border-status-warning-200">REVIEW</span>
+                <span className="px-2 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-700 border border-amber-200">REVIEW</span>
               ) : (
-                <span className="px-2 py-0.5 text-xs font-bold rounded bg-status-success-100 text-status-success-700 border border-status-success-200">VERIFIED</span>
+                <span className="px-2 py-0.5 text-xs font-bold rounded bg-green-100 text-green-700 border border-green-200">VERIFIED</span>
               )}
             </div>
             {(docVerificationSummary.verifications || []).map((v: any, idx: number) => {
               const verdictIcon = v.verdict === 'Verified' ? '✅' : v.verdict === 'Suspicious' ? '⚠️' : '🚫';
               const verdictLabel = v.verdict === 'Verified' ? 'Passed' : v.verdict === 'Suspicious' ? 'Needs review' : 'Failed';
-              const verdictColor = v.verdict === 'Verified' ? 'text-status-success-700'
-                : v.verdict === 'Suspicious' ? 'text-status-warning-700' : 'text-status-danger-700';
+              const verdictColor = v.verdict === 'Verified' ? 'text-green-700'
+                : v.verdict === 'Suspicious' ? 'text-amber-700' : 'text-red-700';
               return (
                 <div key={idx} className="text-sm ml-2 mb-1">
                   <span>{verdictIcon} {v.filename}: <span className={`font-semibold ${verdictColor}`}>{verdictLabel}</span></span>
-                  {v.admin_override && <span className="ml-1 text-xs text-primary-500">[Admin Override]</span>}
+                  {v.admin_override && <span className="ml-1 text-xs text-zinc-500">[Admin Override]</span>}
                 </div>
               );
             })}
-            <p className="text-sm italic mt-1 text-brand-ink-tertiary">Full verification details available below.</p>
+            <p className="text-sm italic mt-1 text-zinc-400">Full verification details available below.</p>
           </div>
         )}
       </div>
@@ -1255,15 +1255,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
   const renderClientInfoSection = (content: string) => {
     return (
-      <div key="client-info" className="bg-white border border-brand-muted rounded-card overflow-hidden">
+      <div key="client-info" className="bg-white border border-zinc-200 rounded-md overflow-hidden">
         {/* Header */}
-        <div className="bg-brand-surface-alt border-b border-brand-muted px-6 py-4">
-          <h3 className="text-lg font-bold text-brand-ink">👤 Client Information</h3>
+        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-zinc-900">👤 Client Information</h3>
         </div>
         
         {/* Client Details */}
         <div className="px-6 py-4">
-          <pre className="whitespace-pre-wrap text-sm text-brand-ink font-mono">{content}</pre>
+          <pre className="whitespace-pre-wrap text-sm text-zinc-900 font-mono">{content}</pre>
         </div>
       </div>
     );
@@ -1284,31 +1284,31 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     const isPartial = displayStatus.includes('⚠️') || displayStatus.includes('Partial');
     
     return (
-      <div key="sof" className="bg-white border border-brand-muted rounded-card overflow-hidden">
+      <div key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden">
         {/* Header */}
-        <div className="bg-brand-surface-alt border-b border-brand-muted px-6 py-4">
-          <h3 className="text-lg font-bold text-brand-ink">📊 Source of Funds Analysis</h3>
+        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-zinc-900">📊 Source of Funds Analysis</h3>
         </div>
         
         {/* Status Lines */}
-        <div className="bg-primary-50 border-b border-primary-200 px-6 py-4">
+        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
           {bankStatus && (
-            <p className="font-semibold mb-2 text-brand-ink">
+            <p className="font-semibold mb-2 text-zinc-900">
               {bankStatus}
             </p>
           )}
           {docStatus && (
             <div>
-              <p className="font-semibold text-brand-ink mb-1">{docStatus}</p>
+              <p className="font-semibold text-zinc-900 mb-1">{docStatus}</p>
               {content.includes('Bank payments alone are INSUFFICIENT') && (
-                <p className="text-sm text-brand-ink italic ml-4">
+                <p className="text-sm text-zinc-900 italic ml-4">
                   Bank payments alone are INSUFFICIENT for AML compliance.
                 </p>
               )}
             </div>
           )}
           {!bankStatus && overallStatus && (
-            <p className="font-semibold text-brand-ink">
+            <p className="font-semibold text-zinc-900">
               {overallStatus}
             </p>
           )}
@@ -1316,14 +1316,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         
         {/* Claims Table */}
         <div className="px-6 py-4">
-          <h4 className="text-sm font-bold text-brand-ink-secondary mb-3">Claim-by-Claim Analysis</h4>
+          <h4 className="text-sm font-bold text-zinc-600 mb-3">Claim-by-Claim Analysis</h4>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-brand-muted">
-              <thead className="bg-brand-surface-alt">
+              <thead className="bg-zinc-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Claim</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Outreach Questions</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Summary</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Claim</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Outreach Questions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Summary</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-brand-muted">
@@ -1343,44 +1343,44 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const requiresReview = hasDocVerificationAttempt && !fullyVerified;
                   
                   return (
-                    <tr key={idx} className="hover:bg-brand-surface-alt">
-                      <td className="px-4 py-3 text-sm text-brand-ink font-medium">
+                    <tr key={idx} className="hover:bg-zinc-50">
+                      <td className="px-4 py-3 text-sm text-zinc-900 font-medium">
                         {claim.source_type} £{claim.expected_amount.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {fullyVerified ? (
-                          <div className="text-status-success-700">
+                          <div className="text-green-700">
                             <div>✓ Verified</div>
                             {evidence?.document_verification?.verification_details?.document_used?.filename && (
-                              <div className="text-xs text-brand-ink-secondary mt-1">
+                              <div className="text-xs text-zinc-600 mt-1">
                                 Doc: {evidence.document_verification.verification_details.document_used.filename.slice(0, 30)}{evidence.document_verification.verification_details.document_used.filename.length > 30 ? '...' : ''}
                               </div>
                             )}
                           </div>
                         ) : manuallyAccepted ? (
-                          <div className="text-status-success-700 text-xs">
+                          <div className="text-green-700 text-xs">
                             <div>✓ Verified via manual acceptance</div>
                           </div>
                         ) : document_verified ? (
-                          <div className="text-brand-ink">
+                          <div className="text-zinc-900">
                             {evidence?.document_verification?.verification_details?.document_used?.filename && (
                               <div className="text-sm">
                                 📄 {evidence.document_verification.verification_details.document_used.filename.slice(0, 25)}{evidence.document_verification.verification_details.document_used.filename.length > 25 ? '...' : ''}
                               </div>
                             )}
                             {evidence?.issues && evidence.issues.length > 0 && (
-                              <div className="text-xs text-status-warning-700 mt-1 space-y-0.5">
+                              <div className="text-xs text-amber-700 mt-1 space-y-0.5">
                                 {evidence.issues.slice(0, 3).map((issue: string, issueIdx: number) => (
                                   <div key={issueIdx}>⚠️ {issue}</div>
                                 ))}
                                 {evidence.issues.length > 3 && (
-                                  <div className="text-brand-ink-tertiary">+ {evidence.issues.length - 3} more issues</div>
+                                  <div className="text-zinc-400">+ {evidence.issues.length - 3} more issues</div>
                                 )}
                               </div>
                             )}
                           </div>
                         ) : verified ? (
-                          <span className="text-brand-ink">
+                          <span className="text-zinc-900">
                             Request {
                               claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
                               claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
@@ -1390,7 +1390,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             }
                           </span>
                         ) : (
-                          <span className="text-brand-ink">
+                          <span className="text-zinc-900">
                             Request {
                               claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
                               claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
@@ -1406,12 +1406,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           <div className="space-y-1">
                             {manuallyAccepted ? (
                               <>
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-badge text-xs font-medium bg-status-success-100 text-status-success-700">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
                                   ✅ VERIFIED (following acceptance of differences)
                                 </span>
-                                <div className="bg-status-success-50 rounded p-2 mt-1 text-xs">
-                                  <div className="text-status-success-700 font-semibold mb-1">Acceptance Details:</div>
-                                  <div className="text-brand-ink-secondary">
+                                <div className="bg-green-50 rounded p-2 mt-1 text-xs">
+                                  <div className="text-green-700 font-semibold mb-1">Acceptance Details:</div>
+                                  <div className="text-zinc-600">
                                     <div>• Accepted by: {evidence?.document_verification?.manually_accepted_by || 'User'}</div>
                                     <div>• Date: {evidence?.document_verification?.manually_accepted_at 
                                       ? new Date(evidence.document_verification.manually_accepted_at).toLocaleString('en-GB', {
@@ -1426,19 +1426,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               </>
                             ) : (
                               <>
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-badge text-xs font-medium bg-status-success-100 text-status-success-700">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
                                   ✅ FULLY VERIFIED
                                 </span>
                                 {/* Show verified data summary */}
                                 {evidence?.document_verification?.verification_details?.extracted_data && (
-                                  <div className="bg-status-success-50 rounded p-2 mt-1 text-xs">
+                                  <div className="bg-green-50 rounded p-2 mt-1 text-xs">
                                     {Object.entries(evidence.document_verification.verification_details.extracted_data)
                                       .filter(([key]) => ['payment_amount', 'net_proceeds', 'completion_date', 'deceased_name', 'payment_date'].includes(key))
                                       .slice(0, 3)
                                       .map(([key, value]: [string, any]) => (
                                         <div key={key} className="flex justify-between py-0.5">
-                                          <span className="text-status-success-700">{key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span>
-                                          <span className="text-status-success-900 font-medium ml-2">
+                                          <span className="text-green-700">{key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span>
+                                          <span className="text-green-700 font-medium ml-2">
                                             {typeof value === 'number' ? `£${value.toLocaleString()}` : String(value).slice(0, 20)}
                                           </span>
                                         </div>
@@ -1451,11 +1451,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           </div>
                         ) : requiresReview ? (
                           <div className="text-sm space-y-1">
-                            <div className="text-status-warning-700 font-semibold mb-1">
+                            <div className="text-amber-700 font-semibold mb-1">
                               ⚠️ Review Required
                             </div>
                             {/* Simplified: Just show bullet points of what's missing/different */}
-                            <ul className="list-disc list-inside text-xs text-brand-ink-secondary space-y-0.5">
+                            <ul className="list-disc list-inside text-xs text-zinc-600 space-y-0.5">
                               {evidence?.document_verification?.differences && evidence.document_verification.differences.length > 0 ? (
                                 evidence.document_verification.differences.map((diff: any, diffIdx: number) => (
                                   <li key={diffIdx}>
@@ -1463,8 +1463,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     {/* Show full details for funds_discrepancy */}
                                     {diff.field === 'funds_discrepancy' && (
                                       <div className="ml-4 mt-1 text-xs space-y-0.5">
-                                        <div className="text-brand-ink-secondary">{diff.expected}</div>
-                                        <div className="text-status-danger-700 font-medium">→ {diff.found}</div>
+                                        <div className="text-zinc-600">{diff.expected}</div>
+                                        <div className="text-red-700 font-medium">→ {diff.found}</div>
                                       </div>
                                     )}
                                   </li>
@@ -1479,11 +1479,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             </ul>
                           </div>
                         ) : verified ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-badge text-xs font-medium bg-primary-200 text-brand-ink">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-zinc-200 text-zinc-900">
                             ⚠️ Payment found, docs req'd
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-badge text-xs font-medium bg-status-danger-100 text-status-danger-700">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
                             ❌ MISSING
                           </span>
                         )}
@@ -1508,38 +1508,38 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     const hasCritical = overallStatus.includes('CRITICAL') || content.includes('CRITICAL');
     
     return (
-      <div key="tr" className="bg-white border border-brand-muted rounded-card overflow-hidden">
+      <div key="tr" className="bg-white border border-zinc-200 rounded-md overflow-hidden">
         {/* Header */}
-        <div className="bg-brand-surface-alt border-b border-brand-muted px-6 py-4">
-          <h3 className="text-lg font-bold text-brand-ink">🚨 Automated Transaction Review</h3>
+        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-zinc-900">🚨 Automated Transaction Review</h3>
         </div>
         
         {/* Overall Status */}
-        <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-status-danger-50 border-status-danger-200' : 'bg-primary-50 border-primary-200'}`}>
-          <p className={`font-semibold ${hasCritical ? 'text-status-danger-900' : 'text-brand-ink'}`}>
+        <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-red-50 border-red-200' : 'bg-zinc-50 border-zinc-200'}`}>
+          <p className={`font-semibold ${hasCritical ? 'text-red-700' : 'text-zinc-900'}`}>
             {overallStatus}
           </p>
         </div>
         
         {/* Alert Stats */}
         {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
-          <div className="px-6 py-4 border-b border-brand-muted">
+          <div className="px-6 py-4 border-b border-zinc-200">
             <div className="grid grid-cols-4 gap-4">
-              <div className="bg-primary-100 rounded-card p-3 text-center">
-                <div className="text-2xl font-bold text-brand-ink">{result.transaction_review_summary.total_alerts}</div>
-                <div className="text-xs text-brand-ink-secondary mt-1">Total Alerts</div>
+              <div className="bg-zinc-100 rounded-md p-3 text-center">
+                <div className="text-2xl font-bold text-zinc-900">{result.transaction_review_summary.total_alerts}</div>
+                <div className="text-xs text-zinc-600 mt-1">Total Alerts</div>
               </div>
-              <div className="bg-status-danger-100 rounded-card p-3 text-center">
-                <div className="text-2xl font-bold text-status-danger-700">{result.transaction_review_summary.critical_alerts}</div>
-                <div className="text-xs text-status-danger-700 mt-1">Critical</div>
+              <div className="bg-red-100 rounded-md p-3 text-center">
+                <div className="text-2xl font-bold text-red-700">{result.transaction_review_summary.critical_alerts}</div>
+                <div className="text-xs text-red-700 mt-1">Critical</div>
               </div>
-              <div className="bg-primary-200 rounded-card p-3 text-center">
-                <div className="text-2xl font-bold text-brand-ink">{result.transaction_review_summary.high_alerts}</div>
-                <div className="text-xs text-brand-ink-secondary mt-1">High</div>
+              <div className="bg-zinc-200 rounded-md p-3 text-center">
+                <div className="text-2xl font-bold text-zinc-900">{result.transaction_review_summary.high_alerts}</div>
+                <div className="text-xs text-zinc-600 mt-1">High</div>
               </div>
-              <div className="bg-primary-50 rounded-card p-3 text-center">
-                <div className="text-2xl font-bold text-brand-ink">{result.transaction_review_summary.medium_alerts}</div>
-                <div className="text-xs text-brand-ink-secondary mt-1">Medium</div>
+              <div className="bg-zinc-50 rounded-md p-3 text-center">
+                <div className="text-2xl font-bold text-zinc-900">{result.transaction_review_summary.medium_alerts}</div>
+                <div className="text-xs text-zinc-600 mt-1">Medium</div>
               </div>
             </div>
           </div>
@@ -1548,17 +1548,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         {/* Alert Table or No Alerts Message */}
         {result.transaction_review_summary && (result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details) && (result.transaction_review_summary.alerts?.length > 0 || result.transaction_review_summary.alert_details?.length > 0) ? (
           <div className="px-6 py-4">
-            <h4 className="text-sm font-bold text-brand-ink-secondary mb-3">Alert Analysis</h4>
+            <h4 className="text-sm font-bold text-zinc-600 mb-3">Alert Analysis</h4>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-brand-muted">
-                <thead className="bg-brand-surface-alt">
+                <thead className="bg-zinc-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Severity</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Issue Identified</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Transaction Details</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Alert Rationale</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Alert Satisfied</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">Summary</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Severity</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Issue Identified</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Transaction Details</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Alert Rationale</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Alert Satisfied</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Summary</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-brand-muted">
@@ -1571,32 +1571,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     const narrative = txn.narrative || alert.counterparty || '';
                     
                     return (
-                      <tr key={idx} className="hover:bg-brand-surface-alt">
+                      <tr key={idx} className="hover:bg-zinc-50">
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-badge text-xs font-bold whitespace-nowrap ${
-                            severity === 'CRITICAL' ? 'bg-status-danger-700 text-white' : 'bg-status-warning-500 text-white'
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-bold whitespace-nowrap ${
+                            severity === 'CRITICAL' ? 'bg-red-700 text-white' : 'bg-amber-500 text-white'
                           }`}>
                             <span>{severity === 'CRITICAL' ? '🔴' : '🟠'}</span>
                             <span>{severity}</span>
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-brand-ink">
+                        <td className="px-4 py-3 text-sm text-zinc-900">
                           {alert.reasons && alert.reasons.length > 0 ? alert.reasons[0] : 'AML concern'}
-                          <div className="text-xs text-brand-ink-tertiary mt-1">
+                          <div className="text-xs text-zinc-400 mt-1">
                             {narrative || 'No description'}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-brand-ink">
+                        <td className="px-4 py-3 text-sm text-zinc-900">
                           <div>Amount: £{amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
-                          <div className="text-xs text-brand-ink-tertiary">Date: {date || 'Unknown'}</div>
-                          {narrative && <div className="text-xs text-brand-ink-tertiary">Details: {narrative}</div>}
+                          <div className="text-xs text-zinc-400">Date: {date || 'Unknown'}</div>
+                          {narrative && <div className="text-xs text-zinc-400">Details: {narrative}</div>}
                         </td>
                         <td className="px-4 py-3">
                           <textarea
                             value={alertRationales[idx] || ''}
                             onChange={(e) => setAlertRationales({...alertRationales, [idx]: e.target.value})}
                             placeholder="Enter rationale..."
-                            className="w-full px-2 py-1 text-sm border border-brand-muted rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            className="w-full px-2 py-1 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-500"
                             rows={2}
                           />
                         </td>
@@ -1605,17 +1605,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             type="checkbox"
                             checked={alertSatisfied[idx] || false}
                             onChange={(e) => setAlertSatisfied({...alertSatisfied, [idx]: e.target.checked})}
-                            className="w-5 h-5 text-primary-600 border-brand-muted rounded focus:ring-primary-500"
+                            className="w-5 h-5 text-zinc-700 border-zinc-200 rounded focus:ring-zinc-500"
                           />
                         </td>
                         <td className="px-4 py-3">
                           {alertSatisfied[idx] ? (
                             <div className="space-y-1">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-badge text-xs font-medium whitespace-nowrap bg-status-success-100 text-status-success-700">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-green-100 text-green-700">
                                 <span>✅</span>
                                 <span>SATISFIED</span>
                               </span>
-                              <div className="text-xs text-brand-ink-secondary">
+                              <div className="text-xs text-zinc-600">
                                 <div>By: Current User</div>
                                 <div>Date: {new Date().toLocaleDateString('en-GB')}</div>
                                 {alertRationales[idx] && (
@@ -1624,8 +1624,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               </div>
                             </div>
                           ) : (
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-badge text-xs font-medium whitespace-nowrap ${
-                              severity === 'CRITICAL' ? 'bg-status-danger-100 text-status-danger-700' : 'bg-primary-100 text-brand-ink'
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${
+                              severity === 'CRITICAL' ? 'bg-red-100 text-red-700' : 'bg-zinc-100 text-zinc-900'
                             }`}>
                               <span>{severity === 'CRITICAL' ? '❌' : '⚠️'}</span>
                               <span>{severity === 'CRITICAL' ? 'BLOCKS COMPLETION' : 'REQUIRES REVIEW'}</span>
@@ -1641,7 +1641,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </div>
         ) : (
           <div className="px-6 py-8">
-            <div className="text-center text-brand-ink-tertiary">
+            <div className="text-center text-zinc-400">
               <div className="text-4xl mb-2">✓</div>
               <p className="font-medium">No alerts found within transactions</p>
             </div>
@@ -1659,12 +1659,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-brand-ink">Source of Funds Assessment</h2>
+          <h2 className="text-2xl font-bold text-zinc-900">Source of Funds Assessment</h2>
         </div>
         {status && status.status !== 'no_data' && (
           <button
             onClick={resetAssessment}
-            className="px-4 py-2 text-sm text-status-danger-700 hover:text-status-danger-700 border border-status-danger-200 rounded-button hover:bg-status-danger-50"
+            className="px-4 py-2 text-sm text-red-700 hover:text-red-700 border border-red-200 rounded hover:bg-red-50"
           >
             Reset Assessment
           </button>
@@ -1672,14 +1672,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       </div>
 
       {/* Step Tabs */}
-      <div className="border-b border-brand-muted">
+      <div className="border-b border-zinc-200">
         <div className="flex space-x-8">
           <button
             onClick={() => setActiveStep('upload')}
             className={`py-4 px-1 border-b-2 font-medium text-sm ${
               activeStep === 'upload'
-                ? 'border-primary-500 text-primary-600'
-                : 'border-transparent text-brand-ink-tertiary hover:text-brand-ink-secondary hover:border-brand-muted'
+                ? 'border-zinc-500 text-zinc-700'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:border-zinc-200'
             }`}
           >
             📤 Upload Documents
@@ -1689,10 +1689,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             disabled={!result}
             className={`py-4 px-1 border-b-2 font-medium text-sm ${
               activeStep === 'results'
-                ? 'border-primary-500 text-primary-600'
+                ? 'border-zinc-500 text-zinc-700'
                 : result
-                ? 'border-transparent text-brand-ink-tertiary hover:text-brand-ink-secondary hover:border-brand-muted'
-                : 'border-transparent text-brand-ink-tertiary cursor-not-allowed'
+                ? 'border-transparent text-zinc-400 hover:text-zinc-600 hover:border-zinc-200'
+                : 'border-transparent text-zinc-400 cursor-not-allowed'
             }`}
           >
             📊 Assessment Results
@@ -1706,18 +1706,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {/* Upload Boxes */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Client Info Upload */}
-            <div className="border border-dashed border-brand-muted rounded-card p-6 hover:border-primary-500 transition-colors">
+            <div className="border border-dashed border-zinc-200 rounded-md p-6 hover:border-zinc-500 transition-colors">
               <div className="text-center">
                 <div className="text-4xl mb-3">📋</div>
-                <h3 className="text-lg font-semibold text-brand-ink mb-2">Client Info</h3>
+                <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
                 
                 {/* Show success state if already uploaded */}
                 {status && status.files_summary && status.files_summary.client_info === 'uploaded' ? (
                   <>
-                    <div className="mt-3 text-status-success-700 text-sm font-medium">✓ Uploaded</div>
+                    <div className="mt-3 text-green-700 text-sm font-medium">✓ Uploaded</div>
                     <button
                       onClick={() => setClientInfoInputMethod(null)}
-                      className="mt-2 text-xs text-primary-600 hover:text-primary-700 underline"
+                      className="mt-2 text-xs text-zinc-700 hover:text-zinc-900 underline"
                     >
                       Change
                     </button>
@@ -1725,19 +1725,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 ) : clientInfoInputMethod === null ? (
                   // Initial choice
                   <>
-                    <p className="text-sm text-brand-ink-secondary mb-4">
+                    <p className="text-sm text-zinc-600 mb-4">
                       Choose how to provide client information
                     </p>
                     <div className="space-y-2">
                       <button
                         onClick={() => setClientInfoInputMethod('manual')}
-                        className="w-full px-4 py-2 border-2 border-accent-400 text-brand-ink rounded-md hover:bg-accent-50 font-medium"
+                        className="w-full px-4 py-2 border-2 border-zinc-400 text-zinc-900 rounded-md hover:bg-zinc-50 font-medium"
                       >
                         ✏️ Enter Manually
                       </button>
                       <button
                         onClick={() => setClientInfoInputMethod('file')}
-                        className="w-full px-4 py-2 border border-brand-muted text-brand-ink-secondary rounded-md hover:bg-brand-surface-alt"
+                        className="w-full px-4 py-2 border border-zinc-200 text-zinc-600 rounded-md hover:bg-zinc-50"
                       >
                         📁 Upload File
                       </button>
@@ -1746,7 +1746,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 ) : clientInfoInputMethod === 'file' ? (
                   // File upload mode
                   <>
-                    <p className="text-sm text-brand-ink-secondary mb-4">
+                    <p className="text-sm text-zinc-600 mb-4">
                       Upload CSV, JSON, Word Doc, or PDF
                     </p>
                     <label className="cursor-pointer">
@@ -1757,44 +1757,44 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         className="hidden"
                         disabled={uploadingFiles.client_info}
                       />
-                      <span className="inline-flex items-center px-4 py-2 border border-brand-muted rounded-md text-sm font-medium text-brand-ink-secondary bg-white hover:bg-brand-surface-alt disabled:opacity-50">
+                      <span className="inline-flex items-center px-4 py-2 border border-zinc-200 rounded-md text-sm font-medium text-zinc-600 bg-white hover:bg-zinc-50 disabled:opacity-50">
                         {uploadingFiles.client_info ? 'Uploading...' : 'Choose File'}
                       </span>
                     </label>
                     <button
                       onClick={() => setClientInfoInputMethod(null)}
-                      className="mt-2 text-xs text-brand-ink-secondary hover:text-brand-ink-secondary underline block mx-auto"
+                      className="mt-2 text-xs text-zinc-600 hover:text-zinc-600 underline block mx-auto"
                     >
                       ← Back
                     </button>
                     {errors.client_info && (
-                      <div className="mt-3 text-status-danger-700 text-sm">{errors.client_info}</div>
+                      <div className="mt-3 text-red-700 text-sm">{errors.client_info}</div>
                     )}
                   </>
                 ) : (
                   // Manual input mode
                   <div className="text-left space-y-3 mt-4">
                     <div>
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Client Name *
                       </label>
                       <input
                         type="text"
                         value={manualClientInfo.client_name}
                         onChange={(e) => setManualClientInfo({...manualClientInfo, client_name: e.target.value})}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                         placeholder="ABC Corp Ltd"
                       />
                     </div>
                     
                     <div>
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Risk Rating *
                       </label>
                       <select
                         value={manualClientInfo.client_risk_rating}
                         onChange={(e) => setManualClientInfo({...manualClientInfo, client_risk_rating: e.target.value as any})}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                       >
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
@@ -1803,14 +1803,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     </div>
                     
                     <div>
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Business Sector
                       </label>
                       <input
                         type="text"
                         value={manualClientInfo.business_sector}
                         onChange={(e) => setManualClientInfo({...manualClientInfo, business_sector: e.target.value})}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                         placeholder="Manufacturing"
                       />
                     </div>
@@ -1822,57 +1822,57 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         onChange={(e) => setManualClientInfo({...manualClientInfo, pep_status: e.target.checked})}
                         className="mr-2"
                       />
-                      <label className="text-xs text-brand-ink-secondary">
+                      <label className="text-xs text-zinc-600">
                         Politically Exposed Person (PEP)
                       </label>
                     </div>
                     
                     <div className="border-t pt-3">
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Purchase Amount * (£)
                       </label>
                       <input
                         type="number"
                         value={manualPurchase.amount}
                         onChange={(e) => setManualPurchase({...manualPurchase, amount: e.target.value})}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                         placeholder="500000"
                       />
                     </div>
                     
                     <div>
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Purchase Description
                       </label>
                       <input
                         type="text"
                         value={manualPurchase.description}
                         onChange={(e) => setManualPurchase({...manualPurchase, description: e.target.value})}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                         placeholder="Business acquisition"
                       />
                     </div>
                     
                     <div>
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Expected Payment Date
                       </label>
                       <input
                         type="date"
                         value={manualPurchase.expected_payment_date}
                         onChange={(e) => setManualPurchase({...manualPurchase, expected_payment_date: e.target.value})}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                       />
                     </div>
                     
                     <div>
-                      <label className="block text-xs font-medium text-brand-ink-secondary mb-1">
+                      <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Source of Funds Explanation *
                       </label>
                       <textarea
                         value={manualSofExplanation}
                         onChange={(e) => setManualSofExplanation(e.target.value)}
-                        className="w-full px-3 py-2 border border-brand-muted rounded-md text-sm"
+                        className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm"
                         rows={4}
                         placeholder="Explain where the funds came from (e.g., inheritance, property sale, savings, loan...)"
                       />
@@ -1882,20 +1882,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       <button
                         onClick={handleManualSubmit}
                         disabled={uploadingFiles.client_info}
-                        className="w-full px-4 py-2 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 text-sm font-medium"
+                        className="w-full px-4 py-2 bg-zinc-900 text-white rounded-md hover:bg-zinc-900 disabled:opacity-50 text-sm font-medium"
                       >
                         {uploadingFiles.client_info ? 'Submitting...' : '✓ Submit'}
                       </button>
                       <button
                         onClick={() => setClientInfoInputMethod(null)}
-                        className="w-full text-xs text-brand-ink-secondary hover:text-brand-ink-secondary underline"
+                        className="w-full text-xs text-zinc-600 hover:text-zinc-600 underline"
                       >
                         ← Back
                       </button>
                     </div>
                     
                     {errors.client_info && (
-                      <div className="mt-3 text-status-danger-700 text-xs">{errors.client_info}</div>
+                      <div className="mt-3 text-red-700 text-xs">{errors.client_info}</div>
                     )}
                   </div>
                 )}
@@ -1903,11 +1903,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
 
             {/* Bank Statements Upload */}
-            <div className="border border-dashed border-brand-muted rounded-card p-6 hover:border-primary-500 transition-colors">
+            <div className="border border-dashed border-zinc-200 rounded-md p-6 hover:border-zinc-500 transition-colors">
               <div className="text-center">
                 <div className="text-4xl mb-3">🏦</div>
-                <h3 className="text-lg font-semibold text-brand-ink mb-2">Bank Statements</h3>
-                <p className="text-sm text-brand-ink-secondary mb-4">
+                <h3 className="text-lg font-semibold text-zinc-900 mb-2">Bank Statements</h3>
+                <p className="text-sm text-zinc-600 mb-4">
                   CSV or PDF bank statements (can upload multiple)
                 </p>
                 <label className="cursor-pointer">
@@ -1918,27 +1918,27 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     className="hidden"
                     disabled={uploadingFiles.bank_statement}
                   />
-                  <span className="inline-flex items-center px-4 py-2 border border-brand-muted rounded-md text-sm font-medium text-brand-ink-secondary bg-white hover:bg-brand-surface-alt disabled:opacity-50">
+                  <span className="inline-flex items-center px-4 py-2 border border-zinc-200 rounded-md text-sm font-medium text-zinc-600 bg-white hover:bg-zinc-50 disabled:opacity-50">
                     {uploadingFiles.bank_statement ? 'Uploading...' : 'Choose CSV/PDF'}
                   </span>
                 </label>
                 {status && status.files_summary && status.files_summary.bank_statements_count > 0 && (
-                  <div className="mt-3 text-status-success-700 text-sm font-medium">
+                  <div className="mt-3 text-green-700 text-sm font-medium">
                     ✓ {status.files_summary.bank_statements_count} transaction(s)
                   </div>
                 )}
                 {errors.bank_statement && (
-                  <div className="mt-3 text-status-danger-700 text-sm">{errors.bank_statement}</div>
+                  <div className="mt-3 text-red-700 text-sm">{errors.bank_statement}</div>
                 )}
               </div>
             </div>
 
             {/* Supporting Docs Upload */}
-            <div className="border border-dashed border-brand-muted rounded-card p-6 hover:border-primary-500 transition-colors">
+            <div className="border border-dashed border-zinc-200 rounded-md p-6 hover:border-zinc-500 transition-colors">
               <div className="text-center">
                 <div className="text-4xl mb-3">📄</div>
-                <h3 className="text-lg font-semibold text-brand-ink mb-2">Supporting Docs</h3>
-                <p className="text-sm text-brand-ink-secondary mb-4">
+                <h3 className="text-lg font-semibold text-zinc-900 mb-2">Supporting Docs</h3>
+                <p className="text-sm text-zinc-600 mb-4">
                   PDF documents (probate, completion statements, etc.)
                 </p>
                 <label className="cursor-pointer">
@@ -1949,17 +1949,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     className="hidden"
                     disabled={uploadingFiles.supporting_doc}
                   />
-                  <span className="inline-flex items-center px-4 py-2 border border-brand-muted rounded-md text-sm font-medium text-brand-ink-secondary bg-white hover:bg-brand-surface-alt disabled:opacity-50">
+                  <span className="inline-flex items-center px-4 py-2 border border-zinc-200 rounded-md text-sm font-medium text-zinc-600 bg-white hover:bg-zinc-50 disabled:opacity-50">
                     {uploadingFiles.supporting_doc ? 'Uploading...' : 'Choose PDF'}
                   </span>
                 </label>
                 {status && status.files_summary && status.files_summary.supporting_docs_count > 0 && (
-                  <div className="mt-3 text-status-success-700 text-sm font-medium">
+                  <div className="mt-3 text-green-700 text-sm font-medium">
                     ✓ {status.files_summary.supporting_docs_count} doc(s)
                   </div>
                 )}
                 {errors.supporting_doc && (
-                  <div className="mt-3 text-status-danger-700 text-sm">{errors.supporting_doc}</div>
+                  <div className="mt-3 text-red-700 text-sm">{errors.supporting_doc}</div>
                 )}
               </div>
             </div>
@@ -1967,33 +1967,33 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
           {/* Uploaded Files List */}
           {status && status.uploaded_files.length > 0 && (
-            <div className="bg-white border-2 border-accent-400 rounded-card p-6">
-              <h3 className="text-lg font-bold text-brand-ink mb-4">📎 Uploaded Documents</h3>
+            <div className="bg-white border-2 border-zinc-400 rounded-md p-6">
+              <h3 className="text-lg font-bold text-zinc-900 mb-4">📎 Uploaded Documents</h3>
               <div className="space-y-3">
                 {status.uploaded_files.map((file, idx) => {
                   const verResult = fileVerificationResults[file.filename];
                   const isCSV = file.filename?.toLowerCase().endsWith('.csv');
                   const verdictBadge = verResult ? (
                     verResult.verdict === 'Verified' ? (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-status-success-100 text-status-success-700 border border-status-success-200">
+                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-green-100 text-green-700 border border-green-200">
                         {isCSV ? 'CHECKS PASSED' : 'VERIFIED'}
                       </span>
                     ) : verResult.verdict === 'Suspicious' ? (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-status-warning-100 text-status-warning-700 border border-status-warning-200">NEEDS REVIEW</span>
+                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-700 border border-amber-200">NEEDS REVIEW</span>
                     ) : verResult.verdict === 'LikelyTampered' ? (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-status-danger-100 text-status-danger-700 border border-status-danger-200">FAILED</span>
+                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-red-100 text-red-700 border border-red-200">FAILED</span>
                     ) : null
                   ) : null;
                   return (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-primary-50 rounded-card border border-primary-200">
+                  <div key={idx} className="flex items-center justify-between p-3 bg-zinc-50 rounded-md border border-zinc-200">
                     <div className="flex items-center space-x-3">
-                      <span className="text-2xl text-status-success-700">✓</span>
+                      <span className="text-2xl text-green-700">✓</span>
                       <div>
-                        <div className="font-semibold text-brand-ink flex items-center">
+                        <div className="font-semibold text-zinc-900 flex items-center">
                           {file.filename}
                           {verdictBadge}
                         </div>
-                        <div className="text-sm text-brand-ink-secondary">
+                        <div className="text-sm text-zinc-600">
                           {file.category.replace('_', ' ')} • {file.records_count} record(s)
                         </div>
                       </div>
@@ -2006,7 +2006,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           alert('File removal will be implemented. For now, use Reset Assessment to clear all files.');
                         }
                       }}
-                      className="px-3 py-1 text-sm text-status-danger-700 hover:text-status-danger-700 border border-status-danger-200 rounded hover:bg-status-danger-50"
+                      className="px-3 py-1 text-sm text-red-700 hover:text-red-700 border border-red-200 rounded hover:bg-red-50"
                     >
                       ✕ Remove
                     </button>
@@ -2014,7 +2014,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   );
                 })}
               </div>
-              <div className="mt-4 text-sm text-brand-ink-secondary">
+              <div className="mt-4 text-sm text-zinc-600">
                 💡 Tip: You can add more documents below. All uploaded files will be used in the assessment.
               </div>
             </div>
@@ -2026,7 +2026,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <button
                 onClick={runAssessment}
                 disabled={loading}
-                className="px-8 py-3 bg-primary-700 text-white rounded-button hover:bg-primary-800 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-lg"
+                className="px-8 py-3 bg-zinc-900 text-white rounded hover:bg-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-lg"
               >
                 {loading ? '⏳ Running Assessment...' : '🚀 Run SoF Assessment'}
               </button>
@@ -2034,13 +2034,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           )}
 
           {errors.assessment && (
-            <div className="bg-status-danger-50 border border-status-danger-200 rounded-card p-4 text-status-danger-700">
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 text-red-700">
               <strong>Assessment Error:</strong> {errors.assessment}
             </div>
           )}
 
           {!status || !status.ready_for_assessment && (
-            <div className="bg-primary-50 border border-primary-200 rounded-card p-4 text-brand-ink">
+            <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4 text-zinc-900">
               <strong>Required:</strong> Upload Client Info (JSON) and at least one Bank Statement (CSV/PDF) to run assessment.
             </div>
           )}
@@ -2051,10 +2051,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {activeStep === 'results' && result && (
         <div className="space-y-6">
           {/* Overall Decision Badge with Comprehensive Summary */}
-          <div className={`rounded-card p-6 ${getStatusColor(result.outcome.status)}`}>
+          <div className={`rounded-md p-6 ${getStatusColor(result.outcome.status)}`}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-2xl font-bold mb-2 text-brand-ink">
+                <h3 className="text-2xl font-bold mb-2 text-zinc-900">
                   {result.outcome.status.toUpperCase()}
                 </h3>
               </div>
@@ -2065,9 +2065,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
             
             {/* Comprehensive Assessment Summary */}
-            <div className="mt-4 pt-4 border-t border-brand-muted">
-              <h4 className="text-lg font-semibold mb-3 text-brand-ink">Assessment Summary</h4>
-              <div className="text-brand-ink text-sm leading-relaxed">
+            <div className="mt-4 pt-4 border-t border-zinc-200">
+              <h4 className="text-lg font-semibold mb-3 text-zinc-900">Assessment Summary</h4>
+              <div className="text-zinc-900 text-sm leading-relaxed">
                 {buildComprehensiveSummary(result)}
               </div>
             </div>
@@ -2080,38 +2080,38 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {/* DOCUMENT VERIFICATION SECTION (UNIFIED)                      */}
           {/* ============================================================ */}
           {docVerificationSummary && docVerificationSummary.total_documents > 0 && (
-            <div className="bg-white border border-brand-muted rounded-card p-6">
-              <h3 className="text-lg font-bold text-brand-ink mb-4 flex items-center gap-2">
+            <div className="bg-white border border-zinc-200 rounded-md p-6">
+              <h3 className="text-lg font-bold text-zinc-900 mb-4 flex items-center gap-2">
                 Document Verification
                 {docVerificationSummary.has_blocking_issues ? (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-status-danger-100 text-status-danger-700 border border-status-danger-200">BLOCKED</span>
+                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-red-100 text-red-700 border border-red-200">BLOCKED</span>
                 ) : docVerificationSummary.suspicious_count > 0 ? (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-status-warning-100 text-status-warning-700 border border-status-warning-200">REVIEW</span>
+                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-700 border border-amber-200">REVIEW</span>
                 ) : (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-status-success-100 text-status-success-700 border border-status-success-200">VERIFIED</span>
+                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-green-100 text-green-700 border border-green-200">VERIFIED</span>
                 )}
               </h3>
 
               {/* Summary counts */}
-              <div className="flex items-center flex-wrap gap-4 mb-5 text-sm text-brand-ink-secondary">
+              <div className="flex items-center flex-wrap gap-4 mb-5 text-sm text-zinc-600">
                 <span>{docVerificationSummary.total_documents} document{docVerificationSummary.total_documents !== 1 ? 's' : ''} checked</span>
-                <span className="text-brand-muted">|</span>
+                <span className="text-zinc-200">|</span>
                 {docVerificationSummary.verified_count > 0 && (
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-status-success-500" />
-                    <span className="text-status-success-700 font-medium">{docVerificationSummary.verified_count} passed</span>
+                    <span className="w-2 h-2 rounded-full bg-green-500" />
+                    <span className="text-green-700 font-medium">{docVerificationSummary.verified_count} passed</span>
                   </span>
                 )}
                 {docVerificationSummary.suspicious_count > 0 && (
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-status-warning-500" />
-                    <span className="text-status-warning-700 font-medium">{docVerificationSummary.suspicious_count} need{docVerificationSummary.suspicious_count === 1 ? 's' : ''} review</span>
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    <span className="text-amber-700 font-medium">{docVerificationSummary.suspicious_count} need{docVerificationSummary.suspicious_count === 1 ? 's' : ''} review</span>
                   </span>
                 )}
                 {docVerificationSummary.likely_tampered_count > 0 && (
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-status-danger-500" />
-                    <span className="text-status-danger-700 font-medium">{docVerificationSummary.likely_tampered_count} failed</span>
+                    <span className="w-2 h-2 rounded-full bg-red-500" />
+                    <span className="text-red-700 font-medium">{docVerificationSummary.likely_tampered_count} failed</span>
                   </span>
                 )}
               </div>
@@ -2125,10 +2125,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const isTampered = v.verdict === 'LikelyTampered';
 
                   const verdictConfig = isVerified
-                    ? { label: isCSVDoc ? 'CHECKS PASSED' : 'VERIFIED', sublabel: 'No issues detected', borderClass: 'border-status-success-200', bgClass: 'bg-status-success-50', textClass: 'text-status-success-700', badgeClass: 'bg-status-success-200 text-status-success-900' }
+                    ? { label: isCSVDoc ? 'CHECKS PASSED' : 'VERIFIED', sublabel: 'No issues detected', borderClass: 'border-green-200', bgClass: 'bg-green-50', textClass: 'text-green-700', badgeClass: 'bg-green-100 text-green-700' }
                     : isSuspicious
-                    ? { label: 'NEEDS REVIEW', sublabel: 'Issues found that require attention', borderClass: 'border-status-warning-200', bgClass: 'bg-status-warning-50', textClass: 'text-status-warning-700', badgeClass: 'bg-status-warning-200 text-status-warning-900' }
-                    : { label: 'FAILED', sublabel: 'Serious concerns identified', borderClass: 'border-status-danger-200', bgClass: 'bg-status-danger-50', textClass: 'text-status-danger-700', badgeClass: 'bg-status-danger-200 text-status-danger-900' };
+                    ? { label: 'NEEDS REVIEW', sublabel: 'Issues found that require attention', borderClass: 'border-amber-200', bgClass: 'bg-amber-50', textClass: 'text-amber-700', badgeClass: 'bg-amber-100 text-amber-700' }
+                    : { label: 'FAILED', sublabel: 'Serious concerns identified', borderClass: 'border-red-200', bgClass: 'bg-red-50', textClass: 'text-red-700', badgeClass: 'bg-red-100 text-red-700' };
 
                   // Filter to actionable flags only
                   const actionableFlags = (v.flags || []).filter(
@@ -2140,25 +2140,25 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const minorFlags = actionableFlags.filter((f: any) => f.severity === 'low');
 
                   return (
-                    <div key={idx} className={`border rounded-card ${verdictConfig.borderClass} ${verdictConfig.bgClass}`}>
+                    <div key={idx} className={`border rounded-md ${verdictConfig.borderClass} ${verdictConfig.bgClass}`}>
                       {/* Header: icon + filename + verdict badge */}
                       <div className="flex items-center justify-between p-4 pb-0">
                         <div className="flex items-center gap-3">
                           {isVerified ? (
-                            <svg className="w-5 h-5 text-status-success-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <svg className="w-5 h-5 text-green-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                           ) : isSuspicious ? (
-                            <svg className="w-5 h-5 text-status-warning-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+                            <svg className="w-5 h-5 text-amber-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
                           ) : (
-                            <svg className="w-5 h-5 text-status-danger-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <svg className="w-5 h-5 text-red-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                           )}
                           <div>
-                            <span className="font-semibold text-brand-ink text-sm">{v.filename}</span>
+                            <span className="font-semibold text-zinc-900 text-sm">{v.filename}</span>
                             {v.identified_bank_template && (
-                              <span className="ml-2 text-xs text-brand-ink-secondary">({v.identified_bank_template})</span>
+                              <span className="ml-2 text-xs text-zinc-600">({v.identified_bank_template})</span>
                             )}
                           </div>
                         </div>
-                        <span className={`px-3 py-1 text-xs font-bold rounded-badge ${verdictConfig.badgeClass}`}>
+                        <span className={`px-3 py-1 text-xs font-bold rounded ${verdictConfig.badgeClass}`}>
                           {verdictConfig.label}
                         </span>
                       </div>
@@ -2169,10 +2169,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         {/* Scoring metrics row */}
                         {v.authenticity_score != null && (
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-badge ${
-                              v.authenticity_score >= 75 ? 'bg-status-success-200 text-status-success-900' :
-                              v.authenticity_score >= 45 ? 'bg-status-warning-200 text-status-warning-900' :
-                              'bg-status-danger-200 text-status-danger-900'
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                              v.authenticity_score >= 75 ? 'bg-green-100 text-green-700' :
+                              v.authenticity_score >= 45 ? 'bg-amber-100 text-amber-700' :
+                              'bg-red-100 text-red-700'
                             }`}>
                               Score: {Math.round(v.authenticity_score)}/100
                             </span>
@@ -2193,7 +2193,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                   rounded >= 45 ? 'bg-[#fcd34d]/40 text-amber-800' :
                                   'bg-[#fca5a5]/40 text-red-800';
                                 return (
-                                  <span key={s.key} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-badge ${pillClass}`}>
+                                  <span key={s.key} className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${pillClass}`}>
                                     {s.label}: {rounded}
                                   </span>
                                 );
@@ -2205,17 +2205,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
                       {/* Issues list — plain English */}
                       {actionableFlags.length > 0 && !isVerified && (
-                        <div className="border-t border-brand-muted mx-4 pt-3 pb-4 space-y-2">
-                          <div className="text-xs font-semibold text-brand-ink uppercase tracking-wide mb-2">Why this document was flagged</div>
+                        <div className="border-t border-zinc-200 mx-4 pt-3 pb-4 space-y-2">
+                          <div className="text-xs font-semibold text-zinc-900 uppercase tracking-wide mb-2">Why this document was flagged</div>
 
                           {criticalFlags.map((f: any, fi: number) => {
                             const t = translateFlag(f);
                             return (
-                              <div key={`c-${fi}`} className="flex gap-3 items-start bg-status-danger-50 border border-status-danger-200 rounded-card p-3">
-                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-danger-500" />
+                              <div key={`c-${fi}`} className="flex gap-3 items-start bg-red-50 border border-red-200 rounded-md p-3">
+                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-red-500" />
                                 <div>
-                                  <div className="text-sm font-semibold text-status-danger-700">{t.headline}</div>
-                                  <div className="text-xs text-status-danger-900 mt-0.5 leading-relaxed">{t.explanation}</div>
+                                  <div className="text-sm font-semibold text-red-700">{t.headline}</div>
+                                  <div className="text-xs text-red-700 mt-0.5 leading-relaxed">{t.explanation}</div>
                                 </div>
                               </div>
                             );
@@ -2224,11 +2224,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           {highFlags.map((f: any, fi: number) => {
                             const t = translateFlag(f);
                             return (
-                              <div key={`h-${fi}`} className="flex gap-3 items-start bg-status-warning-50 border border-status-warning-200 rounded-card p-3">
-                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning-500" />
+                              <div key={`h-${fi}`} className="flex gap-3 items-start bg-amber-50 border border-amber-200 rounded-md p-3">
+                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-amber-500" />
                                 <div>
-                                  <div className="text-sm font-semibold text-status-warning-700">{t.headline}</div>
-                                  <div className="text-xs text-status-warning-900 mt-0.5 leading-relaxed">{t.explanation}</div>
+                                  <div className="text-sm font-semibold text-amber-700">{t.headline}</div>
+                                  <div className="text-xs text-amber-700 mt-0.5 leading-relaxed">{t.explanation}</div>
                                 </div>
                               </div>
                             );
@@ -2237,18 +2237,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           {mediumFlags.map((f: any, fi: number) => {
                             const t = translateFlag(f);
                             return (
-                              <div key={`m-${fi}`} className="flex gap-3 items-start bg-brand-surface-alt border border-brand-muted rounded-card p-3">
-                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-brand-ink-tertiary" />
+                              <div key={`m-${fi}`} className="flex gap-3 items-start bg-zinc-50 border border-zinc-200 rounded-md p-3">
+                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-zinc-400" />
                                 <div>
-                                  <div className="text-sm font-medium text-brand-ink">{t.headline}</div>
-                                  <div className="text-xs text-brand-ink-secondary mt-0.5 leading-relaxed">{t.explanation}</div>
+                                  <div className="text-sm font-medium text-zinc-900">{t.headline}</div>
+                                  <div className="text-xs text-zinc-600 mt-0.5 leading-relaxed">{t.explanation}</div>
                                 </div>
                               </div>
                             );
                           })}
 
                           {minorFlags.length > 0 && (
-                            <div className="text-xs text-brand-ink-tertiary pl-1">
+                            <div className="text-xs text-zinc-400 pl-1">
                               + {minorFlags.length} minor observation{minorFlags.length !== 1 ? 's' : ''}
                             </div>
                           )}
@@ -2257,12 +2257,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
                       {/* Admin Override UI for LikelyTampered / Suspicious */}
                       {(v.verdict === 'LikelyTampered' || v.verdict === 'Suspicious') && v.blocked && !v.admin_override && (
-                        <div className="mt-3 pt-3 border-t border-brand-muted">
-                          <div className="flex items-center gap-2 text-sm text-status-danger-700 mb-2">
+                        <div className="mt-3 pt-3 border-t border-zinc-200">
+                          <div className="flex items-center gap-2 text-sm text-red-700 mb-2">
                             <span className="font-semibold">Upload blocked -- downstream processing halted.</span>
                           </div>
                           {v.override_proposed_by && !v.admin_override && (
-                            <div className="mb-3 px-3 py-2 rounded border border-status-warning-200 bg-status-warning-50 text-xs text-status-warning-900">
+                            <div className="mb-3 px-3 py-2 rounded border border-amber-200 bg-amber-50 text-xs text-amber-700">
                               <div className="font-semibold">Awaiting second-reviewer approval (four-eyes).</div>
                               <div className="mt-1">
                                 Override proposed by <span className="font-mono">{v.override_proposed_by}</span>
@@ -2273,29 +2273,29 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               {v.override_proposed_rationale && (
                                 <div className="mt-1 italic">"{v.override_proposed_rationale}"</div>
                               )}
-                              <div className="mt-1 text-status-warning-700">
+                              <div className="mt-1 text-amber-700">
                                 A different admin must now click Override to approve.
                               </div>
                             </div>
                           )}
                           {docVerOverrideModalOpen === v.id ? (
-                            <div className="bg-white rounded-card p-3 border border-brand-muted space-y-2">
+                            <div className="bg-white rounded-md p-3 border border-zinc-200 space-y-2">
                               <div className="flex items-baseline justify-between">
-                                <label className="block text-xs font-semibold text-brand-ink-secondary">
+                                <label className="block text-xs font-semibold text-zinc-600">
                                   Admin Override Rationale (required, min 10 chars):
                                 </label>
                                 <span
                                   className={`text-[10px] font-medium ${
                                     docVerOverrideRationale.length >= 10
-                                      ? 'text-status-success-700'
-                                      : 'text-brand-ink-tertiary'
+                                      ? 'text-green-700'
+                                      : 'text-zinc-400'
                                   }`}
                                 >
                                   {docVerOverrideRationale.length} / 10 min
                                 </span>
                               </div>
                               <textarea
-                                className="w-full border border-brand-muted rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                                className="w-full border border-zinc-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
                                 rows={3}
                                 value={docVerOverrideRationale}
                                 onChange={(e) => setDocVerOverrideRationale(e.target.value)}
@@ -2345,13 +2345,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                       setDocVerOverrideSubmitting(false);
                                     }
                                   }}
-                                  className="px-4 py-1.5 bg-status-danger-700 text-white text-sm rounded hover:bg-status-danger-800 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                                  className="px-4 py-1.5 bg-red-700 text-white text-sm rounded hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
                                 >
                                   {docVerOverrideSubmitting ? 'Submitting...' : 'Confirm Override'}
                                 </button>
                                 <button
                                   onClick={() => { setDocVerOverrideModalOpen(null); setDocVerOverrideRationale(''); }}
-                                  className="px-4 py-1.5 bg-brand-muted text-brand-ink-secondary text-sm rounded hover:bg-brand-muted"
+                                  className="px-4 py-1.5 bg-zinc-200 text-zinc-600 text-sm rounded hover:bg-zinc-200"
                                 >
                                   Cancel
                                 </button>
@@ -2360,7 +2360,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           ) : (
                             <button
                               onClick={() => setDocVerOverrideModalOpen(v.id)}
-                              className="px-4 py-1.5 bg-status-warning-100 text-status-warning-700 text-sm rounded border border-status-warning-200 hover:bg-status-warning-200 font-semibold"
+                              className="px-4 py-1.5 bg-amber-100 text-amber-700 text-sm rounded border border-amber-200 hover:bg-amber-100 font-semibold"
                             >
                               Admin Override
                             </button>
@@ -2370,8 +2370,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
                       {/* Show override confirmation */}
                       {v.admin_override && (
-                        <div className="mt-2 pt-2 border-t border-brand-muted text-xs text-brand-ink-secondary">
-                          <span className="font-semibold text-status-success-700">Overridden</span> by {v.admin_override_by || 'admin'}
+                        <div className="mt-2 pt-2 border-t border-zinc-200 text-xs text-zinc-600">
+                          <span className="font-semibold text-green-700">Overridden</span> by {v.admin_override_by || 'admin'}
                           {v.admin_override_rationale && (
                             <span> -- "{v.admin_override_rationale}"</span>
                           )}
@@ -2389,8 +2389,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             {/* Questions - deduplicated and including lineage-based questions */}
             {(result.next_actions.questions.length > 0 || 
               (fundsLineageData?.funds_lineage?.unresolved_items?.length > 0)) && (
-              <div className="bg-white border border-brand-muted rounded-card p-6">
-                <h3 className="text-lg font-bold text-brand-ink mb-4">
+              <div className="bg-white border border-zinc-200 rounded-md p-6">
+                <h3 className="text-lg font-bold text-zinc-900 mb-4">
                   ❓ Questions for Client
                 </h3>
                 <ol className="list-decimal list-inside space-y-2">
@@ -2538,7 +2538,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     }
                     
                     return uniqueQuestions.map((question, idx) => (
-                      <li key={idx} className="text-sm text-brand-ink-secondary">{question}</li>
+                      <li key={idx} className="text-sm text-zinc-600">{question}</li>
                     ));
                   })()}
                 </ol>
@@ -2549,8 +2549,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             {(result.next_actions.documents.length > 0 || 
               (fundsLineageData?.funds_lineage?.unresolved_items?.length > 0) ||
               result.evidence_matches?.some((e: any) => e?.document_verification?.differences?.length > 0)) && (
-              <div className="bg-white border border-brand-muted rounded-card p-6">
-                <h3 className="text-lg font-bold text-brand-ink mb-4">
+              <div className="bg-white border border-zinc-200 rounded-md p-6">
+                <h3 className="text-lg font-bold text-zinc-900 mb-4">
                   📄 Documents Required
                 </h3>
                 <ul className="list-disc list-inside space-y-2">
@@ -2725,7 +2725,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     // If no documents required after filtering, show message
                     if (documents.length === 0) {
                       return (
-                        <li className="text-sm text-status-success-700 font-medium">
+                        <li className="text-sm text-green-700 font-medium">
                           ✅ All document requirements satisfied or covered by manual acceptance
                         </li>
                       );
@@ -2734,14 +2734,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     return (
                       <>
                         {hasUntracedDocs && (
-                          <li className="text-sm text-brand-ink-secondary font-medium">
+                          <li className="text-sm text-zinc-600 font-medium">
                             Bank statements/documentation for untraced deposits:
                           </li>
                         )}
                         {documents.map((doc, idx) => (
                           <li 
                             key={doc.key} 
-                            className={`text-sm ${doc.key.startsWith('discrepancy') ? 'text-brand-ink font-medium' : 'text-brand-ink-secondary'} ${doc.isSubItem ? 'ml-4' : ''}`}
+                            className={`text-sm ${doc.key.startsWith('discrepancy') ? 'text-zinc-900 font-medium' : 'text-zinc-600'} ${doc.isSubItem ? 'ml-4' : ''}`}
                           >
                             {doc.text}
                           </li>
@@ -2758,13 +2758,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <div className="flex justify-center gap-4">
             <button
               onClick={() => setActiveStep('upload')}
-              className="px-6 py-3 bg-primary-50 text-brand-ink border-2 border-accent-400 rounded-button hover:bg-primary-100 font-semibold"
+              className="px-6 py-3 bg-zinc-50 text-zinc-900 border-2 border-zinc-400 rounded hover:bg-zinc-100 font-semibold"
             >
               📎 Add Further Documentation
             </button>
             <button
               onClick={downloadFileNote}
-              className="px-6 py-3 bg-primary-700 text-white rounded-button hover:bg-primary-800 font-semibold"
+              className="px-6 py-3 bg-zinc-900 text-white rounded hover:bg-zinc-900 font-semibold"
             >
               📥 Download Audit File Note
             </button>

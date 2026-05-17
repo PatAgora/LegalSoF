@@ -34,7 +34,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white border border-zinc-200/80 rounded-md shadow-[0_1px_3px_0_rgb(0_0_0/0.04)] p-8">
         <div className="text-center mb-8">
-          <img src="/agora-logo.png" alt="Agora Consulting AI" className="h-10 mx-auto mb-4" />
+          <img src="/agora-logo.svg" alt="Agora Consulting AI" className="h-10 mx-auto mb-4" />
           <h1 className="text-lg font-semibold text-zinc-900">Agora Consulting AI</h1>
           <p className="text-xs text-zinc-500 mt-1">Source of Funds Automation</p>
         </div>

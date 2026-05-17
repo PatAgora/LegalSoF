@@ -50,11 +50,11 @@ export default function TransactionAlerts({ matterId }: TransactionAlertsProps) 
 
   const getSeverityBadge = (severity: string) => {
     const colors = {
-      CRITICAL: 'bg-status-danger-100 text-status-danger-700',
-      HIGH: 'bg-status-warning-100 text-status-warning-700',
-      MEDIUM: 'bg-status-warning-100 text-status-warning-700',
-      LOW: 'bg-primary-100 text-primary-700',
-      INFO: 'bg-brand-surface-alt text-brand-ink',
+      CRITICAL: 'bg-red-100 text-red-700',
+      HIGH: 'bg-amber-100 text-amber-700',
+      MEDIUM: 'bg-amber-100 text-amber-700',
+      LOW: 'bg-zinc-100 text-zinc-900',
+      INFO: 'bg-zinc-50 text-zinc-900',
     };
     return colors[severity as keyof typeof colors] || colors.INFO;
   };
@@ -70,7 +70,7 @@ export default function TransactionAlerts({ matterId }: TransactionAlertsProps) 
         <select
           value={severityFilter}
           onChange={(e) => setSeverityFilter(e.target.value)}
-          className="px-3 py-2 border border-brand-muted rounded-md"
+          className="px-3 py-2 border border-zinc-200 rounded-md"
         >
           <option value="">All Severities</option>
           <option value="CRITICAL">Critical</option>
@@ -81,34 +81,34 @@ export default function TransactionAlerts({ matterId }: TransactionAlertsProps) 
       </div>
 
       {alerts.length === 0 ? (
-        <div className="text-center py-8 text-brand-ink-tertiary">
+        <div className="text-center py-8 text-zinc-400">
           No alerts found. Upload transactions to generate alerts.
         </div>
       ) : (
         <div className="space-y-3">
           {alerts.map((alert) => (
-            <div key={alert.id} className="bg-white rounded-card border border-brand-muted p-4">
+            <div key={alert.id} className="bg-white rounded-md border border-zinc-200 p-4">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${getSeverityBadge(alert.severity)}`}>
                     {alert.severity}
                   </span>
                 </div>
-                <div className="text-sm text-brand-ink-tertiary">
+                <div className="text-sm text-zinc-400">
                   {alert.transaction_date} • {alert.currency} {alert.amount?.toFixed(2)}
                 </div>
               </div>
 
               <div className="mb-2">
-                <p className="text-sm font-medium text-brand-ink-secondary">Transaction: {alert.txn_id}</p>
+                <p className="text-sm font-medium text-zinc-600">Transaction: {alert.txn_id}</p>
                 {alert.country_iso2 && (
-                  <p className="text-sm text-brand-ink-secondary">Country: {alert.country_iso2}</p>
+                  <p className="text-sm text-zinc-600">Country: {alert.country_iso2}</p>
                 )}
               </div>
 
               <div className="mb-2">
-                <p className="text-sm font-semibold text-brand-ink-secondary">Reasons:</p>
-                <ul className="list-disc list-inside text-sm text-brand-ink-secondary">
+                <p className="text-sm font-semibold text-zinc-600">Reasons:</p>
+                <ul className="list-disc list-inside text-sm text-zinc-600">
                   {alert.reasons.map((reason, idx) => (
                     <li key={idx}>{reason}</li>
                   ))}

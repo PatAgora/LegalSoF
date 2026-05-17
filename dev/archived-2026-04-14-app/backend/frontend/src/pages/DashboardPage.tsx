@@ -10,10 +10,10 @@ export default function DashboardPage() {
     <div className="space-y-8">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-primary-700">
+        <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
           Dashboard
         </h1>
-        <p className="mt-1 text-sm text-brand-ink-tertiary">
+        <p className="mt-1 text-sm text-zinc-400">
           Source of Funds verification overview
         </p>
       </div>
@@ -57,14 +57,14 @@ export default function DashboardPage() {
       {/* Bottom Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Activity */}
-        <div className="bg-white rounded-card border border-brand-muted">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-brand-muted">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-700">
+        <div className="bg-white rounded-md border border-zinc-200">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-900">
               Recent Activity
             </h2>
             <Link
               to="/matters"
-              className="text-xs font-medium text-primary-600 hover:text-primary-700 transition-colors"
+              className="text-xs font-medium text-zinc-700 hover:text-zinc-900 transition-colors"
             >
               View all
             </Link>
@@ -98,12 +98,12 @@ export default function DashboardPage() {
         </div>
 
         {/* Pending Actions */}
-        <div className="bg-white rounded-card border border-brand-muted">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-brand-muted">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-primary-700">
+        <div className="bg-white rounded-md border border-zinc-200">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-900">
               Pending Actions
             </h2>
-            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-accent-500 text-white text-xs font-bold">
+            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-zinc-900 text-white text-xs font-bold">
               3
             </span>
           </div>
@@ -164,9 +164,9 @@ function StatCard({
 
   // Trend styling
   const trendStyles: Record<string, { color: string; arrow: string }> = {
-    up: { color: 'text-status-success-700', arrow: '\u2191' },
-    down: { color: 'text-status-danger-700', arrow: '\u2193' },
-    neutral: { color: 'text-brand-ink-tertiary', arrow: '\u2014' },
+    up: { color: 'text-green-700', arrow: '\u2191' },
+    down: { color: 'text-red-700', arrow: '\u2193' },
+    neutral: { color: 'text-zinc-400', arrow: '\u2014' },
   }
   const { color: trendColor, arrow: trendArrow } = trendStyles[trend]
 
@@ -174,19 +174,19 @@ function StatCard({
     <Link
       to={href}
       className={
-        'group relative block bg-white rounded-card border border-brand-muted ' +
+        'group relative block bg-white rounded-md border border-zinc-200 ' +
         'border-l-4 ' +
         borderColor[indicator] +
-        ' px-6 py-5 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:ring-offset-2'
+        ' px-6 py-5 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2'
       }
     >
       {/* Icon area */}
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand-ink-tertiary">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             {title}
           </p>
-          <p className="mt-2 text-3xl font-bold text-primary-700">{value}</p>
+          <p className="mt-2 text-3xl font-bold text-zinc-900">{value}</p>
         </div>
         <StatIcon indicator={indicator} />
       </div>
@@ -197,10 +197,10 @@ function StatCard({
           className={
             'inline-flex items-center justify-center h-5 w-5 rounded-full text-xs font-bold ' +
             (trend === 'up'
-              ? 'bg-status-success-50 text-status-success-700'
+              ? 'bg-green-50 text-green-700'
               : trend === 'down'
-                ? 'bg-status-danger-50 text-status-danger-700'
-                : 'bg-brand-surface-alt text-brand-ink-tertiary')
+                ? 'bg-red-50 text-red-700'
+                : 'bg-zinc-50 text-zinc-400')
           }
         >
           {trendArrow}
@@ -209,7 +209,7 @@ function StatCard({
       </div>
 
       {/* Hover caret */}
-      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-brand-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
+      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           className="h-5 w-5"
@@ -238,7 +238,7 @@ function StatIcon({ indicator }: { indicator: Indicator }) {
   switch (indicator) {
     case 'total':
       return (
-        <span className={base + ' bg-primary-50 text-primary-600'}>
+        <span className={base + ' bg-zinc-50 text-zinc-700'}>
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
             <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
@@ -247,7 +247,7 @@ function StatIcon({ indicator }: { indicator: Indicator }) {
       )
     case 'review':
       return (
-        <span className={base + ' bg-accent-50 text-accent-600'}>
+        <span className={base + ' bg-zinc-50 text-zinc-700'}>
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
           </svg>
@@ -255,7 +255,7 @@ function StatIcon({ indicator }: { indicator: Indicator }) {
       )
     case 'approved':
       return (
-        <span className={base + ' bg-status-success-50 text-status-success-700'}>
+        <span className={base + ' bg-green-50 text-green-700'}>
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
           </svg>
@@ -263,7 +263,7 @@ function StatIcon({ indicator }: { indicator: Indicator }) {
       )
     case 'risk':
       return (
-        <span className={base + ' bg-status-danger-50 text-status-danger-700'}>
+        <span className={base + ' bg-red-50 text-red-700'}>
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
           </svg>
@@ -290,14 +290,14 @@ function ActivityItem({
   type: ActivityType
 }) {
   const dotColor: Record<ActivityType, string> = {
-    created: 'bg-primary-500',
-    upload: 'bg-accent-500',
-    approved: 'bg-status-success-500',
-    flagged: 'bg-status-danger-500',
+    created: 'bg-zinc-500',
+    upload: 'bg-zinc-900',
+    approved: 'bg-green-500',
+    flagged: 'bg-red-500',
   }
 
   return (
-    <div className="flex items-start gap-4 px-6 py-4 transition-colors hover:bg-brand-surface">
+    <div className="flex items-start gap-4 px-6 py-4 transition-colors hover:bg-slate-50">
       {/* Timeline dot */}
       <div className="relative mt-1.5 flex-shrink-0">
         <span
@@ -310,12 +310,12 @@ function ActivityItem({
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-brand-ink">{title}</p>
-        <p className="mt-0.5 text-sm text-brand-ink-tertiary truncate">{description}</p>
+        <p className="text-sm font-medium text-zinc-900">{title}</p>
+        <p className="mt-0.5 text-sm text-zinc-400 truncate">{description}</p>
       </div>
 
       {/* Timestamp */}
-      <time className="flex-shrink-0 text-xs text-brand-ink-tertiary whitespace-nowrap">
+      <time className="flex-shrink-0 text-xs text-zinc-400 whitespace-nowrap">
         {time}
       </time>
     </div>
@@ -338,9 +338,9 @@ function PendingAction({
   href: string
 }) {
   const badgeStyles: Record<string, string> = {
-    high: 'bg-status-danger-50 text-status-danger-700 ring-1 ring-inset ring-status-danger-200',
-    medium: 'bg-accent-50 text-accent-700 ring-1 ring-inset ring-accent-200',
-    low: 'bg-primary-50 text-primary-700 ring-1 ring-inset ring-primary-200',
+    high: 'bg-red-50 text-red-700 ring-1 ring-inset ring-status-danger-200',
+    medium: 'bg-zinc-50 text-zinc-700 ring-1 ring-inset ring-zinc-200',
+    low: 'bg-zinc-50 text-zinc-900 ring-1 ring-inset ring-zinc-200',
   }
 
   const priorityLabel: Record<string, string> = {
@@ -352,7 +352,7 @@ function PendingAction({
   return (
     <Link
       to={href}
-      className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-brand-surface group"
+      className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-slate-50 group"
     >
       {/* Priority badge */}
       <span
@@ -366,14 +366,14 @@ function PendingAction({
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-brand-ink">{title}</p>
-        <p className="mt-0.5 text-sm text-brand-ink-tertiary">{description}</p>
+        <p className="text-sm font-medium text-zinc-900">{title}</p>
+        <p className="mt-0.5 text-sm text-zinc-400">{description}</p>
       </div>
 
       {/* Arrow */}
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        className="h-4 w-4 text-brand-ink-tertiary flex-shrink-0 transition-colors group-hover:text-primary-500"
+        className="h-4 w-4 text-zinc-400 flex-shrink-0 transition-colors group-hover:text-zinc-500"
         viewBox="0 0 20 20"
         fill="currentColor"
       >

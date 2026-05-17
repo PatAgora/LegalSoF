@@ -183,21 +183,21 @@ export default function TransactionList({ matterId }: TransactionListProps) {
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case 'CRITICAL': return 'bg-status-danger-100 border-status-danger-500 text-status-danger-700';
-      case 'HIGH': return 'bg-status-warning-100 border-status-warning-500 text-status-warning-700';
-      case 'MEDIUM': return 'bg-status-warning-100 border-status-warning-500 text-status-warning-700';
-      case 'LOW': return 'bg-primary-100 border-primary-400 text-primary-800';
-      default: return 'bg-brand-surface-alt border-brand-muted text-brand-ink';
+      case 'CRITICAL': return 'bg-red-100 border-red-500 text-red-700';
+      case 'HIGH': return 'bg-amber-100 border-status-warning-500 text-amber-700';
+      case 'MEDIUM': return 'bg-amber-100 border-status-warning-500 text-amber-700';
+      case 'LOW': return 'bg-zinc-100 border-zinc-400 text-zinc-900';
+      default: return 'bg-zinc-50 border-zinc-200 text-zinc-900';
     }
   };
 
   const getSeverityBadge = (severity: string) => {
     switch (severity) {
-      case 'CRITICAL': return 'bg-status-danger-700 text-white';
-      case 'HIGH': return 'bg-status-warning-700 text-white';
-      case 'MEDIUM': return 'bg-status-warning-700 text-white';
-      case 'LOW': return 'bg-primary-500 text-white';
-      default: return 'bg-brand-ink-tertiary text-white';
+      case 'CRITICAL': return 'bg-red-700 text-white';
+      case 'HIGH': return 'bg-amber-700 text-white';
+      case 'MEDIUM': return 'bg-amber-700 text-white';
+      case 'LOW': return 'bg-zinc-500 text-white';
+      default: return 'bg-zinc-400 text-white';
     }
   };
 
@@ -222,10 +222,10 @@ export default function TransactionList({ matterId }: TransactionListProps) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-          <p className="text-brand-ink-secondary">Loading transactions...</p>
-          <p className="text-sm text-brand-ink-tertiary mt-2">Matter ID: {matterId}</p>
-          <p className="text-xs text-brand-ink-tertiary mt-1">API: {API_BASE_URL}</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-zinc-600 mx-auto mb-4"></div>
+          <p className="text-zinc-600">Loading transactions...</p>
+          <p className="text-sm text-zinc-400 mt-2">Matter ID: {matterId}</p>
+          <p className="text-xs text-zinc-400 mt-1">API: {API_BASE_URL}</p>
         </div>
       </div>
     );
@@ -233,20 +233,20 @@ export default function TransactionList({ matterId }: TransactionListProps) {
 
   if (error) {
     return (
-      <div className="bg-white rounded-card border border-brand-muted p-8 border-l-4 border-status-danger-500">
+      <div className="bg-white rounded-md border border-zinc-200 p-8 border-l-4 border-red-500">
         <div className="text-center">
-          <div className="text-status-danger-700 text-5xl mb-4">⚠️</div>
-          <h3 className="text-lg font-semibold text-brand-ink mb-2">Error Loading Data</h3>
-          <p className="text-status-danger-700 mb-4">{error}</p>
-          <div className="text-sm text-left bg-brand-surface-alt p-4 rounded">
+          <div className="text-red-700 text-5xl mb-4">⚠️</div>
+          <h3 className="text-lg font-semibold text-zinc-900 mb-2">Error Loading Data</h3>
+          <p className="text-red-700 mb-4">{error}</p>
+          <div className="text-sm text-left bg-zinc-50 p-4 rounded">
             <p className="font-medium mb-2">Debug Info:</p>
-            <p className="text-brand-ink-secondary">Matter ID: {matterId}</p>
-            <p className="text-brand-ink-secondary">API Base URL: {API_BASE_URL}</p>
-            <p className="text-brand-ink-secondary">Check browser console for details</p>
+            <p className="text-zinc-600">Matter ID: {matterId}</p>
+            <p className="text-zinc-600">API Base URL: {API_BASE_URL}</p>
+            <p className="text-zinc-600">Check browser console for details</p>
           </div>
           <button
             onClick={fetchData}
-            className="mt-4 px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-700"
+            className="mt-4 px-4 py-2 bg-zinc-800 text-white rounded hover:bg-zinc-900"
           >
             Retry
           </button>
@@ -257,16 +257,16 @@ export default function TransactionList({ matterId }: TransactionListProps) {
 
   if (transactions.length === 0) {
     return (
-      <div className="bg-white rounded-card border border-brand-muted p-8 text-center">
-        <div className="text-brand-ink-tertiary text-5xl mb-4">📊</div>
-        <h3 className="text-lg font-semibold text-brand-ink mb-2">No Transactions Yet</h3>
-        <p className="text-brand-ink-secondary mb-4">Upload a CSV or PDF bank statement to get started with AML monitoring.</p>
-        <div className="text-sm text-left bg-brand-surface-alt p-4 rounded mt-4">
+      <div className="bg-white rounded-md border border-zinc-200 p-8 text-center">
+        <div className="text-zinc-400 text-5xl mb-4">📊</div>
+        <h3 className="text-lg font-semibold text-zinc-900 mb-2">No Transactions Yet</h3>
+        <p className="text-zinc-600 mb-4">Upload a CSV or PDF bank statement to get started with AML monitoring.</p>
+        <div className="text-sm text-left bg-zinc-50 p-4 rounded mt-4">
           <p className="font-medium mb-2">Debug Info:</p>
-          <p className="text-brand-ink-secondary">Matter ID: {matterId}</p>
-          <p className="text-brand-ink-secondary">API Base URL: {API_BASE_URL}</p>
-          <p className="text-brand-ink-secondary">Transactions loaded: {transactions.length}</p>
-          <p className="text-brand-ink-secondary">Alerts loaded: {alerts.length}</p>
+          <p className="text-zinc-600">Matter ID: {matterId}</p>
+          <p className="text-zinc-600">API Base URL: {API_BASE_URL}</p>
+          <p className="text-zinc-600">Transactions loaded: {transactions.length}</p>
+          <p className="text-zinc-600">Alerts loaded: {alerts.length}</p>
         </div>
       </div>
     );
@@ -280,39 +280,39 @@ export default function TransactionList({ matterId }: TransactionListProps) {
     <div className="space-y-4">
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-white rounded-card border border-brand-muted p-4">
-          <div className="text-sm text-brand-ink-secondary">Total Transactions</div>
-          <div className="text-2xl font-bold text-brand-ink">{transactions.length}</div>
+        <div className="bg-white rounded-md border border-zinc-200 p-4">
+          <div className="text-sm text-zinc-600">Total Transactions</div>
+          <div className="text-2xl font-bold text-zinc-900">{transactions.length}</div>
         </div>
-        <div className="bg-white rounded-card border border-brand-muted p-4">
-          <div className="text-sm text-brand-ink-secondary">Accounts</div>
-          <div className="text-2xl font-bold text-primary-500">{uniqueAccounts.length}</div>
+        <div className="bg-white rounded-md border border-zinc-200 p-4">
+          <div className="text-sm text-zinc-600">Accounts</div>
+          <div className="text-2xl font-bold text-zinc-500">{uniqueAccounts.length}</div>
         </div>
-        <div className="bg-white rounded-card border border-brand-muted p-4">
-          <div className="text-sm text-brand-ink-secondary">Total Alerts</div>
-          <div className="text-2xl font-bold text-status-warning-700">{totalAlerts}</div>
+        <div className="bg-white rounded-md border border-zinc-200 p-4">
+          <div className="text-sm text-zinc-600">Total Alerts</div>
+          <div className="text-2xl font-bold text-amber-700">{totalAlerts}</div>
         </div>
-        <div className="bg-white rounded-card border border-brand-muted p-4">
-          <div className="text-sm text-brand-ink-secondary">Critical Alerts</div>
-          <div className="text-2xl font-bold text-status-danger-700">{criticalAlerts}</div>
+        <div className="bg-white rounded-md border border-zinc-200 p-4">
+          <div className="text-sm text-zinc-600">Critical Alerts</div>
+          <div className="text-2xl font-bold text-red-700">{criticalAlerts}</div>
         </div>
-        <div className="bg-white rounded-card border border-brand-muted p-4">
-          <div className="text-sm text-brand-ink-secondary">High Alerts</div>
-          <div className="text-2xl font-bold text-status-warning-700">{highAlerts}</div>
+        <div className="bg-white rounded-md border border-zinc-200 p-4">
+          <div className="text-sm text-zinc-600">High Alerts</div>
+          <div className="text-2xl font-bold text-amber-700">{highAlerts}</div>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-card border border-brand-muted p-4">
+      <div className="bg-white rounded-md border border-zinc-200 p-4">
         <div className="flex flex-wrap items-center gap-4">
           {/* Account Filter */}
           {uniqueAccounts.length > 1 && (
             <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-brand-ink-secondary">Account:</label>
+              <label className="text-sm font-medium text-zinc-600">Account:</label>
               <select
                 value={filterAccount}
                 onChange={(e) => setFilterAccount(e.target.value)}
-                className="px-3 py-2 border border-brand-muted rounded-md focus:ring-2 focus:ring-primary-500"
+                className="px-3 py-2 border border-zinc-200 rounded-md focus:ring-2 focus:ring-zinc-500"
               >
                 <option value="">All Accounts ({uniqueAccounts.length})</option>
                 {uniqueAccounts.map((account) => (
@@ -326,11 +326,11 @@ export default function TransactionList({ matterId }: TransactionListProps) {
           
           {/* Severity Filter */}
           <div className="flex items-center space-x-2">
-            <label className="text-sm font-medium text-brand-ink-secondary">Filter by Alert Severity:</label>
+            <label className="text-sm font-medium text-zinc-600">Filter by Alert Severity:</label>
             <select
               value={filterSeverity}
               onChange={(e) => setFilterSeverity(e.target.value)}
-              className="px-3 py-2 border border-brand-muted rounded-md focus:ring-2 focus:ring-primary-500"
+              className="px-3 py-2 border border-zinc-200 rounded-md focus:ring-2 focus:ring-zinc-500"
             >
               <option value="">All Transactions</option>
               <option value="CRITICAL">Critical Only</option>
@@ -340,7 +340,7 @@ export default function TransactionList({ matterId }: TransactionListProps) {
             </select>
           </div>
           
-          <div className="text-sm text-brand-ink-secondary">
+          <div className="text-sm text-zinc-600">
             Showing {filteredTransactions.length} of {transactions.length} transactions
             {filterAccount && ` (Account: ${filterAccount})`}
           </div>
@@ -348,10 +348,10 @@ export default function TransactionList({ matterId }: TransactionListProps) {
       </div>
 
       {/* Transaction Table */}
-      <div className="bg-white rounded-card border border-brand-muted overflow-hidden">
+      <div className="bg-white rounded-md border border-zinc-200 overflow-hidden">
         {/* Table Header */}
-        <div className="bg-brand-surface-alt border-b border-brand-muted">
-          <div className="grid grid-cols-12 gap-4 px-6 py-4 text-xs font-semibold text-brand-ink-secondary uppercase tracking-wider">
+        <div className="bg-zinc-50 border-b border-zinc-200">
+          <div className="grid grid-cols-12 gap-4 px-6 py-4 text-xs font-semibold text-zinc-600 uppercase tracking-wider">
             <div className="col-span-2">Transaction ID</div>
             <div className="col-span-1">Date</div>
             <div className="col-span-1">Severity</div>
@@ -379,28 +379,28 @@ export default function TransactionList({ matterId }: TransactionListProps) {
             return (
               <div key={txn.id}>
                 {/* Main Transaction Row */}
-                <div className={`grid grid-cols-12 gap-4 px-6 py-4 hover:bg-brand-surface-alt transition-colors border-l-4 ${
+                <div className={`grid grid-cols-12 gap-4 px-6 py-4 hover:bg-zinc-50 transition-colors border-l-4 ${
                   highestSeverity ? getSeverityColor(highestSeverity.severity) : 'border-transparent'
                 }`}>
                   {/* Transaction ID */}
                   <div className="col-span-2">
-                    <div className="text-sm font-mono font-semibold text-brand-ink">{txn.id}</div>
-                    <div className="text-xs text-brand-ink-tertiary">{txn.customer_id}</div>
+                    <div className="text-sm font-mono font-semibold text-zinc-900">{txn.id}</div>
+                    <div className="text-xs text-zinc-400">{txn.customer_id}</div>
                   </div>
 
                   {/* Date */}
                   <div className="col-span-1">
-                    <div className="text-sm text-brand-ink-secondary">{new Date(txn.txn_date).toLocaleDateString('en-GB')}</div>
+                    <div className="text-sm text-zinc-600">{new Date(txn.txn_date).toLocaleDateString('en-GB')}</div>
                   </div>
 
                   {/* Severity Column */}
                   <div className="col-span-1">
                     {highestSeverity ? (
                       <span className={`inline-flex items-center justify-center w-full px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${
-                        highestSeverity.severity === 'CRITICAL' ? 'bg-status-danger-700 text-white' :
-                        highestSeverity.severity === 'HIGH' ? 'bg-status-warning-700 text-white' :
-                        highestSeverity.severity === 'MEDIUM' ? 'bg-status-warning-700 text-white' :
-                        'bg-primary-500 text-white'
+                        highestSeverity.severity === 'CRITICAL' ? 'bg-red-700 text-white' :
+                        highestSeverity.severity === 'HIGH' ? 'bg-amber-700 text-white' :
+                        highestSeverity.severity === 'MEDIUM' ? 'bg-amber-700 text-white' :
+                        'bg-zinc-500 text-white'
                       }`}>
                         {highestSeverity.severity === 'CRITICAL' ? '🔴' : 
                          highestSeverity.severity === 'HIGH' ? '🟠' : 
@@ -408,37 +408,37 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                         {' '}{highestSeverity.severity}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center justify-center w-full px-2 py-1 rounded text-xs font-medium bg-status-success-50 text-status-success-700 border border-status-success-200">
+                      <span className="inline-flex items-center justify-center w-full px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
                         ✓ Clean
                       </span>
                     )}
                     {txnAlerts.length > 1 && (
-                      <div className="text-xs text-brand-ink-tertiary mt-1 text-center">+{txnAlerts.length - 1} more</div>
+                      <div className="text-xs text-zinc-400 mt-1 text-center">+{txnAlerts.length - 1} more</div>
                     )}
                   </div>
 
                   {/* Description */}
                   <div className="col-span-4">
-                    <div className="text-sm text-brand-ink-secondary break-words">{txn.narrative}</div>
+                    <div className="text-sm text-zinc-600 break-words">{txn.narrative}</div>
                   </div>
 
                   {/* Amount */}
                   <div className="col-span-1 text-right">
-                    <div className={`text-sm font-bold ${txn.direction === 'in' || txn.direction === 'credit' ? 'text-status-success-700' : 'text-status-danger-700'}`}>
+                    <div className={`text-sm font-bold ${txn.direction === 'in' || txn.direction === 'credit' ? 'text-green-700' : 'text-red-700'}`}>
                       {txn.direction === 'in' || txn.direction === 'credit' ? '+' : '-'} {txn.currency} {txn.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
 
                   {/* Country */}
                   <div className="col-span-2">
-                    <div className="text-sm text-brand-ink-secondary">{getCountryName(txn.country_iso2)}</div>
+                    <div className="text-sm text-zinc-600">{getCountryName(txn.country_iso2)}</div>
                   </div>
 
                   {/* Actions */}
                   <div className="col-span-1 text-center">
                     {txnAlerts.length > 0 && (
                       <button 
-                        className="text-primary-600 hover:text-primary-800 text-sm font-medium"
+                        className="text-zinc-700 hover:text-zinc-900 text-sm font-medium"
                         onClick={() => {/* Toggle alert details */}}
                       >
                         🔍 Review
@@ -449,10 +449,10 @@ export default function TransactionList({ matterId }: TransactionListProps) {
 
                 {/* Alert Details (Expandable) - Only show if there are alerts */}
                 {txnAlerts.length > 0 && (
-                  <div className="bg-brand-surface-alt px-6 py-4 border-t border-brand-muted">
+                  <div className="bg-zinc-50 px-6 py-4 border-t border-zinc-200">
                     <div className="space-y-3">
                       {txnAlerts.map((alert) => (
-                        <div key={alert.id} className="bg-white rounded-md p-4 border border-brand-muted">
+                        <div key={alert.id} className="bg-white rounded-md p-4 border border-zinc-200">
                           {/* Alert Header */}
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex items-center space-x-2">
@@ -464,11 +464,11 @@ export default function TransactionList({ matterId }: TransactionListProps) {
 
                           {/* Alert Reasons */}
                           <div className="mb-3">
-                            <div className="text-xs font-semibold text-brand-ink-secondary mb-1">🚩 Alert Reasons:</div>
+                            <div className="text-xs font-semibold text-zinc-600 mb-1">🚩 Alert Reasons:</div>
                             <div className="space-y-1">
                               {alert.reasons.map((reason, idx) => (
-                                <div key={idx} className="text-sm text-brand-ink-secondary flex items-start">
-                                  <span className="mr-2 text-status-danger-700">•</span>
+                                <div key={idx} className="text-sm text-zinc-600 flex items-start">
+                                  <span className="mr-2 text-red-700">•</span>
                                   <span>{reason}</span>
                                 </div>
                               ))}
@@ -486,8 +486,8 @@ export default function TransactionList({ matterId }: TransactionListProps) {
       </div>
 
       {filteredTransactions.length === 0 && (
-        <div className="bg-white rounded-card border border-brand-muted p-8 text-center">
-          <p className="text-brand-ink-secondary">No transactions match the selected filter.</p>
+        <div className="bg-white rounded-md border border-zinc-200 p-8 text-center">
+          <p className="text-zinc-600">No transactions match the selected filter.</p>
         </div>
       )}
     </div>

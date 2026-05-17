@@ -53,8 +53,8 @@ export default function MatterDetailPage() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-          <p className="mt-4 text-brand-ink-secondary">Loading matter details...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-zinc-600"></div>
+          <p className="mt-4 text-zinc-600">Loading matter details...</p>
         </div>
       </div>
     )
@@ -64,10 +64,10 @@ export default function MatterDetailPage() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <p className="text-status-danger-700 text-lg">{error || 'Matter not found'}</p>
+          <p className="text-red-700 text-lg">{error || 'Matter not found'}</p>
           <button 
             onClick={() => window.location.reload()}
-            className="mt-4 bg-primary-700 text-white px-4 py-2 rounded-button"
+            className="mt-4 bg-zinc-900 text-white px-4 py-2 rounded"
           >
             Retry
           </button>
@@ -82,8 +82,8 @@ export default function MatterDetailPage() {
       <div className="mb-8">
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h1 className="text-page-title text-brand-ink">{matter.reference_number}</h1>
-            <p className="text-brand-ink-secondary mt-2">
+            <h1 className="text-page-title text-zinc-900">{matter.reference_number}</h1>
+            <p className="text-zinc-600 mt-2">
               {matter.client_name} - {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
             </p>
           </div>
@@ -92,13 +92,13 @@ export default function MatterDetailPage() {
               onClick={() => {
                 window.open(`${API_BASE_URL}/api/v1/matters/${id}/report`, '_blank')
               }}
-              className="px-4 py-2 border border-brand-muted text-brand-ink-secondary hover:bg-brand-surface-alt rounded-button"
+              className="px-4 py-2 border border-zinc-200 text-zinc-600 hover:bg-zinc-50 rounded"
             >
               📊 Generate Report
             </button>
             <button 
               onClick={() => setShowStatusModal(true)}
-              className="px-4 py-2 bg-primary-700 text-white rounded-button hover:bg-primary-800"
+              className="px-4 py-2 bg-zinc-900 text-white rounded hover:bg-zinc-900"
             >
               🔄 Update Status
             </button>
@@ -107,7 +107,7 @@ export default function MatterDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-brand-muted mb-6">
+      <div className="border-b border-zinc-200 mb-6">
         <nav className="-mb-px flex space-x-8 overflow-x-auto">
           {tabs.map((tab) => (
             <button
@@ -116,15 +116,15 @@ export default function MatterDetailPage() {
               className={`
                 whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium
                 ${activeTab === tab.id
-                  ? 'border-primary-700 text-primary-700'
-                  : 'border-transparent text-brand-ink-tertiary hover:text-brand-ink-secondary hover:border-brand-muted'
+                  ? 'border-zinc-900 text-zinc-900'
+                  : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:border-zinc-200'
                 }
               `}
             >
               {tab.name}
               {tab.count && (
                 <span className={`ml-2 py-0.5 px-2 rounded-full text-xs ${
-                  activeTab === tab.id ? 'bg-primary-50 text-primary-700' : 'bg-brand-surface-alt text-brand-ink-tertiary'
+                  activeTab === tab.id ? 'bg-zinc-50 text-zinc-900' : 'bg-zinc-50 text-zinc-400'
                 }`}>
                   {tab.count}
                 </span>
@@ -369,8 +369,8 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-          <p className="mt-2 text-brand-ink-secondary">Loading funds lineage data...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-600"></div>
+          <p className="mt-2 text-zinc-600">Loading funds lineage data...</p>
         </div>
       </div>
     )
@@ -380,14 +380,14 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
   if (!hasSavingsClaim) {
     return (
       <div className="space-y-6">
-        <div className="bg-white border border-brand-muted rounded-card p-6">
+        <div className="bg-white border border-zinc-200 rounded-md p-6">
           <div className="flex items-center gap-3 mb-4">
             <span className="text-2xl">🔗</span>
-            <h2 className="text-xl font-bold text-brand-ink">Backward Funds Lineage</h2>
+            <h2 className="text-xl font-bold text-zinc-900">Backward Funds Lineage</h2>
           </div>
           
-          <div className="bg-brand-surface-alt border border-brand-muted rounded-card p-4">
-            <div className="text-primary-700">
+          <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4">
+            <div className="text-zinc-900">
               <div className="font-semibold mb-2">ℹ️ Funds Lineage Not Required</div>
               <p className="text-sm">
                 The Backward Funds Lineage tool is designed for <strong>savings accumulation claims</strong> where
@@ -397,16 +397,16 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
                 The current SoF claims for this matter do not include savings-based sources.
                 This tool will become active if a savings claim is added.
               </p>
-              <div className="mt-4 p-3 bg-white rounded border border-brand-muted">
-                <div className="text-xs font-semibold text-brand-ink-secondary mb-2">Current Claims:</div>
+              <div className="mt-4 p-3 bg-white rounded border border-zinc-200">
+                <div className="text-xs font-semibold text-zinc-600 mb-2">Current Claims:</div>
                 {sofClaims.length > 0 ? (
-                  <ul className="text-xs text-brand-ink-secondary space-y-1">
+                  <ul className="text-xs text-zinc-600 space-y-1">
                     {sofClaims.map((claim, idx) => (
                       <li key={idx}>• {claim.source_type}: £{(claim.expected_amount || 0).toLocaleString()}</li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-xs text-brand-ink-tertiary">No claims recorded yet. Complete the SoF Assessment first.</p>
+                  <p className="text-xs text-zinc-400">No claims recorded yet. Complete the SoF Assessment first.</p>
                 )}
               </div>
             </div>
@@ -481,8 +481,8 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-          <p className="mt-2 text-brand-ink-secondary">Loading audit trail...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-600"></div>
+          <p className="mt-2 text-zinc-600">Loading audit trail...</p>
         </div>
       </div>
     )
@@ -501,20 +501,20 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
     switch (action) {
       case 'matter_created':
       case 'created':
-        return 'bg-status-success-100 text-status-success-700'
+        return 'bg-green-100 text-green-700'
       case 'status_changed':
-        return 'bg-status-info-100 text-status-info-700'
+        return 'bg-blue-100 text-blue-700'
       case 'report_generated':
       case 'exported':
-        return 'bg-primary-100 text-primary-700'
+        return 'bg-zinc-100 text-zinc-900'
       case 'alert_reviewed':
-        return 'bg-status-warning-100 text-status-warning-700'
+        return 'bg-amber-100 text-amber-700'
       case 'approved':
-        return 'bg-status-success-100 text-status-success-700'
+        return 'bg-green-100 text-green-700'
       case 'rejected':
-        return 'bg-status-danger-100 text-status-danger-700'
+        return 'bg-red-100 text-red-700'
       default:
-        return 'bg-brand-surface-alt text-brand-ink'
+        return 'bg-zinc-50 text-zinc-900'
     }
   }
 
@@ -522,28 +522,28 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
     switch (status) {
       case 'APPROVED':
       case 'COMPLETED':
-        return 'bg-status-success-100 text-status-success-700 border-status-success-200'
+        return 'bg-green-100 text-green-700 border-green-200'
       case 'REJECTED':
-        return 'bg-status-danger-100 text-status-danger-700 border-status-danger-200'
+        return 'bg-red-100 text-red-700 border-red-200'
       case 'UNDER_REVIEW':
-        return 'bg-status-info-100 text-status-info-700 border-status-info-200'
+        return 'bg-blue-100 text-blue-700 border-blue-200'
       case 'QUERIES_RAISED':
-        return 'bg-status-warning-100 text-status-warning-700 border-status-warning-200'
+        return 'bg-amber-100 text-amber-700 border-amber-200'
       default:
-        return 'bg-brand-surface-alt text-brand-ink-secondary border-brand-muted'
+        return 'bg-zinc-50 text-zinc-600 border-zinc-200'
     }
   }
 
   return (
     <div className="space-y-6">
       {/* Section toggle */}
-      <div className="flex space-x-2 border-b border-brand-muted pb-2">
+      <div className="flex space-x-2 border-b border-zinc-200 pb-2">
         <button
           onClick={() => setActiveSection('audit')}
           className={`px-4 py-2 text-sm font-medium rounded-t-lg ${
             activeSection === 'audit'
-              ? 'bg-brand-surface-alt text-primary-700 border-b-2 border-primary-700'
-              : 'text-brand-ink-tertiary hover:text-brand-ink-secondary'
+              ? 'bg-zinc-50 text-zinc-900 border-b-2 border-zinc-900'
+              : 'text-zinc-400 hover:text-zinc-600'
           }`}
         >
           Activity Log ({auditLogs.length})
@@ -552,8 +552,8 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
           onClick={() => setActiveSection('status')}
           className={`px-4 py-2 text-sm font-medium rounded-t-lg ${
             activeSection === 'status'
-              ? 'bg-brand-surface-alt text-primary-700 border-b-2 border-primary-700'
-              : 'text-brand-ink-tertiary hover:text-brand-ink-secondary'
+              ? 'bg-zinc-50 text-zinc-900 border-b-2 border-zinc-900'
+              : 'text-zinc-400 hover:text-zinc-600'
           }`}
         >
           Status History ({statusHistory.length})
@@ -562,9 +562,9 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
 
       {/* Activity Log */}
       {activeSection === 'audit' && (
-        <div className="bg-white border border-brand-muted rounded-card overflow-hidden">
+        <div className="bg-white border border-zinc-200 rounded-md overflow-hidden">
           {auditLogs.length === 0 ? (
-            <div className="px-6 py-8 text-center text-sm text-brand-ink-tertiary">
+            <div className="px-6 py-8 text-center text-sm text-zinc-400">
               No audit log entries yet.
             </div>
           ) : (
@@ -572,13 +572,13 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
               {auditLogs.map(entry => (
                 <div key={entry.id} className="px-6 py-4 flex items-start gap-4">
                   <div className="flex-shrink-0 mt-0.5">
-                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-badge ${actionBadgeColor(entry.action)}`}>
+                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded ${actionBadgeColor(entry.action)}`}>
                       {entry.action?.replace(/_/g, ' ')}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-brand-ink">{entry.description}</p>
-                    <p className="text-xs text-brand-ink-tertiary mt-1">
+                    <p className="text-sm text-zinc-900">{entry.description}</p>
+                    <p className="text-xs text-zinc-400 mt-1">
                       {entry.user_name || entry.user_email || 'System'} -- {formatDate(entry.created_at)}
                     </p>
                   </div>
@@ -591,9 +591,9 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
 
       {/* Status History */}
       {activeSection === 'status' && (
-        <div className="bg-white border border-brand-muted rounded-card overflow-hidden">
+        <div className="bg-white border border-zinc-200 rounded-md overflow-hidden">
           {statusHistory.length === 0 ? (
-            <div className="px-6 py-8 text-center text-sm text-brand-ink-tertiary">
+            <div className="px-6 py-8 text-center text-sm text-zinc-400">
               No status changes recorded yet.
             </div>
           ) : (
@@ -601,22 +601,22 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
               {statusHistory.map(entry => (
                 <div key={entry.id} className="px-6 py-4">
                   <div className="flex items-center gap-3 mb-2">
-                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-badge border ${statusBadgeColor(entry.old_status)}`}>
+                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded border ${statusBadgeColor(entry.old_status)}`}>
                       {entry.old_status?.replace(/_/g, ' ')}
                     </span>
-                    <svg className="w-4 h-4 text-brand-ink-tertiary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-zinc-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                     </svg>
-                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-badge border ${statusBadgeColor(entry.new_status)}`}>
+                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded border ${statusBadgeColor(entry.new_status)}`}>
                       {entry.new_status?.replace(/_/g, ' ')}
                     </span>
                   </div>
                   {entry.reason && (
-                    <p className="text-sm text-brand-ink-secondary mt-1">
+                    <p className="text-sm text-zinc-600 mt-1">
                       <span className="font-medium">Reason:</span> {entry.reason}
                     </p>
                   )}
-                  <p className="text-xs text-brand-ink-tertiary mt-1">
+                  <p className="text-xs text-zinc-400 mt-1">
                     {entry.changed_by_name || entry.changed_by_email || 'System'} -- {formatDate(entry.changed_at)}
                   </p>
                 </div>
