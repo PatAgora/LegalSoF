@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import PDFViewer, { scrollPDFToPage } from './PDFViewer';
 import { translateFlag } from './flagTranslations';
 import { API_BASE_URL, authFetch } from '../../lib/api';
+import { StatusChip, Button } from '../ui';
 
 interface VerificationData {
   id: number;
@@ -153,7 +154,8 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
     { name: 'Score', value: score },
     { name: 'Remaining', value: 100 - score },
   ];
-  const scoreColor = score >= 75 ? '#22c55e' : score >= 45 ? '#eab308' : '#ef4444';
+  // green-500 / amber-500 / red-500 — match the StatusChip palette.
+  const scoreColor = score >= 75 ? '#22c55e' : score >= 45 ? '#f59e0b' : '#ef4444';
 
   const handleFlagClick = (flag: typeof sortedFlags[0], idx: number) => {
     const pageNumbers = flag.details?.page_numbers;
@@ -267,19 +269,18 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
               {verification.identified_bank_template && (
                 <span className="text-xs text-brand-ink-secondary">({verification.identified_bank_template})</span>
               )}
-              <span className={`px-2 py-0.5 text-xs font-bold rounded-badge ${verdictColor}`}>
-                {verdictLabel}
-              </span>
+              <StatusChip verdict={verification.verdict} />
             </div>
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleDownloadEvidencePack}
-                disabled={downloadingPack}
-                className="px-3 py-1 text-xs font-semibold rounded border border-primary-300 text-primary-700 bg-white hover:bg-primary-50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                loading={downloadingPack}
                 title="Download a PDF report with verdict, flags and audit trail"
               >
                 {downloadingPack ? 'Building…' : 'Download evidence pack'}
-              </button>
+              </Button>
               <button
                 onClick={onClose}
                 className="p-1 rounded hover:bg-brand-surface-alt text-brand-ink-tertiary hover:text-brand-ink transition-colors"

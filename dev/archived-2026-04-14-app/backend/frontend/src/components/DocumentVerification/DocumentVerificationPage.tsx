@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import DocumentVerificationModal from './DocumentVerificationModal';
+import { StatusChip } from '../ui';
 
 interface VerificationData {
   id: number;
@@ -190,9 +191,9 @@ export default function DocumentVerificationPage({ matterId }: Props) {
                 )}
               </div>
 
-              {/* Verdict badge */}
-              <div className={`text-center py-1.5 rounded-badge text-xs font-bold ${vc.bgClass} ${vc.textClass}`}>
-                {vc.label}
+              {/* Verdict chip */}
+              <div className="flex justify-center">
+                <StatusChip verdict={v.verdict} />
               </div>
             </button>
           );

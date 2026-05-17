@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { api } from '../lib/api'
+import { Button, Alert } from '../components/ui'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -30,24 +31,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-700 via-primary-800 to-primary-900 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white/10 backdrop-blur-sm border border-white/20 rounded-card shadow-dropdown p-8">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-white border border-zinc-200/80 rounded-md shadow-[0_1px_3px_0_rgb(0_0_0/0.04)] p-8">
         <div className="text-center mb-8">
-          <img src="/agora-logo.png" alt="Agora Consulting AI" className="h-14 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-white">Agora Consulting AI</h1>
-          <p className="text-gray-300 mt-2">Source of Funds Automation</p>
+          <img src="/agora-logo.png" alt="Agora Consulting AI" className="h-10 mx-auto mb-4" />
+          <h1 className="text-lg font-semibold text-zinc-900">Agora Consulting AI</h1>
+          <p className="text-xs text-zinc-500 mt-1">Source of Funds Automation</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           {error && (
-            <div className="bg-status-danger-500/20 border border-status-danger-500/30 text-status-danger-100 px-4 py-3 rounded-button">
-              {error}
-            </div>
+            <Alert variant="error">{error}</Alert>
           )}
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-200 mb-2">
-              Email Address
+            <label htmlFor="email" className="block text-xs font-semibold text-zinc-700 mb-1.5">
+              Email
             </label>
             <input
               id="email"
@@ -55,13 +54,13 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 bg-white/10 border border-white/30 text-white placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+              className="w-full px-3 py-2 text-sm bg-white border border-zinc-300 rounded text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-transparent"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-200 mb-2">
+            <label htmlFor="password" className="block text-xs font-semibold text-zinc-700 mb-1.5">
               Password
             </label>
             <input
@@ -70,22 +69,24 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 bg-white/10 border border-white/30 text-white placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+              className="w-full px-3 py-2 text-sm bg-white border border-zinc-300 rounded text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-transparent"
               placeholder="••••••••"
             />
           </div>
 
-          <button
+          <Button
             type="submit"
-            disabled={loading}
-            className="w-full bg-accent-500 text-white py-3 px-4 rounded-lg font-medium hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-accent-400 focus:ring-offset-2 focus:ring-offset-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            variant="primary"
+            size="md"
+            loading={loading}
+            className="w-full"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+            {loading ? 'Signing in…' : 'Sign in'}
+          </Button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-gray-400">
-          <p>Contact your administrator for login credentials.</p>
+        <div className="mt-6 text-center text-xs text-zinc-400">
+          Contact your administrator for credentials.
         </div>
       </div>
     </div>
