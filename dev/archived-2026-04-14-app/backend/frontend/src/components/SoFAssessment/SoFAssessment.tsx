@@ -2039,61 +2039,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </details>
           </div>
 
-          {/* Uploaded Files List */}
-          {status && status.uploaded_files.length > 0 && (
-            <div className="bg-white border-2 border-zinc-400 rounded-md p-6">
-              <h3 className="text-lg font-bold text-zinc-900 mb-4">📎 Uploaded Documents</h3>
-              <div className="space-y-3">
-                {status.uploaded_files.map((file, idx) => {
-                  const verResult = fileVerificationResults[file.filename];
-                  const isCSV = file.filename?.toLowerCase().endsWith('.csv');
-                  const verdictBadge = verResult ? (
-                    verResult.verdict === 'Verified' ? (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-green-100 text-green-700 border border-green-200">
-                        {isCSV ? 'CHECKS PASSED' : 'VERIFIED'}
-                      </span>
-                    ) : verResult.verdict === 'Suspicious' ? (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-700 border border-amber-200">NEEDS REVIEW</span>
-                    ) : verResult.verdict === 'LikelyTampered' ? (
-                      <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-red-100 text-red-700 border border-red-200">FAILED</span>
-                    ) : null
-                  ) : null;
-                  return (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-zinc-50 rounded-md border border-zinc-200">
-                    <div className="flex items-center space-x-3">
-                      <span className="text-2xl text-green-700">✓</span>
-                      <div>
-                        <div className="font-semibold text-zinc-900 flex items-center">
-                          {file.filename}
-                          {verdictBadge}
-                        </div>
-                        <div className="text-sm text-zinc-600">
-                          {file.category.replace('_', ' ')} • {file.records_count} record(s)
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        if (confirm(`Remove "${file.filename}"?`)) {
-                          // TODO: Implement file removal
-                          // For now, we'll need to add a backend endpoint to remove individual files
-                          alert('File removal will be implemented. For now, use Reset Assessment to clear all files.');
-                        }
-                      }}
-                      className="px-3 py-1 text-sm text-red-700 hover:text-red-700 border border-red-200 rounded hover:bg-red-50"
-                    >
-                      ✕ Remove
-                    </button>
-                  </div>
-                  );
-                })}
-              </div>
-              <div className="mt-4 text-sm text-zinc-600">
-                💡 Tip: You can add more documents below. All uploaded files will be used in the assessment.
-              </div>
-            </div>
-          )}
-
           {/* Run Assessment Button */}
           {status && status.ready_for_assessment && (
             <div className="flex justify-center">
