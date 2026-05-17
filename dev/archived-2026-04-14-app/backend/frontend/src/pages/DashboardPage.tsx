@@ -8,12 +8,12 @@ import { Link } from 'react-router-dom'
 export default function DashboardPage() {
   return (
     <div className="space-y-8">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+      {/* Page Header — serif title above a hairline rule */}
+      <div className="border-b border-zinc-200 pb-6">
+        <h1 className="font-serif text-3xl font-normal tracking-tight text-zinc-900">
           Dashboard
         </h1>
-        <p className="mt-1 text-sm text-zinc-400">
+        <p className="mt-2 text-sm text-zinc-500">
           Source of Funds verification overview
         </p>
       </div>

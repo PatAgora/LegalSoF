@@ -29,10 +29,12 @@ const ACCENT: Record<NonNullable<CardProps['accent']>, string> = {
   blue:  'border-l-2 border-l-blue-500',
 };
 
+// Harvey-style: hairline border only, no shadow. Reads like a document
+// panel rather than a Material card.
 function CardRoot({ children, accent = 'none', className = '', ...rest }: CardProps) {
   return (
     <div
-      className={`bg-white rounded-md border border-zinc-200/80 shadow-[0_1px_3px_0_rgb(0_0_0/0.04)] overflow-hidden ${ACCENT[accent]} ${className}`}
+      className={`bg-white rounded-md border border-zinc-200 overflow-hidden ${ACCENT[accent]} ${className}`}
       {...rest}
     >
       {children}
@@ -43,7 +45,7 @@ function CardRoot({ children, accent = 'none', className = '', ...rest }: CardPr
 function CardHeader({ children, className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={`px-5 py-3 border-b border-zinc-100 bg-zinc-50/60 ${className}`}
+      className={`px-6 py-4 border-b border-zinc-100 ${className}`}
       {...rest}
     >
       {children}
@@ -53,7 +55,7 @@ function CardHeader({ children, className = '', ...rest }: HTMLAttributes<HTMLDi
 
 function CardBody({ children, className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`px-5 py-4 ${className}`} {...rest}>
+    <div className={`px-6 py-5 ${className}`} {...rest}>
       {children}
     </div>
   );
@@ -62,7 +64,7 @@ function CardBody({ children, className = '', ...rest }: HTMLAttributes<HTMLDivE
 function CardFooter({ children, className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={`px-5 py-3 border-t border-zinc-100 bg-zinc-50/60 ${className}`}
+      className={`px-6 py-4 border-t border-zinc-100 ${className}`}
       {...rest}
     >
       {children}

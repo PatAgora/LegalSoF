@@ -78,27 +78,27 @@ export default function MatterDetailPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex justify-between items-start mb-4">
+      {/* Header — serif title above hairline rule */}
+      <div className="mb-8 border-b border-zinc-200 pb-6">
+        <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-page-title text-zinc-900">{matter.reference_number}</h1>
-            <p className="text-zinc-600 mt-2">
-              {matter.client_name} - {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
+            <h1 className="font-serif text-3xl font-normal tracking-tight text-zinc-900">{matter.reference_number}</h1>
+            <p className="mt-2 text-sm text-zinc-500">
+              {matter.client_name} — {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
             </p>
           </div>
           <div className="flex space-x-3">
-            <button 
+            <button
               onClick={() => {
                 window.open(`${API_BASE_URL}/api/v1/matters/${id}/report`, '_blank')
               }}
-              className="px-4 py-2 border border-zinc-200 text-zinc-600 hover:bg-zinc-50 rounded"
+              className="px-4 py-2 text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 rounded transition-colors"
             >
-              📊 Generate Report
+              Generate Report
             </button>
-            <button 
+            <button
               onClick={() => setShowStatusModal(true)}
-              className="px-4 py-2 bg-zinc-900 text-white rounded hover:bg-zinc-900"
+              className="px-4 py-2 text-sm font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors"
             >
               🔄 Update Status
             </button>

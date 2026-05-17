@@ -34,8 +34,8 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white border border-zinc-200/80 rounded-md shadow-[0_1px_3px_0_rgb(0_0_0/0.04)] p-8">
         <div className="text-center mb-8">
-          <div className="text-3xl font-bold tracking-tight text-zinc-900 mb-2">Agora</div>
-          <p className="text-xs text-zinc-500">Source of Funds Automation</p>
+          <div className="font-serif text-4xl font-medium text-zinc-900 mb-3">Agora</div>
+          <p className="text-xs text-zinc-500 tracking-wide">Source of Funds Automation</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">

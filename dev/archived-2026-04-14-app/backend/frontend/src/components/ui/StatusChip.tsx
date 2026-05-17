@@ -46,7 +46,7 @@ export default function StatusChip({ severity, verdict, label, className = '', .
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide ring-1 ring-inset ${style.wrap} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.06em] ring-1 ring-inset ${style.wrap} ${className}`}
       {...rest}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />

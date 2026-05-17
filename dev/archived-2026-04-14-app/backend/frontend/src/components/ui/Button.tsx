@@ -21,21 +21,25 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   trailingIcon?: ReactNode;
 }
 
+// Quieter than a SaaS button. Primary is still solid black, but
+// font-weight is medium (500) rather than semibold so it doesn't shout.
+// Secondary uses a slightly darker border (zinc-300) so it reads
+// confidently against the warm stone-50 page background.
 const VARIANTS: Record<Variant, string> = {
   primary:   'bg-zinc-900 text-white hover:bg-zinc-800 focus-visible:ring-zinc-700',
-  secondary: 'bg-white text-zinc-700 hover:bg-zinc-50 border border-zinc-200 focus-visible:ring-zinc-400',
+  secondary: 'bg-white text-zinc-700 hover:bg-zinc-50 border border-zinc-300 focus-visible:ring-zinc-400',
   danger:    'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500',
   ghost:     'bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:ring-zinc-300',
 };
 
 const SIZES: Record<Size, string> = {
   sm: 'text-xs px-3 py-1.5 gap-1.5 rounded',
-  md: 'text-sm px-4 py-2 gap-2 rounded',
+  md: 'text-[13px] px-4 py-2 gap-2 rounded',
   lg: 'text-sm px-5 py-2.5 gap-2 rounded-md',
 };
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ variant = 'primary', size = 'md', loading, leadingIcon, trailingIcon, className = '', children, disabled, ...rest }, ref) => {
+  ({ variant = 'primary', size = 'sm', loading, leadingIcon, trailingIcon, className = '', children, disabled, ...rest }, ref) => {
     const base =
       'inline-flex items-center justify-center font-medium transition-colors ' +
       'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ' +

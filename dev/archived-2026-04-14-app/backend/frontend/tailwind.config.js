@@ -22,6 +22,10 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        // Reserved for page headings + the Agora wordmark. Gives the
+        // editorial / law-journal feel that anchors the legal-firm
+        // aesthetic.
+        serif: ['"IBM Plex Serif"', 'Georgia', 'serif'],
       },
       fontSize: {
         'page-title':    ['1.75rem',   { lineHeight: '2.25rem', fontWeight: '600', letterSpacing: '-0.025em' }],

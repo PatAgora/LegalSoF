@@ -26,10 +26,12 @@ function SidebarLink({ href, label, currentPath, onClick }: {
   onClick?: () => void;
 }) {
   const isActive = href === '/' ? currentPath === '/' : currentPath === href || currentPath.startsWith(href + '/')
-  const baseCls = 'px-4 py-2 text-sm font-medium transition-colors'
+  // Slightly thinner / smaller type than the SaaS default — reads more
+  // premium, more legal-journal.
+  const baseCls = 'pl-6 pr-4 py-2 text-[13px] transition-colors'
   const stateCls = isActive
-    ? 'bg-zinc-100 text-zinc-900 border-l-2 border-zinc-900'
-    : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 border-l-2 border-transparent'
+    ? 'bg-zinc-100 text-zinc-900 font-medium border-l-2 border-zinc-900 -ml-px'
+    : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 font-normal border-l-2 border-transparent -ml-px'
   return (
     <Link to={href} onClick={onClick} className={`${baseCls} ${stateCls}`}>
       {label}
@@ -138,15 +140,20 @@ export default function Layout() {
 
   const SidebarBody = (
     <>
-      {/* Sidebar header — wordmark */}
-      <div className="flex items-center h-16 px-4 border-b border-zinc-200">
-        <Link to="/" className="flex items-baseline gap-2" onClick={() => setSidebarOpen(false)}>
-          <span className="text-xl font-bold tracking-tight text-zinc-900">Agora</span>
+      {/* Sidebar header — wordmark in serif, like a masthead */}
+      <div className="flex items-center h-16 px-6 border-b border-zinc-200">
+        <Link to="/" className="flex items-baseline" onClick={() => setSidebarOpen(false)}>
+          <span className="font-serif text-2xl font-medium text-zinc-900">Agora</span>
         </Link>
       </div>
 
+      {/* Section label — refined uppercase tracking for the law-journal feel */}
+      <div className="px-6 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+        Workspace
+      </div>
+
       {/* Primary nav */}
-      <div className="py-2 flex flex-col">
+      <div className="flex flex-col">
         {NAV_LINKS.map(link => (
           <SidebarLink
             key={link.href}
@@ -160,11 +167,11 @@ export default function Layout() {
 
       {/* Footer — user + logout, sticks to bottom */}
       {user && (
-        <div className="mt-auto border-t border-zinc-200 px-4 py-3 text-xs text-zinc-500">
-          <div className="font-medium text-zinc-700 truncate">{user.full_name || user.email}</div>
+        <div className="mt-auto border-t border-zinc-200 px-6 py-4 text-[11px] text-zinc-500">
+          <div className="font-medium text-zinc-700 truncate text-[12px]">{user.full_name || user.email}</div>
           <button
             onClick={handleLogout}
-            className="mt-2 text-zinc-500 hover:text-zinc-900 transition-colors underline-offset-2 hover:underline"
+            className="mt-3 text-zinc-500 hover:text-zinc-900 transition-colors underline-offset-2 hover:underline"
           >
             Logout
           </button>
@@ -176,7 +183,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Desktop sidebar — persistent on md+ */}
-      <aside className="hidden md:flex md:flex-col md:w-60 md:fixed md:inset-y-0 md:left-0 bg-white border-r border-zinc-200 overflow-y-auto">
+      <aside className="hidden md:flex md:flex-col md:w-64 md:fixed md:inset-y-0 md:left-0 bg-white border-r border-zinc-200 overflow-y-auto">
         {SidebarBody}
       </aside>
 
@@ -196,7 +203,7 @@ export default function Layout() {
       </aside>
 
       {/* Content area — offset by sidebar width on md+ */}
-      <div className="flex-1 md:ml-60 flex flex-col min-w-0">
+      <div className="flex-1 md:ml-64 flex flex-col min-w-0">
         {/* Slim top bar — hamburger on mobile + notification bell on the right */}
         <header className="bg-white border-b border-zinc-200 h-14 flex items-center justify-between px-4 sm:px-6 lg:px-8">
           <button
