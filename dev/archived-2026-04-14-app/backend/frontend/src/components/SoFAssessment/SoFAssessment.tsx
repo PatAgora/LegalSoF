@@ -2121,14 +2121,21 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             };
             const v = verdictMap[status] || { label: status.toUpperCase() || 'UNKNOWN', severity: 'medium' as const, headline: 'Assessment complete.' };
             const total = result.evidence_matches?.length || 0;
-            // A claim is "passed" if its evidence verified cleanly OR an
-            // analyst has manually accepted the document differences.
-            // Everything else (failed, unverified, low-confidence, awaiting
-            // review) counts as needing review.
-            const passed = result.evidence_matches?.filter((e: any) =>
-              e.verified === true ||
-              e.document_verification?.manual_review_status === 'accepted'
-            ).length || 0;
+            // A claim "passed" only if EITHER:
+            //   - an analyst has manually accepted any differences, OR
+            //   - the document was verified AND the confidence is high
+            //     (>= 0.999, the existing "no manual review needed"
+            //     threshold used elsewhere in this file).
+            //
+            // Anything else — failed, no document, low confidence, awaiting
+            // review — counts as needing review. e.verified alone is not
+            // sufficient because the pipeline sometimes flags it true on
+            // claims that still failed downstream document checks.
+            const passed = result.evidence_matches?.filter((e: any) => {
+              if (e.document_verification?.manual_review_status === 'accepted') return true;
+              const confidence = e.document_verification?.confidence ?? 0;
+              return e.document_verified === true && confidence >= 0.999;
+            }).length || 0;
             const needsReview = Math.max(0, total - passed);
             return (
               <div className="bg-white border border-zinc-200 rounded-md">
