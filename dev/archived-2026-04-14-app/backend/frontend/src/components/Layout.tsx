@@ -1,6 +1,7 @@
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom'
+import { Outlet, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useAuthStore } from '../stores/authStore'
+import { useCurrentMatter } from '../stores/currentMatterStore'
 import { API_BASE_URL, authFetch } from '../lib/api'
 
 interface NotificationItem {
@@ -17,6 +18,17 @@ interface NotificationItem {
 const NAV_LINKS: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/matters', label: 'Matters' },
+]
+
+// Tabs shown in the sidebar when the user is INSIDE a matter. Each
+// links via ?tab=<id> on the current matter URL so the tab choice is
+// reflected in the address bar (bookmarkable, refresh-safe).
+const MATTER_TABS: { id: string; label: string }[] = [
+  { id: 'sof-assessment', label: 'SoF Assessment' },
+  { id: 'transactions',   label: 'Transaction Review' },
+  { id: 'funds-lineage',  label: 'Funds Lineage' },
+  { id: 'verification',   label: 'Verification' },
+  { id: 'audit-trail',    label: 'Audit Trail' },
 ]
 
 function SidebarLink({ href, label, currentPath, onClick }: {
@@ -39,15 +51,39 @@ function SidebarLink({ href, label, currentPath, onClick }: {
   )
 }
 
+// Sidebar tab link for the in-matter view. Activity tracked by ?tab=
+// search param; falls back to "sof-assessment" if no tab in URL.
+function MatterTabLink({ tabId, label, activeTab, matterId, onClick }: {
+  tabId: string;
+  label: string;
+  activeTab: string;
+  matterId: number;
+  onClick?: () => void;
+}) {
+  const isActive = activeTab === tabId
+  const baseCls = 'pl-6 pr-4 py-2 text-[13px] transition-colors'
+  const stateCls = isActive
+    ? 'bg-zinc-100 text-zinc-900 font-medium border-l-2 border-zinc-900 -ml-px'
+    : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 font-normal border-l-2 border-transparent -ml-px'
+  return (
+    <Link to={`/matters/${matterId}?tab=${tabId}`} onClick={onClick} className={`${baseCls} ${stateCls}`}>
+      {label}
+    </Link>
+  )
+}
+
 export default function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const { user, logout } = useAuthStore()
+  const currentMatter = useCurrentMatter((s) => s.matter)
   const [unreadCount, setUnreadCount] = useState(0)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false) // mobile drawer
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const activeTab = searchParams.get('tab') || 'sof-assessment'
 
   const handleLogout = () => {
     logout()
@@ -140,30 +176,76 @@ export default function Layout() {
 
   const SidebarBody = (
     <>
-      {/* Sidebar header — wordmark in serif, like a masthead */}
-      <div className="flex items-center h-16 px-6 border-b border-zinc-200">
-        <Link to="/" className="flex items-baseline" onClick={() => setSidebarOpen(false)}>
-          <span className="font-serif text-2xl font-medium text-zinc-900">Agora</span>
-        </Link>
-      </div>
+      {/* Sidebar header — wordmark in serif, like a masthead. Hidden
+          when we're inside a matter so the matter reference becomes
+          the title instead. */}
+      {!currentMatter && (
+        <div className="flex items-center h-16 px-6 border-b border-zinc-200">
+          <Link to="/" className="flex items-baseline" onClick={() => setSidebarOpen(false)}>
+            <span className="font-serif text-2xl font-medium text-zinc-900">Agora</span>
+          </Link>
+        </div>
+      )}
 
-      {/* Section label — refined uppercase tracking for the law-journal feel */}
-      <div className="px-6 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
-        Workspace
-      </div>
+      {currentMatter ? (
+        <>
+          {/* Matter context header — reference + client */}
+          <div className="px-6 pt-5 pb-4 border-b border-zinc-200">
+            <Link
+              to="/matters"
+              onClick={() => setSidebarOpen(false)}
+              className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-700 mb-2 transition-colors"
+            >
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              All matters
+            </Link>
+            <div className="font-serif text-xl font-medium text-zinc-900 leading-tight truncate" title={currentMatter.reference_number ?? ''}>
+              {currentMatter.reference_number || `Matter #${currentMatter.id}`}
+            </div>
+            {currentMatter.client_name && (
+              <div className="mt-1 text-xs text-zinc-500 truncate" title={currentMatter.client_name}>
+                {currentMatter.client_name}
+              </div>
+            )}
+          </div>
 
-      {/* Primary nav */}
-      <div className="flex flex-col">
-        {NAV_LINKS.map(link => (
-          <SidebarLink
-            key={link.href}
-            href={link.href}
-            label={link.label}
-            currentPath={location.pathname}
-            onClick={() => setSidebarOpen(false)}
-          />
-        ))}
-      </div>
+          <div className="px-6 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+            Matter
+          </div>
+          <div className="flex flex-col">
+            {MATTER_TABS.map(tab => (
+              <MatterTabLink
+                key={tab.id}
+                tabId={tab.id}
+                label={tab.label}
+                activeTab={activeTab}
+                matterId={currentMatter.id}
+                onClick={() => setSidebarOpen(false)}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Workspace section — primary app nav */}
+          <div className="px-6 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+            Workspace
+          </div>
+          <div className="flex flex-col">
+            {NAV_LINKS.map(link => (
+              <SidebarLink
+                key={link.href}
+                href={link.href}
+                label={link.label}
+                currentPath={location.pathname}
+                onClick={() => setSidebarOpen(false)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Footer — user + logout, sticks to bottom */}
       {user && (

@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import TransactionList from '../components/TransactionReview/TransactionList'
 import SoFAssessment from '../components/SoFAssessment/SoFAssessment'
@@ -6,16 +6,27 @@ import StatusUpdateModal from '../components/StatusUpdateModal'
 import FundsLineage from '../components/FundsLineage/FundsLineage'
 import DocumentVerificationPage from '../components/DocumentVerification/DocumentVerificationPage'
 import { API_BASE_URL, authFetch } from '../lib/api'
+import { useCurrentMatter } from '../stores/currentMatterStore'
 
 type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
+const VALID_TABS: TabType[] = [
+  'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'audit-trail',
+]
+
 export default function MatterDetailPage() {
   const { id } = useParams()
-  const [activeTab, setActiveTab] = useState<TabType>('sof-assessment')
+  const [searchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab') as TabType | null
+  const activeTab: TabType = (tabParam && VALID_TABS.includes(tabParam)) ? tabParam : 'sof-assessment'
+
   const [matter, setMatter] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showStatusModal, setShowStatusModal] = useState(false)
+
+  const setCurrentMatter = useCurrentMatter((s) => s.setMatter)
+  const clearCurrentMatter = useCurrentMatter((s) => s.clearMatter)
 
   // Fetch matter data from API
   useEffect(() => {
@@ -28,6 +39,13 @@ export default function MatterDetailPage() {
         }
         const data = await response.json()
         setMatter(data)
+        // Tell the Layout so it can put the sidebar in matter-context mode.
+        setCurrentMatter({
+          id: data.id,
+          reference_number: data.reference_number ?? null,
+          client_name: data.client_name ?? null,
+          transaction_type: data.transaction_type ?? null,
+        })
       } catch (err) {
         console.error('Error fetching matter:', err)
         setError('Failed to load matter details. Please try again.')
@@ -39,15 +57,12 @@ export default function MatterDetailPage() {
     if (id) {
       fetchMatter()
     }
-  }, [id])
 
-  const tabs = [
-    { id: 'sof-assessment' as TabType, name: 'SoF Assessment', count: null },
-    { id: 'transactions' as TabType, name: 'Transaction Review', count: null },
-    { id: 'funds-lineage' as TabType, name: 'Funds Lineage Model', count: null },
-    { id: 'verification' as TabType, name: 'Verification', count: null },
-    { id: 'audit-trail' as TabType, name: 'Audit Trail', count: null },
-  ]
+    // Clear the sidebar context when leaving the matter detail page.
+    return () => {
+      clearCurrentMatter()
+    }
+  }, [id, setCurrentMatter, clearCurrentMatter])
 
   if (loading) {
     return (
@@ -106,35 +121,7 @@ export default function MatterDetailPage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-zinc-200 mb-6">
-        <nav className="-mb-px flex space-x-8 overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`
-                whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium
-                ${activeTab === tab.id
-                  ? 'border-zinc-900 text-zinc-900'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:border-zinc-200'
-                }
-              `}
-            >
-              {tab.name}
-              {tab.count && (
-                <span className={`ml-2 py-0.5 px-2 rounded-full text-xs ${
-                  activeTab === tab.id ? 'bg-zinc-50 text-zinc-900' : 'bg-zinc-50 text-zinc-400'
-                }`}>
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* Tab Content */}
+      {/* Tab Content — sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
         {activeTab === 'sof-assessment' && <SoFAssessment matterId={matter.id} />}
         {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
