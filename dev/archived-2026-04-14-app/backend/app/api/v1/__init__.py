@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth, transactions, sof_assessment, matters,
     statement_validation, mfa, audit, notifications,
-    document_verification,
+    document_verification, analytics,
 )
 
 api_router = APIRouter()
@@ -20,3 +20,4 @@ api_router.include_router(statement_validation.router, tags=["statement-validati
 api_router.include_router(audit.router, tags=["audit"])
 api_router.include_router(notifications.router, tags=["notifications"])
 api_router.include_router(document_verification.router, tags=["document-verification"])
+api_router.include_router(analytics.router, tags=["analytics"])
