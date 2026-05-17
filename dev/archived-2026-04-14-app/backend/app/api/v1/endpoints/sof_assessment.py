@@ -943,15 +943,63 @@ async def upload_sof_files(
     elif file_category == 'bank_statement':
         # Merge bank statements
         new_transactions = result['data']['bank_statements']
-        
-        # Debug: Log account info for each new transaction batch
+
+        # ------------------------------------------------------------------
+        # Per-file account attribution
+        # ------------------------------------------------------------------
+        # The PDF parsers stamp synthetic account_ids like "PDF_P1_T1"
+        # based on page + table position. Two different uploaded
+        # statements often collide on the same synthetic id, which
+        # breaks the funds-lineage logic that groups by account ("Only
+        # one account uploaded" even when two were).
+        #
+        # Override account_id per FILE so each upload is a distinct
+        # account, and try to detect the account type from filename
+        # / extracted text so the savings → current matcher works.
         if new_transactions:
-            first_txn = new_transactions[0]
-            print(f"   📋 Adding {len(new_transactions)} transactions")
-            print(f"      Account ID: {first_txn.get('account_id', 'N/A')}")
-            print(f"      Account Type: {first_txn.get('account_type', 'N/A')}")
-            print(f"      Bank: {first_txn.get('bank_name', 'N/A')}")
-            print(f"      Sort Code: {first_txn.get('sort_code', 'N/A')}")
+            import re as _re
+            filename_lower = (file.filename or '').lower()
+
+            # Try to extract a real account-number-like token from the
+            # combined transaction descriptions / metadata. 8-digit run is
+            # the UK bank-account-number shape.
+            account_number = None
+            for txn in new_transactions[:50]:
+                for field in ('account_number', 'account_id', 'description', 'narrative'):
+                    val = str(txn.get(field, ''))
+                    m = _re.search(r'\b(\d{8})\b', val)
+                    if m:
+                        account_number = m.group(1)
+                        break
+                if account_number:
+                    break
+
+            # Per-file identifier — falls back to filename when no
+            # account-number-shaped token shows up in the parsed data.
+            file_account_id = (
+                account_number
+                or f"file:{file.filename or 'unknown'}"
+            )
+
+            # Detect account type from filename hints (only override
+            # when the parser left it blank or returned 'Unknown').
+            detected_type = None
+            if any(k in filename_lower for k in ('savings', 'isa', 'easy access', 'easyaccess', 'reserve')):
+                detected_type = 'savings'
+            elif any(k in filename_lower for k in ('current', 'cheque', 'cheqing')):
+                detected_type = 'current'
+
+            for txn in new_transactions:
+                txn['account_id'] = file_account_id
+                txn['source_filename'] = file.filename
+                if detected_type and not str(txn.get('account_type', '')).lower() in ('current', 'savings'):
+                    txn['account_type'] = detected_type
+
+            print(f"   📋 Adding {len(new_transactions)} transactions (file: {file.filename})")
+            print(f"      Account ID (file-scoped): {file_account_id}")
+            print(f"      Account Type: {new_transactions[0].get('account_type', 'N/A')}")
+            print(f"      Bank: {new_transactions[0].get('bank_name', 'N/A')}")
+            print(f"      Sort Code: {new_transactions[0].get('sort_code', 'N/A')}")
         
         storage['bank_statements'].extend(new_transactions)
         
