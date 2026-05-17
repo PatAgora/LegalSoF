@@ -2120,8 +2120,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             };
             const v = verdictMap[status] || { label: status.toUpperCase() || 'UNKNOWN', severity: 'medium' as const, headline: 'Assessment complete.' };
             const total = result.evidence_matches?.length || 0;
-            const verified = result.evidence_matches?.filter((e: any) => e.verified).length || 0;
-            const flagged = result.evidence_matches?.filter((e: any) => e.document_verified && (e.document_verification?.confidence || 0) < 0.999).length || 0;
+            // A claim is "passed" if its evidence verified cleanly OR an
+            // analyst has manually accepted the document differences.
+            // Everything else (failed, unverified, low-confidence, awaiting
+            // review) counts as needing review.
+            const passed = result.evidence_matches?.filter((e: any) =>
+              e.verified === true ||
+              e.document_verification?.manual_review_status === 'accepted'
+            ).length || 0;
+            const needsReview = Math.max(0, total - passed);
             return (
               <div className="bg-white border border-zinc-200 rounded-md">
                 <div className="px-6 py-5 flex items-start gap-6 border-b border-zinc-100">
@@ -2135,18 +2142,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </div>
                 <div className="grid grid-cols-3 divide-x divide-zinc-100">
                   <div className="px-6 py-4">
-                    <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{verified}<span className="text-zinc-300"> / {total}</span></div>
-                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims verified</div>
+                    <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{total}</div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims made</div>
                   </div>
                   <div className="px-6 py-4">
-                    <div className={`font-serif text-2xl font-normal tabular-nums ${flagged > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{flagged}</div>
+                    <div className={`font-serif text-2xl font-normal tabular-nums ${needsReview > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{needsReview}</div>
                     <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims requiring review</div>
                   </div>
                   <div className="px-6 py-4">
                     <div className={`font-serif text-2xl font-normal tabular-nums ${(docVerificationSummary?.likely_tampered_count ?? 0) > 0 ? 'text-red-700' : 'text-zinc-900'}`}>
                       {docVerificationSummary?.total_documents ?? 0}
                     </div>
-                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Documents verified</div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Documents reviewed</div>
                   </div>
                 </div>
                 <div className="px-6 py-4 border-t border-zinc-100 text-sm text-zinc-700 leading-relaxed">
