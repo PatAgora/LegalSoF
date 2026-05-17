@@ -119,6 +119,52 @@ interface SoFAssessmentProps {
   matterId: number;
 }
 
+// Render the numbered list of files already uploaded for one category
+// inside a tile body. Used by the bank-statement and supporting-doc
+// accordion bodies so reviewers can see what's there before deciding
+// whether to add another file.
+function renderUploadedList(
+  status: any,
+  verificationResults: Record<string, { verdict: string; score?: number }>,
+  category: 'client_info' | 'bank_statement' | 'supporting_doc',
+  emptyCopy: string,
+) {
+  const files: Array<{ filename: string; category: string; records_count?: number }> =
+    (status?.uploaded_files ?? []).filter((f: any) => f.category === category);
+
+  if (files.length === 0) {
+    return <p className="mb-4 text-xs text-zinc-400">{emptyCopy}</p>;
+  }
+
+  const verdictBadge = (verdict?: string) => {
+    if (!verdict) return null;
+    if (verdict === 'Verified')
+      return <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded bg-green-50 text-green-700 ring-1 ring-inset ring-green-200">VERIFIED</span>;
+    if (verdict === 'Suspicious')
+      return <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200">SUSPICIOUS</span>;
+    if (verdict === 'LikelyTampered')
+      return <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded bg-red-50 text-red-700 ring-1 ring-inset ring-red-200">LIKELY TAMPERED</span>;
+    return null;
+  };
+
+  return (
+    <ol className="mb-4 space-y-1.5">
+      {files.map((file, idx) => {
+        const ver = verificationResults[file.filename];
+        return (
+          <li key={`${file.filename}-${idx}`} className="flex items-center justify-between gap-3 px-3 py-2 bg-zinc-50 border border-zinc-200 rounded">
+            <span className="text-sm text-zinc-800 truncate flex items-baseline gap-2 min-w-0">
+              <span className="text-xs text-zinc-400 tabular-nums">{idx + 1}.</span>
+              <span className="truncate">{file.filename}</span>
+            </span>
+            {verdictBadge(ver?.verdict)}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 // FLAG_TRANSLATIONS and translateFlag imported from shared module above
 
 const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
@@ -1729,6 +1775,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </svg>
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
+                {/* List of client-info files already provided. The toggle
+                    below acts as the "Add document" mechanism. */}
+                {renderUploadedList(status, fileVerificationResults, 'client_info', 'No client info provided yet.')}
+                <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-3">Add document</div>
                 <div className="text-center">
                   <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
                 
@@ -1943,11 +1993,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </svg>
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
-              <div className="mb-4">
-                <p className="text-xs text-zinc-500">
-                  CSV or PDF. Multiple uploads supported.
-                </p>
-              </div>
+              {/* Numbered list of bank statements already uploaded */}
+              {renderUploadedList(status, fileVerificationResults, 'bank_statement', 'No bank statements uploaded yet.')}
+
+              {/* Add document */}
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-2">Add document</div>
               <FileUploader
                 key={`bank-${status?.files_summary?.bank_statements_count ?? 0}`}
                 category="Bank statement"
@@ -1973,11 +2023,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   ? { verdict: payload.verification_verdict }
                   : null}
               />
-              {status && status.files_summary && status.files_summary.bank_statements_count > 0 && (
-                <div className="mt-3 text-xs text-zinc-500">
-                  {status.files_summary.bank_statements_count} transaction record(s) extracted so far.
-                </div>
-              )}
               </div>
             </details>
 
@@ -2000,11 +2045,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </svg>
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
-              <div className="mb-4">
-                <p className="text-xs text-zinc-500">
-                  Probate grant, completion statement, gift letter, etc.
-                </p>
-              </div>
+              {/* Numbered list of supporting documents already uploaded */}
+              {renderUploadedList(status, fileVerificationResults, 'supporting_doc', 'No supporting documents uploaded yet.')}
+
+              {/* Add document */}
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-2">Add document</div>
               <FileUploader
                 key={`doc-${status?.files_summary?.supporting_docs_count ?? 0}`}
                 category="Supporting document"
@@ -2030,11 +2075,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   ? { verdict: payload.verification_verdict }
                   : null}
               />
-              {status && status.files_summary && status.files_summary.supporting_docs_count > 0 && (
-                <div className="mt-3 text-xs text-zinc-500">
-                  {status.files_summary.supporting_docs_count} document(s) uploaded so far.
-                </div>
-              )}
               </div>
             </details>
           </div>
