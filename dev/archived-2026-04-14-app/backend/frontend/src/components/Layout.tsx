@@ -120,25 +120,25 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-brand-surface">
-      {/* Navigation */}
-      <nav className="bg-primary-700 border-b border-primary-800">
+    <div className="min-h-screen bg-slate-50">
+      {/* Navigation — white bar, black text, zinc-900 underline on active. */}
+      <nav className="bg-white border-b border-zinc-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-20">
+          <div className="flex justify-between h-16">
             <div className="flex items-center">
               <Link to="/" className="flex items-center">
-                <img src="/agora-logo.png" alt="Agora Consulting AI" className="h-12" />
+                <img src="/agora-logo.png" alt="Agora Consulting AI" className="h-9" />
               </Link>
               <div className="hidden sm:ml-10 sm:flex sm:space-x-8">
                 <Link
                   to="/"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-white border-b-2 border-white"
+                  className="inline-flex items-center h-16 px-1 text-sm font-semibold text-zinc-900 border-b-2 border-zinc-900"
                 >
                   Dashboard
                 </Link>
                 <Link
                   to="/matters"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-300 hover:text-white border-b-2 border-transparent hover:border-gray-300"
+                  className="inline-flex items-center h-16 px-1 text-sm font-medium text-zinc-500 hover:text-zinc-900 border-b-2 border-transparent hover:border-zinc-300"
                 >
                   Matters
                 </Link>
@@ -151,15 +151,15 @@ export default function Layout() {
                   <div className="relative" ref={dropdownRef}>
                     <button
                       onClick={() => setShowDropdown(prev => !prev)}
-                      className="relative p-2 text-gray-300 hover:text-white transition-colors"
+                      className="relative p-2 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
                       aria-label="Notifications"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
                           d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                       </svg>
                       {unreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-bold text-white bg-primary-500 rounded-full">
+                        <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-bold text-white bg-zinc-900 rounded-full">
                           {unreadCount > 99 ? '99+' : unreadCount}
                         </span>
                       )}
@@ -167,13 +167,13 @@ export default function Layout() {
 
                     {/* Notification Dropdown */}
                     {showDropdown && (
-                      <div className="absolute right-0 mt-2 w-80 bg-white rounded-card shadow-dropdown border border-brand-muted z-50 overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-brand-muted">
-                          <h3 className="text-sm font-semibold text-brand-ink">Notifications</h3>
+                      <div className="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg border border-zinc-200 z-50 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100">
+                          <h3 className="text-sm font-semibold text-zinc-900">Notifications</h3>
                           {unreadCount > 0 && (
                             <button
                               onClick={handleMarkAllRead}
-                              className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+                              className="text-xs text-zinc-700 hover:text-zinc-900 font-medium underline-offset-2 hover:underline"
                             >
                               Mark all as read
                             </button>
@@ -181,7 +181,7 @@ export default function Layout() {
                         </div>
                         <div className="max-h-80 overflow-y-auto">
                           {notifications.length === 0 ? (
-                            <div className="px-4 py-8 text-center text-sm text-brand-ink-tertiary">
+                            <div className="px-4 py-8 text-center text-sm text-zinc-400">
                               No notifications
                             </div>
                           ) : (
@@ -189,18 +189,18 @@ export default function Layout() {
                               <button
                                 key={n.id}
                                 onClick={() => handleNotificationClick(n)}
-                                className={`w-full text-left px-4 py-3 border-b border-brand-muted hover:bg-brand-surface-alt transition-colors ${
-                                  !n.read ? 'bg-brand-surface-alt' : ''
+                                className={`w-full text-left px-4 py-3 border-b border-zinc-100 hover:bg-zinc-50 transition-colors ${
+                                  !n.read ? 'bg-zinc-50' : ''
                                 }`}
                               >
                                 <div className="flex items-start gap-2">
                                   {!n.read && (
-                                    <span className="mt-1.5 flex-shrink-0 h-2 w-2 rounded-full bg-primary-500"></span>
+                                    <span className="mt-1.5 flex-shrink-0 h-2 w-2 rounded-full bg-zinc-900"></span>
                                   )}
                                   <div className={!n.read ? '' : 'ml-4'}>
-                                    <p className="text-sm font-medium text-brand-ink truncate">{n.title}</p>
-                                    <p className="text-xs text-brand-ink-tertiary mt-0.5 line-clamp-2">{n.message}</p>
-                                    <p className="text-xs text-brand-ink-tertiary mt-1">{formatTimeAgo(n.created_at)}</p>
+                                    <p className="text-sm font-medium text-zinc-900 truncate">{n.title}</p>
+                                    <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2">{n.message}</p>
+                                    <p className="text-xs text-zinc-400 mt-1">{formatTimeAgo(n.created_at)}</p>
                                   </div>
                                 </div>
                               </button>
@@ -211,10 +211,10 @@ export default function Layout() {
                     )}
                   </div>
 
-                  <span className="text-sm text-gray-300">{user.full_name || user.email}</span>
+                  <span className="text-sm text-zinc-600">{user.full_name || user.email}</span>
                   <button
                     onClick={handleLogout}
-                    className="text-sm text-brand-ink-tertiary hover:text-white transition-colors"
+                    className="text-sm text-zinc-500 hover:text-zinc-900 transition-colors"
                   >
                     Logout
                   </button>

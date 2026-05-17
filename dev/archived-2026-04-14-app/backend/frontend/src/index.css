@@ -14,8 +14,8 @@
   body {
     margin: 0;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background-color: #faf9f7;
-    color: #1a1a1a;
+    background-color: #f8fafc;   /* slate-50 — matches CDD body */
+    color: #3f3f46;              /* zinc-700 — default body text */
     font-size: 14px;
     line-height: 1.6;
   }
@@ -26,22 +26,8 @@
   }
 
   *:focus-visible {
-    outline: 2px solid #6b8bad;
+    outline: 2px solid #71717a;  /* zinc-500 */
     outline-offset: 2px;
-  }
-
-  ::-webkit-scrollbar {
-    width: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #d9e2ec;
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #bcccdc;
   }
 }
 
