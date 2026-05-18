@@ -1324,6 +1324,34 @@ async def upload_sof_files(
         d = result['data']
         ci = d.get('client_info') if isinstance(d.get('client_info'), dict) else {}
         purchase = d.get('purchase') if isinstance(d.get('purchase'), dict) else {}
+
+        # sof_explanation is sometimes a plain string (regex extractor,
+        # simple JSON files) and sometimes a structured object (richer
+        # JSON exports). The frontend renders it as text in a textarea,
+        # so flatten objects into a human-readable string here rather
+        # than letting React render "[object Object]".
+        def _stringify_sof(v):
+            if v is None:
+                return ''
+            if isinstance(v, str):
+                return v
+            if isinstance(v, dict):
+                # Prefer common 'text'/'summary' fields if present;
+                # otherwise join key: value pairs newline-separated.
+                for k in ('text', 'summary', 'description', 'narrative', 'explanation'):
+                    if isinstance(v.get(k), str) and v[k].strip():
+                        return v[k]
+                parts = []
+                for k, val in v.items():
+                    if isinstance(val, (str, int, float)):
+                        parts.append(f"{k}: {val}")
+                    elif isinstance(val, (list, tuple)):
+                        parts.append(f"{k}: {', '.join(str(x) for x in val)}")
+                return "\n".join(parts)
+            if isinstance(v, (list, tuple)):
+                return "\n".join(_stringify_sof(x) for x in v if x)
+            return str(v)
+
         response_data["parsed_client_info"] = {
             "client_info": {
                 "client_name":         ci.get('client_name'),
@@ -1337,7 +1365,7 @@ async def upload_sof_files(
                 "expected_payment_date":   purchase.get('expected_payment_date'),
                 "description":             purchase.get('description'),
             },
-            "sof_explanation": d.get('sof_explanation') or '',
+            "sof_explanation": _stringify_sof(d.get('sof_explanation')),
         }
 
     return response_data

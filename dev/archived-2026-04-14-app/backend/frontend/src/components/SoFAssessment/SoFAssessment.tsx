@@ -347,7 +347,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           description:            pu.description            || prev.description,
         }));
         if (p.sof_explanation) {
-          setManualSofExplanation(prev => prev || p.sof_explanation);
+          // Defensive: backend should always flatten this to a string
+          // already, but if a richer object ever leaks through, render
+          // it as JSON rather than letting React produce "[object Object]"
+          // in the textarea.
+          const sofText = typeof p.sof_explanation === 'string'
+            ? p.sof_explanation
+            : (() => {
+                try { return JSON.stringify(p.sof_explanation, null, 2); }
+                catch { return String(p.sof_explanation); }
+              })();
+          setManualSofExplanation(prev => prev || sofText);
         }
         // Flip to manual mode so the user sees the pre-filled form and
         // can verify / tweak before submission.
