@@ -222,13 +222,27 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const [docVerOverrideSubmitting, setDocVerOverrideSubmitting] = useState(false);
   const [fileVerificationResults, setFileVerificationResults] = useState<{ [filename: string]: { verdict: string; score: number; method?: string } }>({});
 
-  // Load funds lineage data
+  // Load funds lineage data.
+  //
+  // The GET endpoint wraps the payload as
+  //   { exists: true, funds_lineage: { summary, unresolved_items, ... } }
+  // but the rest of this component reads fields off the top level
+  // (fundsLineageData.summary, fundsLineageData.unresolved_items).
+  // Flatten on receipt so the tile reflects the real run instead of
+  // showing the "No analysis run yet" empty state.
   const loadFundsLineageData = async () => {
     try {
       const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/funds-lineage`);
       if (response.ok) {
-        const data = await response.json();
-        setFundsLineageData(data);
+        const raw = await response.json();
+        if (raw && raw.exists && raw.funds_lineage) {
+          setFundsLineageData({
+            exists: true,
+            ...raw.funds_lineage,
+          });
+        } else {
+          setFundsLineageData(raw);
+        }
       }
     } catch (err) {
       console.error('Error loading funds lineage:', err);
