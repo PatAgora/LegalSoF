@@ -937,12 +937,47 @@ async def upload_sof_files(
     # CSVs: run statement validation pipeline (math check → binary pass/fail)
     import asyncio
     import hashlib as _hashlib
+
     verification_verdict = None
     verification_score = None
+    doc_ver_record = None
+
+    # ------------------------------------------------------------------
+    # Dedupe by file hash. Same file uploaded twice on the same matter
+    # MUST produce the same verification result — otherwise the analyst
+    # sees a different verdict on re-upload, which is confusing and
+    # erodes trust in the pipeline. The pipeline is mostly
+    # deterministic, but the OCR / cross-document stages have small
+    # variation that can flip borderline flags between runs.
+    # Short-circuiting on hash also avoids the cost of re-running the
+    # full pipeline on a known file.
+    # ------------------------------------------------------------------
+    _precomputed_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
+    existing_dv = (
+        db.query(DocumentVerification)
+        .filter(
+            DocumentVerification.matter_id == matter_id,
+            DocumentVerification.file_hash == _precomputed_hash,
+        )
+        .first()
+    )
+    if existing_dv:
+        verification_verdict = existing_dv.verdict.value if existing_dv.verdict else None
+        verification_score = existing_dv.authenticity_score
+        doc_ver_record = existing_dv
+        print(
+            f"   ↺ Skipping verification — file hash {_precomputed_hash[:12]}…"
+            f" already verified as DV #{existing_dv.id} ({verification_verdict})"
+        )
+
     try:
         is_pdf = file_content_for_verification[:4] == b"%PDF"
 
-        if is_pdf:
+        if existing_dv:
+            # Already verified — skip the rest of the verification work.
+            # Skip the entire pipeline branch by raising-to-continue.
+            pass
+        elif is_pdf:
             # --- PDF: structural verification ---
             loop = asyncio.get_event_loop()
             doc_ver_result: DocVerResult = await loop.run_in_executor(
