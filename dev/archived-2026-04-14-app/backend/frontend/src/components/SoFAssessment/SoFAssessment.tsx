@@ -1821,15 +1821,25 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 <div className="text-center">
                   <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
                 
-                {/* Show success state if already uploaded */}
-                {status && status.files_summary && status.files_summary.client_info === 'uploaded' ? (
+                {/* Branch priority:
+                    1. clientInfoInputMethod === 'manual' — the form is
+                       open for review/edit (either user clicked Enter
+                       Manually, or an uploaded file pre-filled the
+                       fields and switched mode). Falls through to the
+                       final else branch where the form is rendered.
+                    2. Uploaded AND not currently editing — show the
+                       success state with a View / Edit button to enter
+                       the form.
+                    3. Otherwise initial choice / file picker.
+                */}
+                {clientInfoInputMethod !== 'manual' && status && status.files_summary && status.files_summary.client_info === 'uploaded' ? (
                   <>
                     <div className="mt-3 text-green-700 text-sm font-medium">✓ Uploaded</div>
                     <button
-                      onClick={() => setClientInfoInputMethod(null)}
+                      onClick={() => setClientInfoInputMethod('manual')}
                       className="mt-2 text-xs text-zinc-700 hover:text-zinc-900 underline"
                     >
-                      Change
+                      View / edit
                     </button>
                   </>
                 ) : clientInfoInputMethod === null ? (
