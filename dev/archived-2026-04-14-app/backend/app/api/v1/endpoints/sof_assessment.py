@@ -1327,28 +1327,120 @@ async def upload_sof_files(
 
         # sof_explanation is sometimes a plain string (regex extractor,
         # simple JSON files) and sometimes a structured object (richer
-        # JSON exports). The frontend renders it as text in a textarea,
-        # so flatten objects into a human-readable string here rather
-        # than letting React render "[object Object]".
+        # JSON exports with a `sources` array). The frontend renders
+        # it as text in a textarea, so flatten objects into plain
+        # English here rather than letting React render
+        # "[object Object]" or a raw Python repr.
+        def _humanise_amount(amount, currency):
+            try:
+                amt = float(amount)
+            except (TypeError, ValueError):
+                return None
+            cur = (currency or 'GBP').upper().strip()
+            sym = {'GBP': '£', 'USD': '$', 'EUR': '€'}.get(cur, '')
+            formatted = f"{amt:,.0f}" if amt == int(amt) else f"{amt:,.2f}"
+            return f"{sym}{formatted} {cur}" if sym else f"{formatted} {cur}"
+
+        def _humanise_date(d):
+            if not d:
+                return None
+            from datetime import datetime as _dt
+            for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%d/%m/%Y', '%d-%m-%Y'):
+                try:
+                    return _dt.strptime(str(d)[:len(fmt) + 4], fmt).strftime('%d %B %Y')
+                except (ValueError, TypeError):
+                    continue
+            return str(d)
+
+        def _source_to_prose(idx, src):
+            """Turn one source dict (property_sale / savings / salary
+            / inheritance / etc.) into a numbered prose paragraph."""
+            if not isinstance(src, dict):
+                return f"{idx}. {src}"
+            source_type = (src.get('source_type') or 'Source').replace('_', ' ').title()
+            amount_str = _humanise_amount(src.get('amount'), src.get('currency'))
+            head = f"{idx}. {source_type}"
+            if amount_str:
+                head += f" — {amount_str}"
+            lines = [head]
+            description = (src.get('description') or '').strip()
+            if description:
+                lines.append(f"   {description}")
+            # Optional contextual lines, in a stable order so output
+            # reads consistently. Hidden when missing.
+            ctx_keys = [
+                ('property_address',   'Address'),
+                ('title_number',       'Title number'),
+                ('completion_date',    'Completion date'),
+                ('solicitor_firm',     'Solicitor'),
+                ('bank',               'Bank'),
+                ('account_number',     'Account'),
+                ('sort_code',          'Sort code'),
+                ('employer',           'Employer'),
+                ('grant_date',         'Granted on'),
+                ('grant_authority',    'Granted by'),
+                ('payer',              'From'),
+                ('reference',          'Reference'),
+                ('notes',              'Notes'),
+            ]
+            for key, label in ctx_keys:
+                val = src.get(key)
+                if val in (None, ''):
+                    continue
+                if 'date' in key:
+                    val = _humanise_date(val) or val
+                lines.append(f"   {label}: {val}")
+            return "\n".join(lines)
+
         def _stringify_sof(v):
             if v is None:
                 return ''
             if isinstance(v, str):
                 return v
             if isinstance(v, dict):
-                # Prefer common 'text'/'summary' fields if present;
-                # otherwise join key: value pairs newline-separated.
-                for k in ('text', 'summary', 'description', 'narrative', 'explanation'):
+                # 1) If there's already a narrative-style field, use it.
+                for k in ('text', 'summary', 'narrative', 'explanation'):
                     if isinstance(v.get(k), str) and v[k].strip():
                         return v[k]
+
+                # 2) If there's a `sources` array (property sales,
+                #    savings, salary, inheritance etc.), render each
+                #    as a numbered prose block. This is the AML-rich
+                #    shape we see in real client info files.
+                sources = v.get('sources')
+                if isinstance(sources, (list, tuple)) and sources:
+                    blocks: list = []
+                    # Lead with a total line when a totals field is present.
+                    total = v.get('total_amount') or v.get('total')
+                    total_str = _humanise_amount(total, v.get('currency') or 'GBP')
+                    if total_str:
+                        blocks.append(f"Total funds: {total_str}, from {len(sources)} source(s):")
+                    elif len(sources) > 1:
+                        blocks.append(f"The funds come from {len(sources)} sources:")
+                    for i, s in enumerate(sources, start=1):
+                        blocks.append(_source_to_prose(i, s))
+                    # Trailing narrative if any.
+                    if isinstance(v.get('notes'), str) and v['notes'].strip():
+                        blocks.append(f"Notes: {v['notes']}")
+                    return "\n\n".join(blocks)
+
+                # 3) Generic fallback — render the dict as readable
+                #    "Key: value" lines, prettifying the keys.
                 parts = []
                 for k, val in v.items():
+                    label = k.replace('_', ' ').capitalize()
                     if isinstance(val, (str, int, float)):
-                        parts.append(f"{k}: {val}")
+                        parts.append(f"{label}: {val}")
                     elif isinstance(val, (list, tuple)):
-                        parts.append(f"{k}: {', '.join(str(x) for x in val)}")
+                        parts.append(f"{label}: {', '.join(str(x) for x in val)}")
+                    elif isinstance(val, dict):
+                        parts.append(f"{label}: {_stringify_sof(val)}")
                 return "\n".join(parts)
+
             if isinstance(v, (list, tuple)):
+                # List of sources without a wrapping dict.
+                if v and all(isinstance(x, dict) for x in v):
+                    return "\n\n".join(_source_to_prose(i + 1, s) for i, s in enumerate(v))
                 return "\n".join(_stringify_sof(x) for x in v if x)
             return str(v)
 
