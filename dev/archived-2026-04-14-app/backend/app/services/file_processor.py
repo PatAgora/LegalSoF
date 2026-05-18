@@ -67,6 +67,11 @@ class FileProcessor:
         elif file_type == 'pdf_document':
             print(f"📄 Processing as supporting document: {filename}")
             return self.process_pdf_document(content)
+        elif file_type == 'client_info_document':
+            # Free-text client-info file (PDF / Word / CSV / TXT) —
+            # extract text then regex out the structured fields.
+            print(f"📄 Processing as client_info document: {filename}")
+            return self.process_client_info_document(content, filename)
         elif file_type == 'image':
             return self.process_image_bank_statement(content, filename)
         elif file_type == 'excel':
@@ -972,6 +977,218 @@ class FileProcessor:
             return False, f"Expected {'/'.join(allowed_mimes)}, got {file.content_type}"
         
         return True, "Valid"
+
+
+    # ------------------------------------------------------------------
+    # Client-info document parser
+    # ------------------------------------------------------------------
+    # Extracts the SAME structured shape that process_json produces
+    # (client_info / purchase / sof_explanation) — but from a free-text
+    # PDF, Word doc, CSV or TXT. Regex-driven, never throws; missing
+    # fields stay null so the frontend pre-fill logic just leaves them
+    # blank and the user enters them manually.
+    def process_client_info_document(self, content: bytes, filename: str = '') -> Dict[str, Any]:
+        text = self._extract_text_for_client_info(content, filename)
+        if not text or not text.strip():
+            return {
+                "success": False,
+                "error": "Could not read any text from the file.",
+            }
+
+        client_info, purchase, sof_explanation = self._regex_client_info(text)
+
+        # Always return a populated structure even when some fields are
+        # missing — the upload pipeline downstream calls
+        # `data['client_info']` etc unconditionally, so we mustn't drop
+        # the keys.
+        return {
+            "success": True,
+            "file_type": filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'text',
+            "data": {
+                "client_info": client_info,
+                "purchase": purchase,
+                "sof_explanation": sof_explanation,
+                "known_documents": [],
+                "flags": {"pep": client_info.get('pep_status', False)},
+                "constraints": {},
+                "claims": [],
+            },
+        }
+
+    def _extract_text_for_client_info(self, content: bytes, filename: str) -> str:
+        """Pull plain text from whatever format the user uploaded."""
+        ext = (filename.rsplit('.', 1)[-1] or '').lower() if '.' in filename else ''
+        try:
+            if ext == 'pdf' or content[:4] == b'%PDF':
+                try:
+                    import fitz  # PyMuPDF
+                    doc = fitz.open(stream=content, filetype='pdf')
+                    try:
+                        return "\n".join((p.get_text() or '') for p in doc)
+                    finally:
+                        doc.close()
+                except Exception:
+                    return ''
+            if ext in ('docx', 'doc'):
+                try:
+                    from docx import Document
+                    import io as _io
+                    doc = Document(_io.BytesIO(content))
+                    return "\n".join(p.text for p in doc.paragraphs)
+                except Exception:
+                    return content.decode('utf-8', errors='ignore')
+            # CSV / TXT / fallback — just decode bytes.
+            return content.decode('utf-8', errors='ignore')
+        except Exception:
+            return ''
+
+    @staticmethod
+    def _regex_client_info(text: str) -> tuple:
+        """Run the actual extraction. Returns (client_info dict,
+        purchase dict, sof_explanation str)."""
+        import re
+
+        # ---------- helpers --------------------------------------------
+        def _find_first(patterns, flags=re.IGNORECASE):
+            for pat in patterns:
+                m = re.search(pat, text, flags)
+                if m:
+                    return m.group(1).strip()
+            return None
+
+        def _clean(s):
+            if not s:
+                return None
+            # Strip surrounding quotes and trailing punctuation /
+            # whitespace.
+            s = s.strip().strip('"\'')
+            return s or None
+
+        # ---------- client name ----------------------------------------
+        client_name = _find_first([
+            r'(?:client(?:\'s)?\s+name|full\s+name|customer\s+name|name\s+of\s+client)\s*[:\-]\s*([^\n\r]+?)(?:\n|$|,|;)',
+            r'(?:client|customer)\s*[:\-]\s*((?:Mr|Mrs|Ms|Miss|Dr|Mr\.|Mrs\.|Ms\.|Dr\.)\s+[A-Z][^\n\r]{1,80})',
+        ])
+        client_name = _clean(client_name)
+
+        # ---------- business sector ------------------------------------
+        business_sector = _clean(_find_first([
+            r'(?:business\s+sector|industry|sector|occupation|profession)\s*[:\-]\s*([^\n\r]+?)(?:\n|$|,|;)',
+        ]))
+
+        # ---------- risk rating ----------------------------------------
+        risk_raw = _find_first([
+            r'(?:client\s+)?risk\s*(?:rating)?\s*[:\-]\s*(low|medium|high|standard|elevated|enhanced)',
+        ])
+        risk = None
+        if risk_raw:
+            r = risk_raw.lower()
+            if r in ('low', 'standard'):
+                risk = 'low'
+            elif r in ('medium',):
+                risk = 'medium'
+            elif r in ('high', 'elevated', 'enhanced'):
+                risk = 'high'
+
+        # ---------- PEP status -----------------------------------------
+        pep_status = False
+        pep_match = re.search(
+            r'(?:pep|politically\s+exposed\s+person|political(?:ly)?\s+exposed)\s*[:\-]\s*(yes|no|true|false|n/a|none)',
+            text, re.IGNORECASE,
+        )
+        if pep_match:
+            pep_status = pep_match.group(1).lower() in ('yes', 'true')
+        elif re.search(r'\bPEP\s*[:\-]?\s*(?:yes|y|true)\b', text, re.IGNORECASE):
+            pep_status = True
+        elif re.search(r'is\s+a\s+politically\s+exposed\s+person', text, re.IGNORECASE):
+            pep_status = True
+
+        # ---------- amount + currency ----------------------------------
+        amount = None
+        currency = None
+        # Try labelled amount first: "purchase price: £500,000",
+        # "transaction amount: 250000 GBP", "amount: $1,200,000".
+        labelled = re.search(
+            r'(?:purchase\s+(?:price|amount)|transaction\s+amount|amount|sum\s+of)\s*[:\-]?\s*'
+            r'(?P<sym>[£$€])?\s*(?P<value>[\d][\d,]*(?:\.\d+)?)\s*(?P<cur>GBP|USD|EUR|AUD|CAD|NZD|CHF|JPY|SGD)?',
+            text, re.IGNORECASE,
+        )
+        if labelled:
+            try:
+                amount = float(labelled.group('value').replace(',', ''))
+                sym = labelled.group('sym') or ''
+                cur = (labelled.group('cur') or '').upper()
+                if cur:
+                    currency = cur
+                elif sym == '£':
+                    currency = 'GBP'
+                elif sym == '$':
+                    currency = 'USD'
+                elif sym == '€':
+                    currency = 'EUR'
+            except (TypeError, ValueError):
+                amount = None
+        # Fallback — any £-prefixed number anywhere in the doc.
+        if amount is None:
+            free = re.search(r'£\s*([\d][\d,]*(?:\.\d+)?)', text)
+            if free:
+                try:
+                    amount = float(free.group(1).replace(',', ''))
+                    currency = 'GBP'
+                except (TypeError, ValueError):
+                    amount = None
+
+        # ---------- expected payment date -------------------------------
+        # Accept "expected payment date: 12/06/2026" / "completion
+        # date: 12 June 2026" / ISO. Best-effort parse to YYYY-MM-DD.
+        date_iso = None
+        date_raw = _find_first([
+            r'(?:expected\s+(?:payment|completion)\s+date|completion\s+date|payment\s+date|date\s+expected)\s*[:\-]\s*([^\n\r,;]+?)(?:\n|$|,|;)',
+        ])
+        if date_raw:
+            from datetime import datetime as _dt
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%d %B %Y', '%d %b %Y', '%d.%m.%Y'):
+                try:
+                    date_iso = _dt.strptime(date_raw.strip(), fmt).date().isoformat()
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # ---------- purchase description --------------------------------
+        description = _clean(_find_first([
+            r'(?:purchase\s+description|transaction\s+description|purpose|description\s+of\s+purchase)\s*[:\-]\s*([^\n\r]+?)(?:\n|$)',
+        ]))
+
+        # ---------- source-of-funds explanation -------------------------
+        # Try a labelled block first: capture lines following the label
+        # until a blank line or the next "FieldName:" header.
+        sof = None
+        block_match = re.search(
+            r'(?:source\s+of\s+funds(?:\s+explanation)?|funds\s+explanation|sof\s+explanation)\s*[:\-]\s*'
+            r'(.+?)(?:\n\s*\n|\n[A-Z][A-Za-z ]{1,40}:|\Z)',
+            text, re.IGNORECASE | re.DOTALL,
+        )
+        if block_match:
+            sof = block_match.group(1).strip()
+            # Collapse extra whitespace.
+            sof = re.sub(r'\s+', ' ', sof).strip()
+            if len(sof) < 4:
+                sof = None
+
+        # Build outputs.
+        client_info = {
+            'client_name':        client_name,
+            'client_risk_rating': risk or 'medium',
+            'business_sector':    business_sector,
+            'pep_status':         pep_status,
+        }
+        purchase = {
+            'amount':                amount,
+            'currency':              currency or 'GBP',
+            'expected_payment_date': date_iso,
+            'description':           description,
+        }
+        return client_info, purchase, (sof or '')
 
 
 # Singleton instance

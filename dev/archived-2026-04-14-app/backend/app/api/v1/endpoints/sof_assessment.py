@@ -859,12 +859,25 @@ async def upload_sof_files(
     file_ext = file.filename.split('.')[-1].lower() if file.filename else ''
     
     if file_category == 'client_info':
-        if file_ext != 'json':
+        # Accept JSON (structured) plus free-text formats — PDF, Word,
+        # CSV. The file_processor turns the free-text content into the
+        # same shape the frontend manual form uses via regex
+        # extraction.
+        if file_ext == 'json':
+            file_type = 'json'
+        elif file_ext == 'pdf':
+            file_type = 'client_info_document'
+        elif file_ext in ('docx', 'doc'):
+            file_type = 'client_info_document'
+        elif file_ext == 'csv':
+            file_type = 'client_info_document'
+        elif file_ext == 'txt':
+            file_type = 'client_info_document'
+        else:
             raise HTTPException(
-                status_code=400, 
-                detail="Client info must be JSON file"
+                status_code=400,
+                detail="Client info must be JSON, PDF, Word, CSV or TXT.",
             )
-        file_type = 'json'
     
     elif file_category == 'bank_statement':
         if file_ext == 'csv':
