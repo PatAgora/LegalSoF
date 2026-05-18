@@ -1303,6 +1303,30 @@ async def upload_sof_files(
         response_data["verification_score"] = verification_score
         response_data["verification_method"] = doc_ver_record.verification_method if doc_ver_record else None
 
+    # Return the parsed client_info payload so the frontend can pre-fill
+    # the manual form fields and let the user verify / edit before
+    # running the assessment. Only sent for client_info; bank_statement
+    # and supporting_doc don't need this.
+    if file_category == 'client_info' and isinstance(result.get('data'), dict):
+        d = result['data']
+        ci = d.get('client_info') if isinstance(d.get('client_info'), dict) else {}
+        purchase = d.get('purchase') if isinstance(d.get('purchase'), dict) else {}
+        response_data["parsed_client_info"] = {
+            "client_info": {
+                "client_name":         ci.get('client_name'),
+                "client_risk_rating":  ci.get('client_risk_rating'),
+                "business_sector":     ci.get('business_sector'),
+                "pep_status":          bool(ci.get('pep_status') or d.get('flags', {}).get('pep') if isinstance(d.get('flags'), dict) else ci.get('pep_status')),
+            },
+            "purchase": {
+                "amount":                  purchase.get('amount'),
+                "currency":                purchase.get('currency') or 'GBP',
+                "expected_payment_date":   purchase.get('expected_payment_date'),
+                "description":             purchase.get('description'),
+            },
+            "sof_explanation": d.get('sof_explanation') or '',
+        }
+
     return response_data
 
 

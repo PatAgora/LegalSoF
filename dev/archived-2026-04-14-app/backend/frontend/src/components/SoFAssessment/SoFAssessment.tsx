@@ -327,6 +327,33 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         }));
       }
 
+      // Auto-populate the manual form when client_info was uploaded as
+      // a file. The user can then review / edit / submit. We don't
+      // overwrite fields the user has already typed.
+      if (category === 'client_info' && uploadResult.parsed_client_info) {
+        const p = uploadResult.parsed_client_info;
+        const ci = p.client_info || {};
+        const pu = p.purchase || {};
+        setManualClientInfo(prev => ({
+          client_name:        ci.client_name        || prev.client_name,
+          client_risk_rating: (['low','medium','high'].includes(ci.client_risk_rating) ? ci.client_risk_rating : prev.client_risk_rating) as 'low' | 'medium' | 'high',
+          pep_status:         typeof ci.pep_status === 'boolean' ? ci.pep_status : prev.pep_status,
+          business_sector:    ci.business_sector    || prev.business_sector,
+        }));
+        setManualPurchase(prev => ({
+          amount:                 pu.amount != null ? String(pu.amount) : prev.amount,
+          currency:               pu.currency               || prev.currency,
+          expected_payment_date:  pu.expected_payment_date  || prev.expected_payment_date,
+          description:            pu.description            || prev.description,
+        }));
+        if (p.sof_explanation) {
+          setManualSofExplanation(prev => prev || p.sof_explanation);
+        }
+        // Flip to manual mode so the user sees the pre-filled form and
+        // can verify / tweak before submission.
+        setClientInfoInputMethod('manual');
+      }
+
       await fetchStatus();
     } catch (error: any) {
       setErrors(prev => ({ ...prev, [category]: error.message }));
@@ -1857,6 +1884,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 ) : (
                   // Manual input mode
                   <div className="text-left space-y-3 mt-4">
+                    {/* Pre-filled banner — shown when an uploaded
+                        client-info file populated the form. The user
+                        should review and edit before submitting. */}
+                    {status && status.files_summary && status.files_summary.client_info === 'uploaded' && manualClientInfo.client_name && (
+                      <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                        <span className="font-semibold">Pre-filled from your uploaded file.</span>{' '}
+                        Review the details below and click Submit to save them to this matter.
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-medium text-zinc-600 mb-1">
                         Client Name *
