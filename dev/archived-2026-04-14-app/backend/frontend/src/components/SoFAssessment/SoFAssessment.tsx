@@ -2092,7 +2092,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 disabled={loading}
                 className="px-8 py-3 bg-zinc-900 text-white rounded hover:bg-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-lg"
               >
-                {loading ? '⏳ Running Assessment...' : '🚀 Run SoF Assessment'}
+                {loading ? 'Running assessment...' : 'Run SoF Assessment'}
               </button>
             </div>
           )}
