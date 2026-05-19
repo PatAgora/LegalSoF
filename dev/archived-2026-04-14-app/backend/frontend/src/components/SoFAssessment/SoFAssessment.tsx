@@ -1577,7 +1577,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       </div>
                       <div className="px-6 py-4">
                         <div className={`font-serif text-2xl font-normal tabular-nums ${untraced > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{fmt(untraced)}</div>
-                        <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Untraced</div>
+                        <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Untraced ({Math.max(0, 100 - tracedPct)}%)</div>
                       </div>
                       <div className="px-6 py-4">
                         <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{s.matchedTransfers || 0}</div>
