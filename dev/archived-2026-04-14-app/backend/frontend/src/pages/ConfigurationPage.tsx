@@ -40,26 +40,29 @@ const SECTIONS: Section[] = [
     id: 'tr',
     title: 'Transaction Review',
     prefix: 'tr_',
+    // Rules listed first (boolean toggles), then numeric thresholds,
+    // then narrative keywords. Keeps the rendered ordering predictable
+    // and groups the on/off switches together so a reviewer can
+    // quickly enable/disable whole rule families.
     legacyKeys: [
-      'cfg_high_risk_min_amount',
-      'cfg_outlier_vs_median',
-      'cfg_outlier_min_amount',
-      'cfg_cash_threshold_deposit',
-      'cfg_cash_threshold_withdrawal',
-      'cfg_velocity_days',
-      'cfg_velocity_count',
-      'rule_high_risk_country',
       'rule_prohibited_country',
+      'rule_high_risk_country',
       'rule_cash_deposit',
       'rule_cash_withdrawal',
       'rule_outlier',
       'rule_velocity',
       'rule_unusual_narrative',
+      'cfg_high_risk_min_amount',
+      'cfg_cash_threshold_deposit',
+      'cfg_cash_threshold_withdrawal',
+      'cfg_outlier_min_amount',
+      'cfg_outlier_vs_median',
+      'cfg_velocity_days',
+      'cfg_velocity_count',
       'unusual_narrative_keywords',
     ],
-    title: 'Transaction Review',
     blurb:
-      'Rules and thresholds applied by the transaction monitoring engine — high-risk countries, cash, outliers, velocity, narrative keywords, structuring patterns.',
+      'Rules and thresholds applied by the transaction monitoring engine — high-risk countries, cash, outliers, velocity, narrative keywords, structuring patterns. Toggles control which rules fire; numeric thresholds tune their sensitivity.',
   },
   {
     id: 'fl',
@@ -109,32 +112,61 @@ export default function ConfigurationPage() {
   const [draft, setDraft] = useState<Record<string, string>>({}); // raw string per key for the input
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [reseeding, setReseeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config`);
-        if (!r.ok) {
-          throw new Error(`Could not load settings (${r.status})`);
-        }
-        const data = await r.json();
-        if (cancelled) return;
-        setConfig(data);
-        const d: Record<string, string> = {};
-        for (const k of Object.keys(data)) d[k] = data[k].value;
-        setDraft(d);
-      } catch (e: any) {
-        setError(e?.message || 'Failed to load configuration.');
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadConfig = async () => {
+    setLoading(true);
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config`);
+      if (!r.ok) {
+        throw new Error(`Could not load settings (${r.status})`);
       }
-    })();
-    return () => { cancelled = true; };
+      const data = await r.json();
+      setConfig(data);
+      const d: Record<string, string> = {};
+      for (const k of Object.keys(data)) d[k] = data[k].value;
+      setDraft(d);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load configuration.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConfig();
   }, []);
+
+  // Backfill any missing catalogue rows from defaults. Existing values
+  // stay intact. Used when a section comes back empty because the seed
+  // never ran on a deploy.
+  const onRestoreDefaults = async () => {
+    if (!confirm(
+      'Backfill missing settings from the catalogue defaults? '
+      + 'Existing values are not changed — only missing rows are inserted.',
+    )) return;
+    setReseeding(true);
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config/reseed`, {
+        method: 'POST',
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || `Reseed failed (${r.status})`);
+      }
+      const result = await r.json();
+      setSavedNote(`Defaults restored (${result.total_settings} settings on file).`);
+      setTimeout(() => setSavedNote(null), 5000);
+      await loadConfig();
+    } catch (e: any) {
+      setError(e?.message || 'Could not restore defaults.');
+    } finally {
+      setReseeding(false);
+    }
+  };
 
   const dirtyKeys = useMemo(() => {
     return Object.keys(draft).filter((k) => config[k] && draft[k] !== config[k].value);
@@ -224,22 +256,37 @@ export default function ConfigurationPage() {
           </p>
         </div>
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <button
-            type="button"
-            disabled={saving || dirtyKeys.length === 0}
-            onClick={onSave}
-            className={`px-4 py-2 text-sm font-medium rounded transition-colors whitespace-nowrap ${
-              saving || dirtyKeys.length === 0
-                ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
-                : 'bg-zinc-900 text-white hover:bg-zinc-800'
-            }`}
-          >
-            {saving
-              ? 'Saving…'
-              : dirtyKeys.length === 0
-              ? 'No changes'
-              : `Save ${dirtyKeys.length} change${dirtyKeys.length === 1 ? '' : 's'}`}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onRestoreDefaults}
+              disabled={reseeding}
+              title="Backfill any missing settings from the catalogue defaults. Existing values are preserved."
+              className={`px-3 py-2 text-sm font-medium rounded border transition-colors whitespace-nowrap ${
+                reseeding
+                  ? 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
+                  : 'bg-white text-zinc-900 border-zinc-300 hover:bg-zinc-50'
+              }`}
+            >
+              {reseeding ? 'Restoring…' : 'Restore defaults'}
+            </button>
+            <button
+              type="button"
+              disabled={saving || dirtyKeys.length === 0}
+              onClick={onSave}
+              className={`px-4 py-2 text-sm font-medium rounded transition-colors whitespace-nowrap ${
+                saving || dirtyKeys.length === 0
+                  ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
+                  : 'bg-zinc-900 text-white hover:bg-zinc-800'
+              }`}
+            >
+              {saving
+                ? 'Saving…'
+                : dirtyKeys.length === 0
+                ? 'No changes'
+                : `Save ${dirtyKeys.length} change${dirtyKeys.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
           {savedNote && <span className="text-xs text-green-700">{savedNote}</span>}
           {error && <span className="text-xs text-red-700 max-w-xs text-right">{error}</span>}
         </div>
@@ -247,8 +294,23 @@ export default function ConfigurationPage() {
 
       {SECTIONS.map((section) => {
         const keys = keysBySection[section.id] || [];
-        if (keys.length === 0) return null;
         const sectionDirty = keys.some((k) => draft[k] !== config[k]?.value);
+        if (keys.length === 0) {
+          // Section has no rows yet — usually means the seed didn't run.
+          // Show the section header anyway so the user can see it exists
+          // and trigger a re-seed from the page header button.
+          return (
+            <section key={section.id} className="bg-white border border-zinc-200 rounded-md overflow-hidden">
+              <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
+                <h2 className="text-base font-bold text-zinc-900">{section.title}</h2>
+                <p className="mt-1 text-xs text-zinc-600 max-w-2xl">{section.blurb}</p>
+              </div>
+              <div className="px-6 py-8 text-center text-sm text-zinc-500">
+                No settings for this section yet. Click <span className="font-medium text-zinc-700">Restore defaults</span> at the top of the page to populate them.
+              </div>
+            </section>
+          );
+        }
         return (
           <section
             key={section.id}

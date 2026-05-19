@@ -785,15 +785,43 @@ async def update_transaction_config(
     """
     Update transaction monitoring configuration (admin only)
     """
-    
+
     for key, value in updates.items():
         config_item = db.query(TransactionConfig).filter(TransactionConfig.key == key).first()
         if config_item:
             config_item.value = value
-    
+
     db.commit()
-    
+
     return {"success": True, "message": "Configuration updated"}
+
+
+@router.post("/transaction-config/reseed")
+async def reseed_transaction_config(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_sync_db),
+):
+    """
+    Backfill any missing configuration keys from the catalogue defaults.
+
+    Idempotent — existing rows are left untouched (so an operator's
+    saved values are preserved). Only rows that don't exist yet are
+    inserted. Useful when the seed didn't run on deploy or when new
+    settings were added in a release.
+    """
+    from sqlalchemy import create_engine
+    from app.core.config import settings
+    from app.db.init_transaction_tables import seed_transaction_config
+
+    db_url = str(settings.DATABASE_URL).replace("postgresql+asyncpg", "postgresql")
+    sync_engine = create_engine(db_url)
+    try:
+        seed_transaction_config(sync_engine)
+    finally:
+        sync_engine.dispose()
+
+    total = db.query(TransactionConfig).count()
+    return {"success": True, "total_settings": total}
 
 @router.get("/matters/{matter_id}/transaction-alerts/{alert_id}/context-analysis")
 async def get_alert_context_analysis(
