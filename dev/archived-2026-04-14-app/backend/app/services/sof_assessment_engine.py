@@ -22,7 +22,40 @@ class SoFAssessmentEngine:
     def __init__(self, matter_id: int, db: Session):
         self.matter_id = matter_id
         self.db = db
-        
+        self.settings = self._load_settings()
+
+    def _load_settings(self) -> Dict[str, Any]:
+        """Load the operator-tunable risk-appetite settings from the
+        transaction_config table. Falls back to sensible defaults if
+        the table hasn't been seeded yet — keeps the engine usable in
+        unit tests that don't run the boot path."""
+        defaults = {
+            'sof_amount_tolerance_pct':       5.0,
+            'sof_date_tolerance_days':        7,
+            'sof_confidence_threshold':       0.999,
+            'sof_partial_confidence_threshold': 0.99,
+        }
+        try:
+            from app.models.transaction import TransactionConfig
+            rows = self.db.query(TransactionConfig).filter(
+                TransactionConfig.key.in_(defaults.keys())
+            ).all()
+            out = dict(defaults)
+            for row in rows:
+                try:
+                    if row.value_type == 'float':
+                        out[row.key] = float(row.value)
+                    elif row.value_type == 'int':
+                        out[row.key] = int(row.value)
+                    else:
+                        out[row.key] = row.value
+                except Exception:
+                    pass  # keep default on a parse miss
+            return out
+        except Exception:
+            return defaults
+
+
     def assess(
         self,
         client_info: Dict[str, Any],
@@ -532,7 +565,10 @@ class SoFAssessmentEngine:
         for claim in claims:
             matches = []
             expected_amount = claim['expected_amount']
-            tolerance = expected_amount * 0.05  # 5% tolerance
+            # Tolerance comes from the Configuration page
+            # (sof_amount_tolerance_pct, default 5%).
+            tolerance_pct = float(self.settings.get('sof_amount_tolerance_pct', 5.0)) / 100.0
+            tolerance = expected_amount * tolerance_pct
             
             # Filter to credit transactions
             credits = [t for t in bank_statements if t.get('direction') == 'credit']
@@ -1210,7 +1246,7 @@ class SoFAssessmentEngine:
             1 for e in evidence_matches 
             if e.get('verified') 
             and e.get('document_verified')
-            and e.get('confidence', 0) >= 0.999  # Require 100% confidence
+            and e.get('confidence', 0) >= self.settings.get('sof_confidence_threshold', 0.999)
         )
         total_claims = len(claims)
         
@@ -1362,7 +1398,7 @@ class SoFAssessmentEngine:
             1 for e in evidence_matches 
             if e.get('verified') 
             and e.get('document_verified')
-            and e.get('confidence', 0) >= 0.999  # Require 100% confidence
+            and e.get('confidence', 0) >= self.settings.get('sof_confidence_threshold', 0.999)
         )
         
         if fully_verified_count == total_claims:
@@ -1653,7 +1689,7 @@ class SoFAssessmentEngine:
             claim_fully_verified = (
                 evidence.get('verified', False) and 
                 evidence.get('document_verified', False) and
-                evidence.get('document_verification', {}).get('confidence', 0) >= 0.99
+                evidence.get('document_verification', {}).get('confidence', 0) >= self.settings.get('sof_partial_confidence_threshold', 0.99)
             )
             
             # Skip document requests for fully verified claims (100% confidence)
@@ -1714,7 +1750,7 @@ class SoFAssessmentEngine:
         all_fully_verified = all(
             match.get('verified', False) and 
             match.get('document_verified', False) and
-            match.get('document_verification', {}).get('confidence', 0) >= 0.99
+            match.get('document_verification', {}).get('confidence', 0) >= self.settings.get('sof_partial_confidence_threshold', 0.99)
             for match in evidence_matches
         ) if evidence_matches else False
         

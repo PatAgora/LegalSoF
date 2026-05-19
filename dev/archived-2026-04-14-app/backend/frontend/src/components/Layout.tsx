@@ -18,6 +18,7 @@ interface NotificationItem {
 const NAV_LINKS: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/matters', label: 'Matters' },
+  { href: '/configuration', label: 'Configuration' },
 ]
 
 // Tabs shown in the sidebar when the user is INSIDE a matter. Each

@@ -128,51 +128,139 @@ def seed_country_risk_data(engine):
 
 
 def seed_transaction_config(engine):
-    """Seed default transaction monitoring configuration"""
+    """Seed the platform configuration catalogue.
+
+    The transaction_config table holds every operator-tunable threshold,
+    risk-appetite setting and rule toggle across the SoF, Document
+    Verification, Transaction Review and Funds Lineage sections of the
+    platform. Settings are namespaced by prefix:
+
+        sof_*  → Source of Funds Analysis
+        dv_*   → Document Verification
+        tr_*   → Transaction Review (existing rule_*/cfg_* kept for
+                  backwards compatibility with the transaction
+                  monitoring service)
+        fl_*   → Funds Lineage
+
+    Idempotent — on every boot, missing rows are inserted with their
+    defaults but existing rows are left untouched so an operator's
+    saved values are preserved across deploys.
+    """
     with engine.connect() as conn:
-        # Check if config already exists
-        result = conn.execute(text("SELECT COUNT(*) FROM transaction_config"))
-        count = result.scalar()
-        
-        if count > 0:
-            print(f"ℹ️  Transaction config already exists ({count} settings)")
-            return
-        
-        # Default configuration (based on original app)
+        # The full catalogue. Each row: (key, default_value, type,
+        # description). value_type is "string" | "int" | "float" |
+        # "bool" | "json". Description is shown to the operator in the
+        # Configuration page so write it as user-facing copy.
         configs = [
-            # Thresholds
-            ('cfg_high_risk_min_amount', '10000.00', 'float', 'Minimum amount (GBP) to trigger high-risk country alert'),
-            ('cfg_outlier_vs_median', '5.0', 'float', 'Multiplier for outlier detection (x times median)'),
-            ('cfg_outlier_min_amount', '1000.00', 'float', 'Minimum amount (GBP) for outlier detection'),
-            ('cfg_cash_threshold_deposit', '7500.00', 'float', 'Cash deposit threshold (GBP)'),
-            ('cfg_cash_threshold_withdrawal', '7500.00', 'float', 'Cash withdrawal threshold (GBP)'),
-            ('cfg_velocity_days', '7', 'int', 'Days to check for velocity alerts'),
-            ('cfg_velocity_count', '5', 'int', 'Number of transactions for velocity alert'),
-            
-            # Rule toggles
-            ('rule_high_risk_country', 'true', 'bool', 'Alert on high-risk country transactions'),
-            ('rule_prohibited_country', 'true', 'bool', 'Alert on prohibited country transactions'),
-            ('rule_cash_deposit', 'true', 'bool', 'Alert on large cash deposits'),
-            ('rule_cash_withdrawal', 'true', 'bool', 'Alert on large cash withdrawals'),
-            ('rule_outlier', 'true', 'bool', 'Alert on outlier transactions'),
-            ('rule_velocity', 'true', 'bool', 'Alert on transaction velocity'),
-            ('rule_unusual_narrative', 'true', 'bool', 'Alert on unusual narrative patterns'),
-            
-            # Narrative keywords (JSON list)
-            ('unusual_narrative_keywords', '["cash", "bearer", "nominee", "offshore", "shell", "sanctioned", "embargo", "frozen", "cryptocurrency", "crypto", "bitcoin", "dark web", "darkweb", "ransom", "extortion"]', 'json', 'Keywords that trigger unusual narrative alerts'),
+            # ── Source of Funds Analysis ──────────────────────────────
+            ('sof_amount_tolerance_pct', '5.0', 'float',
+             'Allowed % difference between the amount declared on a SoF claim and the amount evidenced on a document or bank transaction. Above this threshold the claim is flagged for manual review.'),
+            ('sof_date_tolerance_days', '7', 'int',
+             'Number of days of slack permitted between a claim date and the matched bank transaction or supporting document date.'),
+            ('sof_confidence_threshold', '0.999', 'float',
+             'Minimum document-match confidence (0.0–1.0) for a SoF claim to auto-pass without manual review.'),
+            ('sof_partial_confidence_threshold', '0.99', 'float',
+             'Lower confidence threshold (0.0–1.0) used for partial / borderline auto-acceptance paths in the SoF engine.'),
+            ('sof_min_claims_required', '1', 'int',
+             'Minimum number of SoF claims that must be evidenced for the matter to reach a "sufficient" outcome.'),
+
+            # ── Document Verification ─────────────────────────────────
+            ('dv_score_verified_min', '75', 'int',
+             'Minimum authenticity score (0–100) at which a document is automatically classified as Verified.'),
+            ('dv_score_suspicious_min', '45', 'int',
+             'Authenticity score at and above which a document is classified as Suspicious rather than Likely Tampered.'),
+            ('dv_weight_authenticity', '0.5', 'float',
+             'Weight applied to the structural authenticity sub-score when computing the overall document score (0.0–1.0).'),
+            ('dv_weight_forensic_flags', '0.3', 'float',
+             'Weight applied to the forensic-flag deduction when computing the overall document score (0.0–1.0).'),
+            ('dv_weight_template_match', '0.2', 'float',
+             'Weight applied to the bank-template fingerprint match when computing the overall document score (0.0–1.0).'),
+            ('dv_block_on_tampered', 'true', 'bool',
+             'When enabled, documents with the Likely Tampered verdict block downstream processing until a reviewer accepts the document with a rationale.'),
+            ('dv_allow_self_accept', 'true', 'bool',
+             'When enabled, any analyst can accept a Suspicious document inline with a rationale. When disabled, only admins via the four-eyes flow can sign off.'),
+
+            # ── Transaction Review ─────────────────────────────────────
+            # Pre-existing thresholds — preserved exactly so the
+            # transaction-monitoring service keeps working unchanged.
+            ('cfg_high_risk_min_amount', '10000.00', 'float',
+             'Minimum transaction amount (GBP) that triggers a high-risk-country alert.'),
+            ('cfg_outlier_vs_median', '5.0', 'float',
+             'A transaction is flagged as an outlier when its amount exceeds this multiple of the median.'),
+            ('cfg_outlier_min_amount', '1000.00', 'float',
+             'Minimum transaction amount (GBP) considered when running outlier detection.'),
+            ('cfg_cash_threshold_deposit', '7500.00', 'float',
+             'Cash deposit value (GBP) at and above which a Large Cash Deposit alert is raised.'),
+            ('cfg_cash_threshold_withdrawal', '7500.00', 'float',
+             'Cash withdrawal value (GBP) at and above which a Large Cash Withdrawal alert is raised.'),
+            ('cfg_velocity_days', '7', 'int',
+             'Window (in days) used by the velocity rule when counting recent transactions.'),
+            ('cfg_velocity_count', '5', 'int',
+             'Number of transactions inside the velocity window that triggers a velocity alert.'),
+            ('rule_high_risk_country', 'true', 'bool', 'Raise an alert when a transaction touches a high-risk country.'),
+            ('rule_prohibited_country', 'true', 'bool', 'Raise an alert when a transaction touches a prohibited country.'),
+            ('rule_cash_deposit', 'true', 'bool', 'Raise an alert on large cash deposits.'),
+            ('rule_cash_withdrawal', 'true', 'bool', 'Raise an alert on large cash withdrawals.'),
+            ('rule_outlier', 'true', 'bool', 'Raise an alert on outlier transactions.'),
+            ('rule_velocity', 'true', 'bool', 'Raise an alert on rapid transaction velocity.'),
+            ('rule_unusual_narrative', 'true', 'bool', 'Raise an alert when a transaction narrative matches a flagged keyword.'),
+            ('unusual_narrative_keywords',
+             '["cash", "bearer", "nominee", "offshore", "shell", "sanctioned", "embargo", "frozen", "cryptocurrency", "crypto", "bitcoin", "dark web", "darkweb", "ransom", "extortion"]',
+             'json', 'Keywords that trigger the unusual-narrative alert. Stored as a JSON list of strings.'),
+
+            # New transaction-review settings exposed via the Configuration page
+            ('tr_round_number_alert_amount', '5000.00', 'float',
+             'A credit at or above this amount with a round number (multiple of 1000) is flagged for review.'),
+            ('tr_structuring_window_days', '3', 'int',
+             'Window (in days) used when looking for structuring/smurfing patterns (multiple deposits just below the reporting threshold).'),
+            ('tr_structuring_band_pct', '20.0', 'float',
+             'Transactions falling within this percentage band BELOW the cash threshold are considered candidates for structuring.'),
+            ('tr_critical_alerts_block', 'true', 'bool',
+             'When enabled, any Critical transaction-review alert blocks the matter from being marked as "sufficient" until resolved.'),
+
+            # ── Funds Lineage ─────────────────────────────────────────
+            ('fl_traced_pct_required', '80.0', 'float',
+             'Minimum % of the claimed amount that must be traced to a verified origin for a savings/accumulation claim to auto-pass.'),
+            ('fl_amount_match_tolerance', '0.005', 'float',
+             'Allowed fractional tolerance (0.005 = 0.5%) when matching debits to credits across accounts during lineage tracing.'),
+            ('fl_min_amount_match_gbp', '1.00', 'float',
+             'Floor (GBP) on the lineage amount-match tolerance. Pairs within max(this, total*amount_match_tolerance) are treated as equivalent.'),
+            ('fl_max_lookback_days', '730', 'int',
+             'Maximum number of days the lineage tracer will walk backwards from the target credit when searching for funding sources.'),
+            ('fl_circular_reference_severity', 'high', 'string',
+             'Severity (low | medium | high | critical) raised when the lineage tracer detects an A→B→A loop between accounts.'),
+            ('fl_statement_gap_warn_days', '30', 'int',
+             'When statements for an upstream account are missing for more than this many days, a "statement gap" review item is raised.'),
         ]
-        
+
+        existing_keys = {
+            row[0] for row in conn.execute(text("SELECT key FROM transaction_config")).all()
+        }
+
+        inserted = 0
         for key, value, value_type, description in configs:
+            if key in existing_keys:
+                # Preserve operator-set values across deploys; only refresh
+                # the description so help text can be tweaked centrally.
+                conn.execute(
+                    text("UPDATE transaction_config SET description = :description WHERE key = :key"),
+                    {"key": key, "description": description},
+                )
+                continue
             conn.execute(
-                text("""
-                    INSERT INTO transaction_config (key, value, value_type, description)
-                    VALUES (:key, :value, :value_type, :description)
-                """),
-                {"key": key, "value": value, "value_type": value_type, "description": description}
+                text(
+                    "INSERT INTO transaction_config (key, value, value_type, description) "
+                    "VALUES (:key, :value, :value_type, :description)"
+                ),
+                {"key": key, "value": value, "value_type": value_type, "description": description},
             )
-        
+            inserted += 1
+
         conn.commit()
-        print(f"✅ Seeded {len(configs)} transaction config settings")
+        if inserted:
+            print(f"✅ Seeded {inserted} new config settings ({len(configs)} total in catalogue).")
+        else:
+            print(f"ℹ️  All {len(configs)} catalogue config keys already present; descriptions refreshed.")
 
 
 if __name__ == "__main__":

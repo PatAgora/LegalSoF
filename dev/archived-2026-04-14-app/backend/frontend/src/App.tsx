@@ -3,6 +3,7 @@ import DashboardPage from './pages/DashboardPage'
 import MattersPage from './pages/MattersPage'
 import MatterDetailPage from './pages/MatterDetailPage'
 import LoginPage from './pages/LoginPage'
+import ConfigurationPage from './pages/ConfigurationPage'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -22,6 +23,7 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="matters" element={<MattersPage />} />
           <Route path="matters/:id" element={<MatterDetailPage />} />
+          <Route path="configuration" element={<ConfigurationPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

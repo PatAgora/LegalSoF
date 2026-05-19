@@ -200,6 +200,31 @@ async def seed_admin(engine):
             print("    set ADMIN_PASSWORD in Railway env vars, then redeploy.")
 
 
+def seed_app_config():
+    """Seed / backfill the platform configuration catalogue.
+
+    Idempotent. Runs on every boot so newly-introduced settings are
+    auto-added with sensible defaults without overwriting any value an
+    operator has already changed via the Configuration page.
+    """
+    from sqlalchemy import create_engine
+    try:
+        from app.db.init_transaction_tables import seed_transaction_config
+    except Exception as exc:
+        print(f"[!] Could not import seed_transaction_config: {exc}")
+        return
+
+    db_url = str(settings.DATABASE_URL).replace("postgresql+asyncpg", "postgresql")
+    sync_engine = create_engine(db_url)
+    try:
+        seed_transaction_config(sync_engine)
+    except Exception as exc:
+        # Don't block startup on a seed failure — surfaces in logs.
+        print(f"[!] App config seeding failed: {exc}")
+    finally:
+        sync_engine.dispose()
+
+
 async def main():
     print("=== Agora Consulting AI — Database Init ===\n")
 
@@ -216,6 +241,9 @@ async def main():
 
     # 3. Seed admin user
     await seed_admin(engine)
+
+    # 4. Seed / backfill the platform configuration catalogue
+    seed_app_config()
 
     await engine.dispose()
     print("\n=== Done ===")
