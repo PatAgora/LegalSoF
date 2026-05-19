@@ -1405,10 +1405,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           out.push(`£${Math.round(lineage.untracedAmount).toLocaleString()} requires further evidence.`);
         }
       }
-      // Bank transaction confirmation, if any.
-      if (Array.isArray(evidence.transactions) && evidence.transactions.length > 0) {
-        out.push(`Bank transaction confirmed (${evidence.transactions.length} match${evidence.transactions.length !== 1 ? 'es' : ''}).`);
-      }
       if (out.length === 0) {
         if (dv.issues && dv.issues.length > 0) out.push(String(dv.issues[0]));
         else out.push('Source documentation required.');
