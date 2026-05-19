@@ -2763,6 +2763,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   );
                 })}
               </div>
+              </div>
             </details>
           )}
 
