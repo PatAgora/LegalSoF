@@ -19,6 +19,7 @@ interface Section {
   blurb: string;
   order?: string[];
   legacyKeys?: string[]; // additional keys that don't share the prefix
+  enabledKey?: string;   // master on/off toggle for this whole module
 }
 
 const SECTIONS: Section[] = [
@@ -26,6 +27,7 @@ const SECTIONS: Section[] = [
     id: 'sof',
     title: 'Source of Funds Analysis',
     prefix: 'sof_',
+    enabledKey: 'sof_enabled',
     blurb:
       'Tolerances applied to each Source of Funds claim — how close the document evidence has to be to the declared amount, the date, and the auto-pass confidence threshold.',
   },
@@ -33,6 +35,7 @@ const SECTIONS: Section[] = [
     id: 'dv',
     title: 'Document Verification',
     prefix: 'dv_',
+    enabledKey: 'dv_enabled',
     blurb:
       'Scoring thresholds and weights for the document forensics pipeline, plus rules controlling when a Suspicious or Likely-Tampered document blocks downstream processing.',
   },
@@ -40,6 +43,7 @@ const SECTIONS: Section[] = [
     id: 'tr',
     title: 'Transaction Review',
     prefix: 'tr_',
+    enabledKey: 'tr_enabled',
     // Rules listed first (boolean toggles), then numeric thresholds,
     // then narrative keywords. Keeps the rendered ordering predictable
     // and groups the on/off switches together so a reviewer can
@@ -68,6 +72,7 @@ const SECTIONS: Section[] = [
     id: 'fl',
     title: 'Funds Lineage',
     prefix: 'fl_',
+    enabledKey: 'fl_enabled',
     blurb:
       'Controls for the funds lineage tracer — how strict the amount match must be when linking transfers, how far back to look, and what proportion of the credit must be traced before a savings claim auto-passes.',
   },
@@ -293,18 +298,69 @@ export default function ConfigurationPage() {
       </div>
 
       {SECTIONS.map((section) => {
-        const keys = keysBySection[section.id] || [];
-        const sectionDirty = keys.some((k) => draft[k] !== config[k]?.value);
-        if (keys.length === 0) {
+        const allKeys = keysBySection[section.id] || [];
+        // The master switch is shown as the section toggle, NOT as a
+        // row in the table — so we filter it out before rendering rows.
+        const enabledKey = section.enabledKey;
+        const enabledItem = enabledKey ? config[enabledKey] : undefined;
+        const enabledDraft = enabledKey ? draft[enabledKey] : undefined;
+        const moduleOn = enabledKey ? enabledDraft === 'true' : true;
+        const enabledDirty = !!enabledKey && enabledDraft !== enabledItem?.value;
+        const keys = allKeys.filter((k) => k !== enabledKey);
+        const sectionDirty = enabledDirty || keys.some((k) => draft[k] !== config[k]?.value);
+
+        const renderHeader = () => (
+          <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-zinc-900">{section.title}</h2>
+              <p className="mt-1 text-xs text-zinc-600 max-w-2xl">{section.blurb}</p>
+            </div>
+            <div className="flex items-center gap-4 flex-shrink-0">
+              {sectionDirty && (
+                <button
+                  type="button"
+                  onClick={() => onResetSection(allKeys)}
+                  className="text-xs text-zinc-500 hover:text-zinc-900 underline whitespace-nowrap"
+                >
+                  Reset section
+                </button>
+              )}
+              {enabledItem && (
+                <label
+                  className="inline-flex items-center gap-2 cursor-pointer select-none"
+                  title="Master switch for this module. When OFF, the module is skipped on the next assessment run."
+                >
+                  <span className={`text-xs font-semibold tracking-wide ${moduleOn ? 'text-green-700' : 'text-zinc-400'}`}>
+                    {moduleOn ? 'ON' : 'OFF'}
+                  </span>
+                  {/* Switch */}
+                  <span
+                    role="switch"
+                    aria-checked={moduleOn}
+                    onClick={() => enabledKey && setDraft((prev) => ({ ...prev, [enabledKey]: moduleOn ? 'false' : 'true' }))}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      moduleOn ? 'bg-green-500' : 'bg-zinc-300'
+                    } ${enabledDirty ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                        moduleOn ? 'translate-x-5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </span>
+                </label>
+              )}
+            </div>
+          </div>
+        );
+
+        if (allKeys.length === 0) {
           // Section has no rows yet — usually means the seed didn't run.
           // Show the section header anyway so the user can see it exists
           // and trigger a re-seed from the page header button.
           return (
             <section key={section.id} className="bg-white border border-zinc-200 rounded-md overflow-hidden">
-              <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
-                <h2 className="text-base font-bold text-zinc-900">{section.title}</h2>
-                <p className="mt-1 text-xs text-zinc-600 max-w-2xl">{section.blurb}</p>
-              </div>
+              {renderHeader()}
               <div className="px-6 py-8 text-center text-sm text-zinc-500">
                 No settings for this section yet. Click <span className="font-medium text-zinc-700">Restore defaults</span> at the top of the page to populate them.
               </div>
@@ -314,85 +370,94 @@ export default function ConfigurationPage() {
         return (
           <section
             key={section.id}
-            className="bg-white border border-zinc-200 rounded-md overflow-hidden"
+            className={`bg-white border rounded-md overflow-hidden ${moduleOn ? 'border-zinc-200' : 'border-zinc-200 opacity-75'}`}
           >
-            <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-base font-bold text-zinc-900">{section.title}</h2>
-                <p className="mt-1 text-xs text-zinc-600 max-w-2xl">{section.blurb}</p>
+            {renderHeader()}
+            {!moduleOn && (
+              <div className="px-6 py-2.5 bg-zinc-100 border-b border-zinc-200 text-xs text-zinc-700">
+                <strong>This module is currently OFF.</strong> The settings below are saved but
+                won't take effect until the master switch above is set to ON.
               </div>
-              {sectionDirty && (
-                <button
-                  type="button"
-                  onClick={() => onResetSection(keys)}
-                  className="text-xs text-zinc-500 hover:text-zinc-900 underline whitespace-nowrap"
-                >
-                  Reset section
-                </button>
-              )}
-            </div>
-            <div className="divide-y divide-zinc-100">
-              {keys.map((key) => {
-                const item = config[key];
-                const value = draft[key] ?? '';
-                const isBool = item.type === 'bool';
-                const dirty = value !== item.value;
-                return (
-                  <div key={key} className="px-6 py-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                    <div className="md:col-span-7">
-                      <div className="text-sm font-medium text-zinc-900 capitalize">
-                        {labelFor(key)}
-                      </div>
-                      {item.description && (
-                        <div className="mt-1 text-xs text-zinc-500 leading-snug">{item.description}</div>
-                      )}
-                      <div className="mt-1 text-[10px] tracking-wider uppercase text-zinc-300 font-mono">
-                        {key} · {item.type}
-                      </div>
-                    </div>
-                    <div className="md:col-span-5">
-                      {isBool ? (
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={value === 'true'}
-                            onChange={(e) =>
-                              setDraft((prev) => ({ ...prev, [key]: e.target.checked ? 'true' : 'false' }))
-                            }
-                            className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
-                          />
-                          <span className="text-sm text-zinc-800">{value === 'true' ? 'Enabled' : 'Disabled'}</span>
-                        </label>
-                      ) : item.type === 'json' ? (
-                        <textarea
-                          value={value}
-                          onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.value }))}
-                          rows={3}
-                          className={`w-full px-3 py-2 text-xs font-mono border rounded ${
-                            dirty ? 'border-amber-400 bg-amber-50/40' : 'border-zinc-200 bg-white'
-                          } focus:outline-none focus:ring-2 focus:ring-zinc-300`}
-                          spellCheck={false}
-                        />
-                      ) : (
-                        <input
-                          type={item.type === 'int' || item.type === 'float' ? 'number' : 'text'}
-                          step={item.type === 'float' ? 'any' : item.type === 'int' ? '1' : undefined}
-                          value={value}
-                          onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.value }))}
-                          className={`w-full px-3 py-2 text-sm border rounded tabular-nums ${
-                            dirty ? 'border-amber-400 bg-amber-50/40' : 'border-zinc-200 bg-white'
-                          } focus:outline-none focus:ring-2 focus:ring-zinc-300`}
-                        />
-                      )}
-                      {dirty && (
-                        <div className="mt-1 text-[10px] text-amber-700">
-                          Current: <span className="tabular-nums">{item.value}</span> · unsaved
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            )}
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-zinc-200 text-sm">
+                <thead className="bg-zinc-50">
+                  <tr>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400 w-1/4">
+                      Configuration Name
+                    </th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                      Description
+                    </th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400 w-64">
+                      Value
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-zinc-100">
+                  {keys.map((key) => {
+                    const item = config[key];
+                    const value = draft[key] ?? '';
+                    const isBool = item.type === 'bool';
+                    const dirty = value !== item.value;
+                    return (
+                      <tr key={key} className="align-top hover:bg-zinc-50/40">
+                        <td className="px-5 py-4">
+                          <div className="text-sm font-medium text-zinc-900 capitalize leading-snug">
+                            {labelFor(key)}
+                          </div>
+                          <div className="mt-1 text-[10px] tracking-wider uppercase text-zinc-300 font-mono">
+                            {key} · {item.type}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-xs text-zinc-600 leading-snug">
+                          {item.description || <span className="text-zinc-300">No description.</span>}
+                        </td>
+                        <td className="px-5 py-4">
+                          {isBool ? (
+                            <label className="inline-flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={value === 'true'}
+                                onChange={(e) =>
+                                  setDraft((prev) => ({ ...prev, [key]: e.target.checked ? 'true' : 'false' }))
+                                }
+                                className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                              />
+                              <span className="text-sm text-zinc-800">{value === 'true' ? 'Enabled' : 'Disabled'}</span>
+                            </label>
+                          ) : item.type === 'json' ? (
+                            <textarea
+                              value={value}
+                              onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                              rows={3}
+                              className={`w-full px-3 py-2 text-xs font-mono border rounded ${
+                                dirty ? 'border-amber-400 bg-amber-50/40' : 'border-zinc-200 bg-white'
+                              } focus:outline-none focus:ring-2 focus:ring-zinc-300`}
+                              spellCheck={false}
+                            />
+                          ) : (
+                            <input
+                              type={item.type === 'int' || item.type === 'float' ? 'number' : 'text'}
+                              step={item.type === 'float' ? 'any' : item.type === 'int' ? '1' : undefined}
+                              value={value}
+                              onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                              className={`w-full px-3 py-2 text-sm border rounded tabular-nums ${
+                                dirty ? 'border-amber-400 bg-amber-50/40' : 'border-zinc-200 bg-white'
+                              } focus:outline-none focus:ring-2 focus:ring-zinc-300`}
+                            />
+                          )}
+                          {dirty && (
+                            <div className="mt-1 text-[10px] text-amber-700">
+                              Current: <span className="tabular-nums">{item.value}</span> · unsaved
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </section>
         );

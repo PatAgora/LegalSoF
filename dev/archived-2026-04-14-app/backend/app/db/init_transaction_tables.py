@@ -152,6 +152,20 @@ def seed_transaction_config(engine):
         # "bool" | "json". Description is shown to the operator in the
         # Configuration page so write it as user-facing copy.
         configs = [
+            # ── Module master switches ────────────────────────────────
+            # Each toggle controls whether the corresponding module
+            # runs at all. When OFF, the module is skipped and its
+            # outputs come back empty so the operator can disable a
+            # whole section of the platform if it isn't applicable.
+            ('sof_enabled', 'true', 'bool',
+             'Master switch for the Source of Funds Analysis module. When disabled, the SoF engine returns an empty result and no claim verification is performed.'),
+            ('dv_enabled', 'true', 'bool',
+             'Master switch for the Document Verification module. When disabled, uploaded documents are stored but not forensically checked. Use only if you have an alternative verification process.'),
+            ('tr_enabled', 'true', 'bool',
+             'Master switch for the Transaction Review module. When disabled, the transaction monitoring engine produces no alerts and matters do not get an AML alert breakdown.'),
+            ('fl_enabled', 'true', 'bool',
+             'Master switch for the Funds Lineage module. When disabled, the lineage tracer is not run automatically after a SoF assessment.'),
+
             # ── Source of Funds Analysis ──────────────────────────────
             ('sof_amount_tolerance_pct', '5.0', 'float',
              'Allowed % difference between the amount declared on a SoF claim and the amount evidenced on a document or bank transaction. Above this threshold the claim is flagged for manual review.'),

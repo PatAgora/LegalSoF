@@ -56,11 +56,16 @@ class TransactionMonitoringService:
     
     def run_checks_for_matter(self, matter_id: int) -> List[TransactionAlert]:
         """Run all AML checks for a matter's transactions"""
+        # Module master switch — operator can disable the whole
+        # Transaction Review section from the Configuration page.
+        if not self.config.get('tr_enabled', True):
+            return []
+
         # Get all transactions for this matter
         transactions = self.db.query(Transaction).filter(
             Transaction.matter_id == matter_id
         ).order_by(Transaction.txn_date).all()
-        
+
         if not transactions:
             return []
         

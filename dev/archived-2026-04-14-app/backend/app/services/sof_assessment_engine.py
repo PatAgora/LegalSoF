@@ -30,6 +30,7 @@ class SoFAssessmentEngine:
         the table hasn't been seeded yet — keeps the engine usable in
         unit tests that don't run the boot path."""
         defaults = {
+            'sof_enabled':                   True,
             'sof_amount_tolerance_pct':       5.0,
             'sof_date_tolerance_days':        7,
             'sof_confidence_threshold':       0.999,
@@ -47,6 +48,8 @@ class SoFAssessmentEngine:
                         out[row.key] = float(row.value)
                     elif row.value_type == 'int':
                         out[row.key] = int(row.value)
+                    elif row.value_type == 'bool':
+                        out[row.key] = str(row.value).lower() in ('true', '1', 'yes')
                     else:
                         out[row.key] = row.value
                 except Exception:
@@ -71,6 +74,28 @@ class SoFAssessmentEngine:
         Main assessment method
         Returns structured JSON with claims, evidence, decision, and actions
         """
+        # Module master switch — operator can disable the whole SoF
+        # module from the Configuration page. We still return a valid
+        # result shape so downstream callers don't crash, but with
+        # status=incomplete and a clear rationale.
+        if not self.settings.get('sof_enabled', True):
+            return {
+                'matter_id': self.matter_id,
+                'claims': [],
+                'evidence_matches': [],
+                'transaction_review_summary': {},
+                'next_actions': {'questions': [], 'documents': []},
+                'outcome': {
+                    'status': 'incomplete',
+                    'confidence': 0,
+                    'rationale': (
+                        'Source of Funds Analysis is currently disabled in the platform '
+                        'Configuration page. Re-enable the module to run claim verification.'
+                    ),
+                },
+                'engine_disabled': True,
+            }
+
         from app.services.document_verifier import document_verifier
         
         # DEFENSIVE: Ensure all inputs are valid

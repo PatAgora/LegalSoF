@@ -28,6 +28,7 @@ from app.models.document_verification import (
     DocumentVerification, DocumentVerificationFlag, DocumentVerificationTransaction,
     VerificationVerdict,
 )
+from app.models.transaction import TransactionConfig
 
 router = APIRouter()
 
@@ -942,6 +943,14 @@ async def upload_sof_files(
     verification_score = None
     doc_ver_record = None
 
+    # Module master switch — when Document Verification is disabled on
+    # the Configuration page (dv_enabled = false), we keep the upload
+    # but skip the forensic pipeline entirely.
+    dv_enabled_row = db.query(TransactionConfig).filter(
+        TransactionConfig.key == 'dv_enabled'
+    ).first()
+    dv_enabled = (dv_enabled_row is None) or (str(dv_enabled_row.value).lower() in ('true', '1', 'yes'))
+
     # ------------------------------------------------------------------
     # Dedupe by file hash. Same file uploaded twice on the same matter
     # MUST produce the same verification result — otherwise the analyst
@@ -973,7 +982,13 @@ async def upload_sof_files(
     try:
         is_pdf = file_content_for_verification[:4] == b"%PDF"
 
-        if existing_dv:
+        if not dv_enabled:
+            # Module turned off in the Configuration page. Persist the
+            # raw file but skip the entire forensic pipeline; the
+            # operator has accepted that this matter will not have
+            # document-level checks.
+            print(f"   ⚙️  Document Verification module is OFF — skipping pipeline for {file.filename}")
+        elif existing_dv:
             # Already verified — skip the rest of the verification work.
             # Skip the entire pipeline branch by raising-to-continue.
             pass
@@ -1985,11 +2000,18 @@ async def run_sof_assessment(
         storage['last_updated'] = datetime.now(timezone.utc).isoformat()
         
         # AUTO-RUN FUNDS LINEAGE FOR SAVINGS CLAIMS
-        # Check if there's a savings claim and automatically run lineage analysis
+        # Check if there's a savings claim and automatically run lineage analysis.
+        # Skipped entirely when the Funds Lineage module is turned off in
+        # the Configuration page (fl_enabled = false).
+        fl_enabled_row = db.query(TransactionConfig).filter(
+            TransactionConfig.key == 'fl_enabled'
+        ).first()
+        fl_enabled = (fl_enabled_row is None) or (str(fl_enabled_row.value).lower() in ('true', '1', 'yes'))
+
         savings_claim = None
         savings_claim_idx = None
-        claims = assessment_result.get('claims', [])
-        evidence_matches = assessment_result.get('evidence_matches', [])
+        claims = assessment_result.get('claims', []) if fl_enabled else []
+        evidence_matches = assessment_result.get('evidence_matches', []) if fl_enabled else []
         
         for idx, claim in enumerate(claims):
             source_type = (claim.get('source_type', '') or '').lower()
