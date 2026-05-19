@@ -991,18 +991,101 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             </div>
           </div>
 
-          {/* Action Items */}
-          {lineageSummary.requiresEvidence > 0 && (
-            <div className="px-6 py-4 bg-amber-50 border-t border-amber-200">
-              <div className="text-sm font-semibold text-amber-700 mb-2">
-                ⚠️ Evidence Required for {lineageSummary.requiresEvidence} Transaction(s)
+          {/* Review Required for — enumerated open issues a reviewer
+              must clear before this lineage can be signed off.
+              Sources walked from the live lineage tree so the list
+              stays in sync with the current rendering. */}
+          {(() => {
+            const evidenceNodes: LineageNode[] = [];
+            const gapNodes: LineageNode[] = [];
+            const walk = (nodes: LineageNode[]) => {
+              for (const n of nodes) {
+                if (n.matchType === 'requires_evidence') evidenceNodes.push(n);
+                else if (n.matchType === 'statement_gap') gapNodes.push(n);
+                if (n.children && n.children.length > 0) walk(n.children);
+              }
+            };
+            walk(lineageTree);
+
+            const untraced = lineageSummary.untracedAmount || 0;
+            const total    = lineageSummary.totalAmount    || 0;
+            const untracedPct = total > 0 ? (untraced / total) * 100 : 0;
+
+            const noIssues = untraced <= 0 && evidenceNodes.length === 0 && gapNodes.length === 0;
+            if (noIssues) return null;
+
+            const fmtMoney = (n: number) => `£${Math.round(n).toLocaleString()}`;
+
+            return (
+              <div className="px-6 py-5 bg-amber-50 border-t border-amber-200">
+                <div className="text-sm font-bold text-amber-800 mb-3">
+                  Review Required for
+                </div>
+                <ul className="space-y-2">
+                  {untraced > 0 && (
+                    <li className="flex items-start gap-3 text-sm text-zinc-800">
+                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                      <span>
+                        <strong>{fmtMoney(untraced)}</strong> of the {fmtMoney(total)} credit
+                        {untracedPct > 0 && ` (${untracedPct.toFixed(1)}%)`} is not yet traced
+                        to a verified origin.
+                      </span>
+                    </li>
+                  )}
+                  {evidenceNodes.length > 0 && (
+                    <li className="text-sm text-zinc-800">
+                      <div className="flex items-start gap-3">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                        <span>
+                          <strong>{evidenceNodes.length} transaction{evidenceNodes.length === 1 ? '' : 's'}</strong> need
+                          {evidenceNodes.length === 1 ? 's' : ''} source documentation —
+                          obtain proof of origin (payslip, contract, completion statement, etc.).
+                        </span>
+                      </div>
+                      <ul className="mt-1.5 ml-7 space-y-1 text-xs text-zinc-600">
+                        {evidenceNodes.slice(0, 6).map((n, i) => (
+                          <li key={i}>
+                            {fmtMoney(Math.abs(n.transaction?.amount || n.amount || 0))} on{' '}
+                            {formatDate(n.transaction?.date || n.date)}
+                            {(n.transaction?.account || n.account) && ` — ${n.transaction?.account || n.account}`}
+                            {(n.transaction?.description || n.description) && (
+                              <span className="text-zinc-500"> · {(n.transaction?.description || n.description).slice(0, 60)}</span>
+                            )}
+                          </li>
+                        ))}
+                        {evidenceNodes.length > 6 && (
+                          <li className="italic">…and {evidenceNodes.length - 6} more — expand the ledger below.</li>
+                        )}
+                      </ul>
+                    </li>
+                  )}
+                  {gapNodes.length > 0 && (
+                    <li className="text-sm text-zinc-800">
+                      <div className="flex items-start gap-3">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                        <span>
+                          <strong>{gapNodes.length} statement gap{gapNodes.length === 1 ? '' : 's'}</strong> — earlier
+                          statements are needed for the source accounts of these inbound transfers.
+                        </span>
+                      </div>
+                      <ul className="mt-1.5 ml-7 space-y-1 text-xs text-zinc-600">
+                        {gapNodes.slice(0, 4).map((n, i) => (
+                          <li key={i}>
+                            {fmtMoney(Math.abs(n.transaction?.amount || n.amount || 0))} on{' '}
+                            {formatDate(n.transaction?.date || n.date)}
+                            {n.sourceAccount && n.sourceAccount !== 'Unknown' && ` from ${n.sourceAccount}`}
+                          </li>
+                        ))}
+                        {gapNodes.length > 4 && (
+                          <li className="italic">…and {gapNodes.length - 4} more.</li>
+                        )}
+                      </ul>
+                    </li>
+                  )}
+                </ul>
               </div>
-              <p className="text-sm text-amber-700">
-                Some funds could not be traced to a verified origin. Obtain source documentation 
-                (bank statements, contracts, etc.) to verify these payments.
-              </p>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Compliance Footer */}
           <div className="px-6 py-4 bg-zinc-50 border-t border-zinc-200">

@@ -614,8 +614,88 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const renderSoFSection = (_content: string, result: AssessmentResult) => {
-    // Helper: build a one-line plain-English summary for a single
-    // evidence row based on what the pipeline reported about it.
+    // Helper: format a UK date out of any date-ish input.
+    const fmtIssueDate = (raw: any): string => {
+      if (!raw) return '';
+      const s = String(raw);
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const [y, m, d] = s.slice(0, 10).split('-');
+        return `${d}/${m}/${y}`;
+      }
+      return s;
+    };
+    const fmtMoney = (n: any): string => {
+      const v = Number(n);
+      if (!isFinite(v)) return '';
+      return `£${Math.round(v).toLocaleString()}`;
+    };
+
+    // Helper: translate one structured `differences[]` entry coming
+    // back from the verification pipeline into a single plain-English
+    // bullet a reviewer can read end to end. The pipeline emits a
+    // small set of field codes (amount / date / untraced_funds /
+    // statement_gap / statement_coverage / funds_discrepancy /
+    // funds_lineage_analysis) plus assorted ad-hoc field names; this
+    // function picks the most informative phrasing for each.
+    const prettyDifference = (d: any): string | null => {
+      if (!d || typeof d !== 'object') return null;
+      const field = String(d.field || '').toLowerCase();
+      const expected = d.expected ? String(d.expected).trim() : '';
+      const found    = d.found    ? String(d.found).trim()    : '';
+      const issue    = d.issue    ? String(d.issue).trim()    : '';
+      const desc     = d.description ? String(d.description).trim() : '';
+
+      if (field === 'amount') {
+        if (expected && found) return `Amount mismatch — claim states ${expected}, document shows ${found}.`;
+        return desc || issue || 'Amount on the document does not match the claim.';
+      }
+      if (field === 'date' || field === 'payment_date' || field === 'completion_date') {
+        if (expected && found) return `Date mismatch — claim states ${expected}, document shows ${found}.`;
+        return desc || issue || 'Document date does not match the claimed transaction date.';
+      }
+      if (field === 'counterparty' || field === 'payee' || field === 'payer') {
+        if (expected && found) return `Counterparty mismatch — expected ${expected}, document shows ${found}.`;
+        return desc || issue || 'Counterparty on the document does not match the claim.';
+      }
+      if (field === 'untraced_funds') {
+        const m = issue.match(/£([\d,]+(?:\.\d+)?)\s+on\s+(\S+)/);
+        const amt = m ? `£${m[1]}` : (d.amount ? fmtMoney(d.amount) : '');
+        const dt  = m ? fmtIssueDate(m[2]) : fmtIssueDate(d.date);
+        if (amt && dt) return `Untraced credit of ${amt} on ${dt} — origin cannot be confirmed from uploaded statements.`;
+        return issue || 'A credit on the statement could not be traced to a verified origin.';
+      }
+      if (field === 'statement_gap') {
+        const m = issue.match(/£([\d,]+(?:\.\d+)?)\s+on\s+(\S+)/);
+        const amt = m ? `£${m[1]}` : (d.amount ? fmtMoney(d.amount) : '');
+        const dt  = m ? fmtIssueDate(m[2]) : fmtIssueDate(d.date);
+        const acct = d.gap_account ? ` for account ${d.gap_account}` : '';
+        if (amt && dt) return `Earlier bank statements${acct} are needed to trace ${amt} received on ${dt}.`;
+        return expected || issue || 'Earlier bank statements are needed to trace this transfer.';
+      }
+      if (field === 'statement_coverage') {
+        return found || expected || 'Statement period does not fully cover the claimed accumulation window.';
+      }
+      if (field === 'funds_discrepancy') {
+        if (expected && found) return `Funds discrepancy — expected ${expected}, but found ${found}.`;
+        return desc || issue || 'Funds shown on supporting documents do not reconcile with the claim.';
+      }
+      if (field === 'funds_lineage_analysis') {
+        return desc || issue || 'Funds lineage analysis flagged this claim for review.';
+      }
+      // Generic fallback — prefer description, then issue. Only
+      // fall back to a humanised field name if neither is present,
+      // and never emit a bare single-word like "Amount".
+      if (desc) return desc;
+      if (issue) return issue;
+      if (expected && found) return `Mismatch — expected ${expected}, found ${found}.`;
+      if (field) {
+        const human = field.replace(/_/g, ' ');
+        return `Reviewer attention required on ${human}.`;
+      }
+      return null;
+    };
+
+    // Build a 1–3 line plain-English summary for a single evidence row.
     const summariseEvidence = (evidence: any): string[] => {
       const out: string[] = [];
       if (!evidence) return out;
@@ -627,21 +707,22 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       }
       const diffs = Array.isArray(dv.differences) ? dv.differences : [];
       diffs.slice(0, 3).forEach((d: any) => {
-        if (d?.description) out.push(d.description);
-        else if (d?.field) out.push(String(d.field));
+        const line = prettyDifference(d);
+        if (line) out.push(line);
       });
       // Funds lineage summary, if any.
       const lineage = evidence.lineage_summary || (evidence.funds_lineage && evidence.funds_lineage.summary);
       if (lineage && typeof lineage.tracedAmount === 'number' && typeof lineage.totalAmount === 'number' && lineage.totalAmount > 0) {
         const pct = Math.round((lineage.tracedAmount / lineage.totalAmount) * 100);
-        out.push(`${pct}% of funds traced to origin.`);
         if (lineage.untracedAmount > 0) {
-          out.push(`£${Math.round(lineage.untracedAmount).toLocaleString()} requires further evidence.`);
+          out.push(`${pct}% of the claimed funds are traced to an origin; ${fmtMoney(lineage.untracedAmount)} still needs supporting evidence.`);
+        } else {
+          out.push(`All claimed funds have been traced to an origin.`);
         }
       }
       if (out.length === 0) {
         if (dv.issues && dv.issues.length > 0) out.push(String(dv.issues[0]));
-        else out.push('Source documentation required.');
+        else out.push('Source documentation required to confirm this claim.');
       }
       return out;
     };
@@ -1915,7 +1996,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           )}
 
           {/* Next Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-6">
 
             {/* Documents Required - INTELLIGENT DOCUMENT GENERATOR */}
             {(result.next_actions.documents.length > 0 || 
