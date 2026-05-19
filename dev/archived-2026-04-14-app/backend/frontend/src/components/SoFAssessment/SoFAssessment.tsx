@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import { translateFlag } from '../DocumentVerification/flagTranslations';
 import { FileUploader, StatusChip } from '../ui';
@@ -180,6 +180,7 @@ function renderUploadedList(
 // FLAG_TRANSLATIONS and translateFlag imported from shared module above
 
 const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<AssessmentStatus | null>(null);
   const [result, setResult] = useState<AssessmentResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -524,21 +525,24 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
-  const resetAssessment = async () => {
-    if (!confirm('This will delete all uploaded files and reset the assessment. Continue?')) {
+  const deleteMatter = async () => {
+    if (!confirm('This will permanently delete this matter, every uploaded file, and every assessment record. This cannot be undone. Continue?')) {
       return;
     }
 
     try {
-      await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/reset`, {
+      const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}`, {
         method: 'DELETE',
       });
-      setStatus(null);
-      setResult(null);
-      setActiveStep('upload');
-      await fetchStatus();
-    } catch (error) {
-      console.error('Error resetting assessment:', error);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert(`Could not delete matter: ${err.detail || response.statusText}`);
+        return;
+      }
+      navigate('/matters');
+    } catch (error: any) {
+      console.error('Error deleting matter:', error);
+      alert(`Could not delete matter: ${error?.message || 'Unknown error'}`);
     }
   };
 
@@ -924,14 +928,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         <div>
           <h2 className="text-2xl font-bold text-zinc-900">Source of Funds Assessment</h2>
         </div>
-        {status && status.status !== 'no_data' && (
-          <button
-            onClick={resetAssessment}
-            className="px-4 py-2 text-sm text-red-700 hover:text-red-700 border border-red-200 rounded hover:bg-red-50"
-          >
-            Reset Assessment
-          </button>
-        )}
+        <button
+          onClick={deleteMatter}
+          className="px-4 py-2 text-sm text-red-700 hover:text-red-700 border border-red-200 rounded hover:bg-red-50"
+        >
+          Delete Matter
+        </button>
       </div>
 
       {/* Step Tabs */}

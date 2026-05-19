@@ -8,12 +8,15 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.db.session import get_db, get_sync_db, get_sync_session
-from app.api.dependencies.auth import get_current_active_user, require_analyst
+from app.api.dependencies.auth import get_current_active_user, require_analyst, require_admin
 from app.models import Matter, MatterStatus, RiskRating, TransactionType
 from app.models.user import User
 from app.models.assessment_storage import AssessmentStorage
 from app.models.audit import AuditLog, AuditLogAction
 from app.models.status_history import MatterStatusHistory
+from app.models.document_verification import DocumentVerification
+from app.models.statement_validation import StatementValidation
+from app.models.notification import Notification
 
 router = APIRouter()
 
@@ -267,6 +270,59 @@ async def get_matter(
             "completion_percentage": completion_percentage,
         }
     
+    finally:
+        sync_db.close()
+
+
+@router.delete("/matters/{matter_id}")
+async def delete_matter(
+    matter_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Hard-delete a matter and every record associated with it: documents,
+    verifications, transactions, assessments, uploaded files on disk.
+    Admin-only. Irreversible.
+    """
+    import os, shutil
+
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+
+    try:
+        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            raise HTTPException(status_code=404, detail="Matter not found")
+
+        reference_number = matter.reference_number
+
+        # Tables that DO NOT cascade via Matter's relationships — wipe explicitly.
+        # DocumentVerification and StatementValidation cascade their own
+        # flags/transactions children via ondelete=CASCADE on the FK.
+        sync_db.query(AssessmentStorage).filter(AssessmentStorage.matter_id == matter_id).delete(synchronize_session=False)
+        sync_db.query(DocumentVerification).filter(DocumentVerification.matter_id == matter_id).delete(synchronize_session=False)
+        sync_db.query(StatementValidation).filter(StatementValidation.matter_id == matter_id).delete(synchronize_session=False)
+        sync_db.query(Notification).filter(Notification.matter_id == matter_id).delete(synchronize_session=False)
+
+        # Matter delete cascades through questionnaire_responses, documents,
+        # entities, funds_events, checks, notes, audit_logs, approvals,
+        # status_history, transactions, transaction_alerts, kyc_profile.
+        sync_db.delete(matter)
+        sync_db.commit()
+
+        # Remove any persisted upload files for this matter.
+        upload_dir = f"/app/uploads/{matter_id}"
+        if os.path.isdir(upload_dir):
+            shutil.rmtree(upload_dir, ignore_errors=True)
+
+        return {
+            "success": True,
+            "matter_id": matter_id,
+            "reference_number": reference_number,
+            "message": "Matter and all related records deleted",
+        }
+
     finally:
         sync_db.close()
 
