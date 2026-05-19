@@ -5,6 +5,7 @@ import PDFViewer, { scrollPDFToPage } from './PDFViewer';
 import { translateFlag } from './flagTranslations';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import { StatusChip, Button } from '../ui';
+import { useAuthStore } from '../../stores/authStore';
 
 interface VerificationData {
   id: number;
@@ -18,6 +19,10 @@ interface VerificationData {
   structural_pipeline_score?: number;
   statement_pipeline_score?: number;
   identified_bank_template?: string;
+  admin_override?: boolean;
+  admin_override_by?: string | null;
+  admin_override_rationale?: string | null;
+  admin_override_at?: string | null;
   flags: Array<{
     id?: number;
     code: string;
@@ -32,6 +37,7 @@ interface Props {
   verification: VerificationData;
   isOpen: boolean;
   onClose: () => void;
+  onAccepted?: (updated: VerificationData) => void;
 }
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
@@ -57,13 +63,56 @@ interface AuditEntry {
 
 type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
 
-export default function DocumentVerificationModal({ verification, isOpen, onClose }: Props) {
+export default function DocumentVerificationModal({ verification: incoming, isOpen, onClose, onAccepted }: Props) {
+  const [verification, setVerification] = useState<VerificationData>(incoming);
+  useEffect(() => { setVerification(incoming); }, [incoming]);
+  const currentUser = useAuthStore((s) => s.user);
   const [activeFlagIdx, setActiveFlagIdx] = useState<number | null>(null);
   const [highlightPages, setHighlightPages] = useState<number[]>([]);
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [downloadingPack, setDownloadingPack] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+
+  const acceptVerification = async () => {
+    if (verification.admin_override) return;
+    const rationale = window.prompt(
+      `Add a rationale for accepting "${verification.filename}". Required — please include enough detail for the audit log.`,
+      '',
+    );
+    if (rationale === null) return;
+    const trimmed = rationale.trim();
+    if (trimmed.length < 10) {
+      alert('Rationale must be at least 10 characters.');
+      return;
+    }
+    setAccepting(true);
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/accept`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            admin_user: currentUser?.full_name || currentUser?.email || 'Reviewer',
+            rationale: trimmed,
+          }),
+        },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not accept: ${err.detail || r.statusText}`);
+        return;
+      }
+      const updated = await r.json();
+      setVerification((v) => ({ ...v, ...updated }));
+      if (onAccepted) onAccepted({ ...verification, ...updated });
+    } catch (e: any) {
+      alert(`Could not accept: ${e?.message || 'Unknown error'}`);
+    } finally {
+      setAccepting(false);
+    }
+  };
 
   const isPDF = verification.verification_phase !== 'statement_only';
   const fileUrl = verification.disk_filename
@@ -272,6 +321,17 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
               <StatusChip verdict={verification.verdict} />
             </div>
             <div className="flex items-center gap-2">
+              {!verification.admin_override && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={acceptVerification}
+                  loading={accepting}
+                  title="Mark this verification as accepted with a rationale; the action is captured in the audit log."
+                >
+                  {accepting ? 'Saving…' : 'Accept document'}
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
@@ -291,6 +351,32 @@ export default function DocumentVerificationModal({ verification, isOpen, onClos
               </button>
             </div>
           </div>
+
+          {/* Acceptance banner — shown when a reviewer has signed off
+              this document. Records who, when and why for the audit log. */}
+          {verification.admin_override && (
+            <div className="px-6 py-3 bg-green-50 border-b border-green-200">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 mt-0.5 text-green-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-xs leading-snug text-green-900">
+                  <div className="font-semibold tracking-wide">
+                    Document accepted by {verification.admin_override_by || 'Reviewer'}
+                    {verification.admin_override_at && (() => {
+                      const d = new Date(verification.admin_override_at);
+                      return isNaN(d.getTime())
+                        ? ''
+                        : ` · ${d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+                    })()}
+                  </div>
+                  {verification.admin_override_rationale && (
+                    <div className="mt-1 italic text-green-800">"{verification.admin_override_rationale}"</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Body: split layout */}
           <div className="flex-1 flex overflow-hidden">

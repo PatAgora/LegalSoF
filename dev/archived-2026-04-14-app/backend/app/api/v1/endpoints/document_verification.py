@@ -280,6 +280,71 @@ def admin_override(
 
 
 # ---------------------------------------------------------------------------
+# ACCEPT verification (single-step reviewer disposition)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/matters/{matter_id}/document-verifications/{verification_id}/accept",
+    tags=["document-verification"],
+)
+def accept_verification(
+    matter_id: int,
+    verification_id: int,
+    body: AdminOverrideRequest,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Single-step reviewer acceptance. Any analyst may accept the
+    verdict on a document with a rationale; the action is captured in
+    the verification row (admin_override_*) and the audit log. Used by
+    the verification tab in the matter detail UI so reviewers can sign
+    off Suspicious / Likely-Tampered documents inline rather than going
+    through the four-eyes propose+approve flow."""
+    v = (
+        db.query(DocumentVerification)
+        .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
+        .first()
+    )
+    if not v:
+        raise HTTPException(404, "Verification not found")
+    if v.admin_override:
+        raise HTTPException(409, "Verification has already been accepted")
+
+    reviewer = body.admin_user or current_user.full_name or current_user.email
+    previous_verdict = v.verdict.value if v.verdict else "unknown"
+
+    v.admin_override = True
+    v.admin_override_by = reviewer
+    v.admin_override_rationale = body.rationale
+    v.admin_override_at = datetime.now(timezone.utc)
+    v.blocked = False
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.APPROVED,
+        entity_type="document_verification",
+        entity_id=verification_id,
+        description=(
+            f"Document verification #{verification_id} ({v.filename}) accepted "
+            f"by {reviewer}. Previous verdict: {previous_verdict}. "
+            f"Rationale: {body.rationale}"
+        ),
+        details={
+            "verification_id": verification_id,
+            "filename": v.filename,
+            "previous_verdict": previous_verdict,
+            "reviewer": reviewer,
+            "rationale": body.rationale,
+            "stage": "accepted",
+        },
+    ))
+    db.commit()
+    db.refresh(v)
+    return v.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # TRANSACTIONS extracted for a verification
 # ---------------------------------------------------------------------------
 

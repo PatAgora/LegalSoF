@@ -17,6 +17,10 @@ interface VerificationData {
   statement_pipeline_score?: number;
   identified_bank_template?: string;
   created_at?: string;
+  admin_override?: boolean;
+  admin_override_by?: string | null;
+  admin_override_rationale?: string | null;
+  admin_override_at?: string | null;
   flags: Array<{
     id?: number;
     code: string;
@@ -191,10 +195,23 @@ export default function DocumentVerificationPage({ matterId }: Props) {
                 )}
               </div>
 
-              {/* Verdict chip */}
+              {/* Verdict chip — replaced by an Accepted chip once a
+                  reviewer has signed the document off. */}
               <div className="flex justify-center">
-                <StatusChip verdict={v.verdict} />
+                {v.admin_override ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                    ACCEPTED
+                  </span>
+                ) : (
+                  <StatusChip verdict={v.verdict} />
+                )}
               </div>
+              {v.admin_override && v.admin_override_by && (
+                <div className="mt-2 text-[10px] text-zinc-500 text-center truncate">
+                  by {v.admin_override_by}
+                </div>
+              )}
             </button>
           );
         })}
@@ -206,6 +223,10 @@ export default function DocumentVerificationPage({ matterId }: Props) {
           verification={selectedVerification}
           isOpen={!!selectedVerification}
           onClose={() => setSelectedVerification(null)}
+          onAccepted={(updated) => {
+            setVerifications((prev) => prev.map((v) => (v.id === updated.id ? { ...v, ...updated } : v)));
+            setSelectedVerification(updated);
+          }}
         />
       )}
     </div>
