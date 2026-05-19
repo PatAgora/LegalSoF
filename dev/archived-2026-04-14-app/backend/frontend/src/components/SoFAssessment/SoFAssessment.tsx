@@ -1394,11 +1394,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     const isPartial = displayStatus.includes('⚠️') || displayStatus.includes('Partial');
     
     return (
-      <div key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden">
-        {/* Header */}
-        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
+      <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+        {/* Header — clickable summary, chevron rotates when open */}
+        <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
           <h3 className="text-lg font-bold text-zinc-900">📊 Source of Funds Analysis</h3>
-        </div>
+          <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </summary>
         
         {/* Status Lines */}
         <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
@@ -1605,24 +1608,26 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </table>
           </div>
         </div>
-        
 
-      </div>
+
+      </details>
     );
   };
 
   const renderTransactionReviewSection = (content: string, result: AssessmentResult) => {
     const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/);
     const overallStatus = overallMatch ? overallMatch[1].trim() : '';
-    
+
     const hasCritical = overallStatus.includes('CRITICAL') || content.includes('CRITICAL');
-    
+
     return (
-      <div key="tr" className="bg-white border border-zinc-200 rounded-md overflow-hidden">
-        {/* Header */}
-        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
+      <details key="tr" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+        <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
           <h3 className="text-lg font-bold text-zinc-900">🚨 Automated Transaction Review</h3>
-        </div>
+          <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </summary>
         
         {/* Overall Status */}
         <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-red-50 border-red-200' : 'bg-zinc-50 border-zinc-200'}`}>
@@ -1757,9 +1762,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
           </div>
         )}
-        
 
-      </div>
+
+      </details>
     );
   };
 
@@ -2256,19 +2261,24 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {renderStructuredRationale(result)}
 
           {/* ============================================================ */}
-          {/* FUNDS LINEAGE SECTION (always shown, matches sibling tile     */}
-          {/* styling — header band with bg-zinc-50, emoji + bold title)   */}
+          {/* FUNDS LINEAGE SECTION (collapsible by default)                */}
           {/* ============================================================ */}
-          <div className="bg-white border border-zinc-200 rounded-md overflow-hidden">
-            <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between">
+          <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+            <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
               <h3 className="text-lg font-bold text-zinc-900">🔗 Funds Lineage</h3>
-              <Link
-                to={`/matters/${matterId}?tab=funds-lineage`}
-                className="text-xs text-zinc-700 hover:text-zinc-900 underline-offset-2 hover:underline"
-              >
-                Open full lineage →
-              </Link>
-            </div>
+              <div className="flex items-center gap-3">
+                <Link
+                  to={`/matters/${matterId}?tab=funds-lineage`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-xs text-zinc-700 hover:text-zinc-900 underline-offset-2 hover:underline"
+                >
+                  Open full lineage →
+                </Link>
+                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </summary>
 
             {fundsLineageData?.exists && fundsLineageData.summary ? (
               (() => {
@@ -2441,24 +2451,29 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </Link>
               </div>
             )}
-          </div>
+          </details>
 
           {/* ============================================================ */}
-          {/* DOCUMENT VERIFICATION SECTION (UNIFIED)                      */}
+          {/* DOCUMENT VERIFICATION SECTION (collapsible by default)        */}
           {/* ============================================================ */}
           {docVerificationSummary && docVerificationSummary.total_documents > 0 && (
-            <div className="bg-white border border-zinc-200 rounded-md p-6">
-              <h3 className="text-lg font-bold text-zinc-900 mb-4 flex items-center gap-2">
-                Document Verification
-                {docVerificationSummary.has_blocking_issues ? (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-red-100 text-red-700 border border-red-200">BLOCKED</span>
-                ) : docVerificationSummary.suspicious_count > 0 ? (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-700 border border-amber-200">REVIEW</span>
-                ) : (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-green-100 text-green-700 border border-green-200">VERIFIED</span>
-                )}
-              </h3>
-
+            <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+              <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
+                <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
+                  Document Verification
+                  {docVerificationSummary.has_blocking_issues ? (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-red-100 text-red-700 border border-red-200">BLOCKED</span>
+                  ) : docVerificationSummary.suspicious_count > 0 ? (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-700 border border-amber-200">REVIEW</span>
+                  ) : (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-bold rounded bg-green-100 text-green-700 border border-green-200">VERIFIED</span>
+                  )}
+                </h3>
+                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-6 py-4">
               {/* Summary counts */}
               <div className="flex items-center flex-wrap gap-4 mb-5 text-sm text-zinc-600">
                 <span>{docVerificationSummary.total_documents} document{docVerificationSummary.total_documents !== 1 ? 's' : ''} checked</span>
@@ -2748,7 +2763,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   );
                 })}
               </div>
-            </div>
+            </details>
           )}
 
           {/* Next Actions */}
