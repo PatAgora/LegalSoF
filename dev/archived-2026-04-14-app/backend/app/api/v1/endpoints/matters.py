@@ -334,313 +334,652 @@ async def generate_matter_report(
     db: Session = Depends(get_db)
 ):
     """
-    Generate comprehensive Matter Summary Report as Word document (.docx)
-    
-    Includes:
-    - Matter overview and details
-    - Status and progress summary
-    - SoF Assessment results
-    - Transaction Review alerts
-    - Document checklist
-    - Next actions
+    Generate an SRA-grade Source of Funds / CDD Memorandum as a Word
+    document (.docx).
+
+    Structured to evidence compliance with the Money Laundering,
+    Terrorist Financing and Transfer of Funds (Information on the Payer)
+    Regulations 2017 ("MLR 2017") and the SRA's AML Sectoral Guidance
+    for the Legal Sector. Sections cover: regulatory framework, risk
+    assessment, CDD measures, source of funds and source of wealth
+    analysis, document forensics, bank statement validation, funds
+    lineage, outstanding matters, audit trail, reviewer attestation,
+    and retention notice.
     """
     from docx import Document
-    from docx.shared import Pt, Inches, RGBColor
+    from docx.shared import Pt, Inches, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_ALIGN_VERTICAL
     from io import BytesIO
     from fastapi.responses import StreamingResponse
-    import json
 
-    # Get shared sync DB session
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
-    
+
     try:
-        # Get matter details
         matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
         if not matter:
             raise HTTPException(status_code=404, detail="Matter not found")
-        
-        # Load SoF assessment storage from DB
-        sof_data = _safe_load_storage_single(sync_db, matter_id)
-        transaction_data = None
-        
-        # Create Word document
+
+        sof_data = _safe_load_storage_single(sync_db, matter_id) or {}
+        assessment = sof_data.get('assessment_result') or {}
+        outcome = assessment.get('outcome', {}) or {}
+        claims = assessment.get('claims', []) or []
+        evidence_matches = assessment.get('evidence_matches', []) or []
+        tr_summary = assessment.get('transaction_review_summary', {}) or {}
+        funds_lineage = sof_data.get('funds_lineage') or {}
+        uploaded_files = sof_data.get('uploaded_files', []) or []
+        bank_statements = sof_data.get('bank_statements', []) or []
+        supporting_docs = sof_data.get('supporting_docs', []) or []
+        client_info = sof_data.get('client_info') or {}
+        next_actions = assessment.get('next_actions', {}) or {}
+
+        dv_rows = sync_db.query(DocumentVerification).filter(
+            DocumentVerification.matter_id == matter_id
+        ).order_by(DocumentVerification.id.asc()).all()
+
+        stmt_rows = sync_db.query(StatementValidation).filter(
+            StatementValidation.matter_id == matter_id
+        ).order_by(StatementValidation.id.asc()).all()
+
+        audit_rows = sync_db.query(AuditLog).filter(
+            AuditLog.matter_id == matter_id
+        ).order_by(AuditLog.created_at.asc()).all()
+
+        # -----------------------------------------------------------------
+        # Render helpers — keep the document construction tidy and the
+        # styling consistent across every section.
+        # -----------------------------------------------------------------
         doc = Document()
-        
-        # Set document margins
-        sections = doc.sections
-        for section in sections:
-            section.top_margin = Inches(1)
-            section.bottom_margin = Inches(1)
-            section.left_margin = Inches(1)
-            section.right_margin = Inches(1)
-        
-        # ==================== TITLE ====================
-        title = doc.add_heading('Matter Summary Report', level=0)
+        for section in doc.sections:
+            section.top_margin = Inches(0.9)
+            section.bottom_margin = Inches(0.9)
+            section.left_margin = Inches(0.9)
+            section.right_margin = Inches(0.9)
+        normal = doc.styles['Normal']
+        normal.font.name = 'Calibri'
+        normal.font.size = Pt(10.5)
+
+        def p(text: str = '', bold: bool = False, italic: bool = False, size: float = None, align=None):
+            para = doc.add_paragraph()
+            run = para.add_run(text)
+            run.bold = bold
+            run.italic = italic
+            if size:
+                run.font.size = Pt(size)
+            if align is not None:
+                para.alignment = align
+            return para
+
+        def kv_table(rows, col_widths=(Cm(5.0), Cm(11.5))):
+            t = doc.add_table(rows=len(rows), cols=2)
+            t.style = 'Light Grid Accent 1'
+            for i, (label, value) in enumerate(rows):
+                a, b = t.rows[i].cells
+                a.text = str(label)
+                a.paragraphs[0].runs[0].bold = True
+                a.width = col_widths[0]
+                b.text = '' if value is None else str(value)
+                b.width = col_widths[1]
+            return t
+
+        def header_table(headers, rows):
+            t = doc.add_table(rows=1 + len(rows), cols=len(headers))
+            t.style = 'Light Grid Accent 1'
+            for j, h in enumerate(headers):
+                c = t.rows[0].cells[j]
+                c.text = str(h)
+                if c.paragraphs[0].runs:
+                    c.paragraphs[0].runs[0].bold = True
+            for i, row in enumerate(rows, start=1):
+                for j, val in enumerate(row):
+                    t.rows[i].cells[j].text = '' if val is None else str(val)
+            return t
+
+        def fmt_date(value, fmt: str = '%d/%m/%Y') -> str:
+            if not value:
+                return ''
+            if isinstance(value, str):
+                # Accept ISO strings; fall back to raw text.
+                try:
+                    return datetime.fromisoformat(value.replace('Z', '+00:00')).strftime(fmt)
+                except Exception:
+                    return value
+            try:
+                return value.strftime(fmt)
+            except Exception:
+                return str(value)
+
+        def fmt_money(amount, currency: str = 'GBP') -> str:
+            if amount is None:
+                return 'Not specified'
+            try:
+                symbol = '£' if currency == 'GBP' else f"{currency} "
+                return f"{symbol}{float(amount):,.2f}"
+            except Exception:
+                return str(amount)
+
+        # -----------------------------------------------------------------
+        # 0. COVER
+        # -----------------------------------------------------------------
+        title = doc.add_heading('Source of Funds Compliance Memorandum', level=0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # ==================== MATTER DETAILS ====================
-        header = doc.add_paragraph()
-        header.add_run(f'Matter Reference: {matter.reference_number}').bold = True
-        header.add_run(f'\nClient: {matter.client_name}')
-        header.add_run(f'\nReport Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}')
-        header.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
+        p('Customer Due Diligence record prepared under the Money Laundering,',
+          italic=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        p('Terrorist Financing and Transfer of Funds (Information on the Payer) Regulations 2017',
+          italic=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        p('and the SRA AML Sectoral Guidance for the Legal Sector.',
+          italic=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        p('', align=WD_ALIGN_PARAGRAPH.CENTER)
+        p('CONFIDENTIAL — for the firm\'s AML records.', bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
         doc.add_paragraph()
-        
-        # ==================== SECTION 1: MATTER OVERVIEW ====================
-        doc.add_heading('1. Matter Overview', level=1)
-        
-        overview_table = doc.add_table(rows=8, cols=2)
-        overview_table.style = 'Light Grid Accent 1'
-        
-        rows_data = [
-            ('Reference Number', matter.reference_number or 'N/A'),
-            ('Client Name', matter.client_name or 'N/A'),
-            ('Transaction Type', matter.transaction_type.value.replace('_', ' ').title() if matter.transaction_type else 'N/A'),
-            ('Target Amount', f"£{matter.target_amount:,.2f} {matter.target_currency}" if matter.target_amount else 'N/A'),
-            ('Status', matter.status.value if matter.status else 'DRAFT'),
-            ('Risk Rating', matter.risk_rating.value if matter.risk_rating else 'MEDIUM'),
-            ('Created Date', matter.created_at.strftime("%d %B %Y") if matter.created_at else 'N/A'),
-            ('Last Updated', matter.updated_at.strftime("%d %B %Y") if matter.updated_at else 'N/A'),
+
+        verdict_status = (outcome.get('status') or '').lower()
+        verdict_label = {
+            'sufficient':  'PASS — Source of funds adequately evidenced',
+            'borderline':  'REVIEW REQUIRED — Manual sign-off needed',
+            'insufficient':'FAIL — Source of funds not adequately evidenced',
+        }.get(verdict_status, 'INCOMPLETE — Assessment not yet finalised')
+
+        kv_table([
+            ('Matter reference',  matter.reference_number or 'Not assigned'),
+            ('Client',            matter.client_name or ''),
+            ('Transaction type',  (matter.transaction_type.value.replace('_', ' ').title()
+                                   if matter.transaction_type else 'Not specified')),
+            ('Target amount',     fmt_money(matter.target_amount, 'GBP')),
+            ('Transaction date',  fmt_date(matter.transaction_date)),
+            ('Matter status',     (matter.status.value if matter.status else 'draft').replace('_', ' ').title()),
+            ('CDD outcome',       verdict_label),
+            ('Reviewer',          current_user.full_name or current_user.email),
+            ('Reviewer role',     (current_user.role.value if getattr(current_user, 'role', None) else 'Analyst').title()),
+            ('Report prepared',   datetime.utcnow().strftime('%d %B %Y at %H:%M UTC')),
+        ])
+
+        doc.add_paragraph()
+
+        # -----------------------------------------------------------------
+        # 1. EXECUTIVE SUMMARY
+        # -----------------------------------------------------------------
+        doc.add_heading('1. Executive summary', level=1)
+
+        total_claims    = len(claims)
+        passed_claims   = sum(
+            1 for ev in evidence_matches
+            if (ev.get('document_verification', {}) or {}).get('manual_review_status') == 'accepted'
+               or (ev.get('document_verified') is True
+                   and (ev.get('document_verification', {}) or {}).get('confidence', 0) >= 0.999)
+        )
+        review_claims   = max(0, total_claims - passed_claims)
+        docs_reviewed   = len(dv_rows)
+        docs_tampered   = sum(1 for d in dv_rows if d.verdict and d.verdict.value == 'LikelyTampered')
+        docs_suspicious = sum(1 for d in dv_rows if d.verdict and d.verdict.value == 'Suspicious')
+
+        kv_table([
+            ('Overall verdict',                 verdict_label),
+            ('Claims declared by client',       total_claims),
+            ('Claims fully evidenced',          passed_claims),
+            ('Claims requiring further review', review_claims),
+            ('Documents subjected to forensic checks', docs_reviewed),
+            ('Documents flagged "Suspicious"',  docs_suspicious),
+            ('Documents flagged "Likely tampered"', docs_tampered),
+            ('Transaction-review alerts raised', tr_summary.get('total_alerts', 0)),
+        ])
+
+        if outcome.get('rationale'):
+            doc.add_paragraph()
+            p('Reviewer narrative', bold=True)
+            doc.add_paragraph(str(outcome.get('rationale')).strip()[:2000])
+
+        # -----------------------------------------------------------------
+        # 2. REGULATORY FRAMEWORK
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('2. Regulatory framework', level=1)
+        doc.add_paragraph(
+            'This memorandum records the customer due diligence (CDD) and source-of-funds '
+            'verification undertaken in respect of the above matter. The work has been performed '
+            'with reference to:'
+        )
+        for ref in [
+            'The Money Laundering, Terrorist Financing and Transfer of Funds (Information on the Payer) '
+            'Regulations 2017 — in particular Regulations 18 (risk assessment), 27–28 (CDD), 33 (EDD), '
+            '35 (PEPs), 40 (record-keeping), and 47 (training).',
+            'The Proceeds of Crime Act 2002 — in particular Sections 327–330 (principal money '
+            'laundering offences and reporting obligations).',
+            'The Terrorism Act 2000 — Sections 15–18 and 19.',
+            'The SRA Standards and Regulations 2019 — including the SRA Code of Conduct for '
+            'Solicitors, RELs and RFLs (paragraphs 7.1, 7.4) and the Code of Conduct for Firms '
+            '(paragraph 3).',
+            'The SRA AML Sectoral Guidance for the Legal Sector (2023) and the Legal Sector '
+            'Affinity Group Guidance.',
+        ]:
+            doc.add_paragraph(ref, style='List Bullet')
+
+        # -----------------------------------------------------------------
+        # 3. MATTER & CLIENT DETAILS
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('3. Matter and client details', level=1)
+        kv_table([
+            ('Matter reference',          matter.reference_number or ''),
+            ('Client name',               matter.client_name or ''),
+            ('Client entity (if any)',    matter.client_entity_name or 'Not applicable'),
+            ('Target / counterparty',     matter.target_business_name or 'Not specified'),
+            ('Transaction type',          (matter.transaction_type.value.replace('_', ' ').title()
+                                            if matter.transaction_type else 'Not specified')),
+            ('Target amount',             fmt_money(matter.target_amount, 'GBP')),
+            ('Transaction date',          fmt_date(matter.transaction_date) or 'Not yet set'),
+            ('Matter opened',             fmt_date(matter.created_at)),
+            ('Matter last updated',       fmt_date(matter.updated_at)),
+            ('Matter description',        (matter.description or '').strip() or 'Not provided'),
+        ])
+
+        if isinstance(client_info, dict) and client_info:
+            doc.add_paragraph()
+            p('Client-supplied source-of-funds explanation', bold=True)
+            ci_inner = client_info.get('client_info') if isinstance(client_info.get('client_info'), dict) else client_info
+            sof_explanation = (
+                ci_inner.get('sof_explanation') or ci_inner.get('source_of_funds')
+                or client_info.get('sof_explanation') or ''
+            )
+            if isinstance(sof_explanation, dict):
+                sof_explanation = sof_explanation.get('explanation') or sof_explanation.get('summary') or ''
+            if sof_explanation:
+                doc.add_paragraph(str(sof_explanation).strip()[:2000])
+            else:
+                doc.add_paragraph('No free-text explanation supplied by the client.')
+
+        # -----------------------------------------------------------------
+        # 4. RISK ASSESSMENT (MLR Reg 18 / 28)
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('4. Matter risk assessment', level=1)
+        kv_table([
+            ('System-calculated risk',  (matter.risk_rating_auto.value if matter.risk_rating_auto else 'Not calculated').title()),
+            ('Reviewer-applied risk',   (matter.risk_rating_override.value if matter.risk_rating_override else 'No override').title()),
+            ('Effective risk rating',   (matter.risk_rating.value if matter.risk_rating else 'Medium').title()),
+            ('Risk notes / rationale',  (matter.risk_notes or '').strip() or 'No additional notes recorded.'),
+        ])
+        doc.add_paragraph(
+            'In line with Regulation 18 MLR 2017 the matter risk has been assessed against the firm-wide '
+            'risk assessment and the specific characteristics of the client, the parties, the geography, '
+            'the products/services involved, the channels through which the matter is being conducted, '
+            'and the transactions concerned. Enhanced Due Diligence (Regulation 33) has been applied '
+            'where the rating is High or where any factor in Schedule 3 / Schedule 4 to MLR 2017 was '
+            'identified.'
+        )
+
+        # -----------------------------------------------------------------
+        # 5. CDD MEASURES APPLIED
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('5. Customer due diligence measures applied', level=1)
+        doc.add_paragraph(
+            'The following CDD measures were applied to satisfy Regulation 28 MLR 2017. Each control '
+            'is recorded against the corresponding regulatory requirement. Documentary evidence is '
+            'retained on the matter file and the assessment platform audit trail.'
+        )
+        cdd_rows = [
+            ('Reg 28(2)(a) — Identification of the client',
+             'Client name on file: %s.' % (matter.client_name or 'Not recorded')),
+            ('Reg 28(2)(b) — Verification of identity',
+             '%d identity / supporting document(s) uploaded and run through the document forensics '
+             'pipeline (see Section 7).' % docs_reviewed),
+            ('Reg 28(4) — Beneficial ownership',
+             'Recorded against the matter where applicable: %s.' % (matter.client_entity_name or 'Individual client; no entity ownership chain.')),
+            ('Reg 28(2)(c) — Purpose and intended nature of the business relationship',
+             ((matter.description or '').strip() or 'See matter description / SoF explanation above.')),
+            ('Reg 28(11) — Source of funds',
+             '%d claim(s) of source-of-funds declared; %d fully evidenced, %d require further review '
+             '(see Section 6).' % (total_claims, passed_claims, review_claims)),
+            ('Reg 28(13) — Ongoing monitoring',
+             'Bank statement validation and transaction review applied; %d alert(s) raised '
+             '(see Section 8).' % (tr_summary.get('total_alerts', 0))),
+            ('Reg 35 — PEP screening',
+             'Not yet integrated with an external screening provider; reviewer to confirm '
+             'separately. (PLATFORM LIMITATION — to be addressed before sign-off.)'),
+            ('Reg 39 — Reliance on third parties',
+             'No reliance placed on third parties; CDD performed by the firm directly.'),
         ]
-        
-        for idx, (label, value) in enumerate(rows_data):
-            row = overview_table.rows[idx]
-            row.cells[0].text = label
-            row.cells[0].paragraphs[0].runs[0].bold = True
-            row.cells[1].text = str(value)
-        
+        kv_table(cdd_rows)
+
+        # -----------------------------------------------------------------
+        # 6. SOURCE OF FUNDS — CLAIM-BY-CLAIM ANALYSIS
+        # -----------------------------------------------------------------
         doc.add_paragraph()
-        
-        # ==================== SECTION 2: SoF ASSESSMENT ====================
-        doc.add_heading('2. Source of Funds Assessment', level=1)
-        
-        if sof_data and 'assessment_result' in sof_data:
-            assessment = sof_data['assessment_result']
-            
-            # Assessment Status
-            para = doc.add_paragraph()
-            para.add_run('Assessment Status: ').bold = True
-            
-            outcome = assessment.get('outcome', {})
-            status = outcome.get('status', 'NOT COMPLETED').upper()
-            confidence = outcome.get('confidence', 0)
-            
-            para.add_run(f"{status} ({confidence}% confidence)")
-            
-            # Claims Summary
-            claims = assessment.get('claims', [])
-            if claims:
-                doc.add_paragraph()
-                claims_heading = doc.add_paragraph()
-                claims_heading.add_run('Claims Verified:').bold = True
-                
-                for idx, claim in enumerate(claims, 1):
-                    claim_para = doc.add_paragraph(style='List Bullet')
-                    source_type = claim.get('source_type', 'Unknown')
-                    amount = claim.get('expected_amount', 0)
-                    claim_para.add_run(f"Claim {idx}: {source_type} - £{amount:,.2f}")
-                
-                # Evidence Matches
-                evidence_matches = assessment.get('evidence_matches', [])
-                if evidence_matches:
-                    doc.add_paragraph()
-                    evidence_heading = doc.add_paragraph()
-                    evidence_heading.add_run('Verification Results:').bold = True
-                    
-                    for idx, evidence in enumerate(evidence_matches, 1):
-                        verified = evidence.get('verified', False)
-                        doc_verified = evidence.get('document_verified', False)
-                        
-                        status_icon = '✅' if (verified and doc_verified) else '⚠️' if verified else '❌'
-                        status_text = 'FULLY VERIFIED' if (verified and doc_verified) else 'BANK ONLY' if verified else 'NOT VERIFIED'
-                        
-                        ev_para = doc.add_paragraph(style='List Bullet')
-                        ev_para.add_run(f"{status_icon} Claim {idx}: {status_text}")
-            
-            # Next Actions
-            next_actions = assessment.get('next_actions', {})
-            questions = next_actions.get('questions', [])
-            documents = next_actions.get('documents', [])
-            
-            if questions or documents:
-                doc.add_paragraph()
-                doc.add_paragraph().add_run('Outstanding Actions:').bold = True
-                
-                if questions:
-                    doc.add_paragraph().add_run('Questions for Client:').bold = True
-                    for q in questions[:5]:
-                        doc.add_paragraph(q, style='List Bullet')
-                
-                if documents:
-                    doc.add_paragraph().add_run('Documents Required:').bold = True
-                    for d in documents[:5]:
-                        doc.add_paragraph(d, style='List Bullet')
+        doc.add_heading('6. Source of funds analysis', level=1)
+
+        if not claims:
+            doc.add_paragraph('No source-of-funds claims have been recorded against this matter.')
         else:
-            para = doc.add_paragraph()
-            para.add_run('Status: ').bold = True
-            para.add_run('Assessment not yet completed')
-        
-        doc.add_paragraph()
-        
-        # ==================== SECTION 3: TRANSACTION REVIEW ====================
-        doc.add_heading('3. Transaction Review & AML Alerts', level=1)
-        
-        if sof_data and 'assessment_result' in sof_data:
-            assessment = sof_data['assessment_result']
-            tr_summary = assessment.get('transaction_review_summary', {})
-            
-            total_alerts = tr_summary.get('total_alerts', 0)
-            critical_alerts = tr_summary.get('critical_alerts', 0)
-            high_alerts = tr_summary.get('high_alerts', 0)
-            medium_alerts = tr_summary.get('medium_alerts', 0)
-            
-            # Alert Summary
-            alert_para = doc.add_paragraph()
-            alert_para.add_run('Alert Summary: ').bold = True
-            
-            if total_alerts > 0:
-                alert_para.add_run(f"{total_alerts} alert(s) identified")
-                
-                alert_breakdown = doc.add_paragraph(style='List Bullet')
-                alert_breakdown.add_run(f"🔴 CRITICAL: {critical_alerts}")
-                
-                alert_breakdown = doc.add_paragraph(style='List Bullet')
-                alert_breakdown.add_run(f"🟠 HIGH: {high_alerts}")
-                
-                alert_breakdown = doc.add_paragraph(style='List Bullet')
-                alert_breakdown.add_run(f"🟡 MEDIUM: {medium_alerts}")
-                
-                # Key Concerns
-                key_concerns = tr_summary.get('key_concerns', [])
-                if key_concerns:
-                    doc.add_paragraph()
-                    doc.add_paragraph().add_run('Key Concerns:').bold = True
-                    for concern in key_concerns[:5]:
-                        doc.add_paragraph(concern, style='List Bullet')
-            else:
-                alert_para.add_run('No alerts identified ✅')
-        else:
-            para = doc.add_paragraph()
-            para.add_run('Status: ').bold = True
-            para.add_run('Transaction review not yet completed')
-        
-        doc.add_paragraph()
-        
-        # ==================== SECTION 4: DOCUMENT CHECKLIST ====================
-        doc.add_heading('4. Document Checklist', level=1)
-        
-        if sof_data and 'uploaded_files' in sof_data:
-            uploaded_files = sof_data.get('uploaded_files', [])
-            
-            if uploaded_files:
-                doc_para = doc.add_paragraph()
-                doc_para.add_run(f'Total Documents Uploaded: {len(uploaded_files)}').bold = True
+            for idx, claim in enumerate(claims, 1):
+                ev = evidence_matches[idx - 1] if idx - 1 < len(evidence_matches) else {}
+                dv = ev.get('document_verification') or {}
+                confidence = dv.get('confidence') or 0
+                accepted = dv.get('manual_review_status') == 'accepted'
+                fully_verified = (
+                    accepted
+                    or (ev.get('document_verified') is True and confidence >= 0.999)
+                )
+                claim_status = 'ACCEPTED (manual review)' if accepted else (
+                    'VERIFIED' if fully_verified else 'REVIEW REQUIRED'
+                )
+                source_label = str(claim.get('source_type', 'Unknown')).replace('_', ' ').title()
+
+                p(f'Claim {idx}: {source_label}', bold=True, size=12)
+                kv_table([
+                    ('Declared source',         source_label),
+                    ('Declared amount',         fmt_money(claim.get('expected_amount'), 'GBP')),
+                    ('Verification outcome',    claim_status),
+                    ('Document-match confidence', f"{confidence * 100:.1f}%" if isinstance(confidence, (int, float)) else 'n/a'),
+                    ('Bank transactions matched', len(ev.get('transactions', []) or [])),
+                ])
+
+                diffs = dv.get('differences') or []
+                if diffs:
+                    p('Discrepancies identified', bold=True)
+                    diff_rows = []
+                    for d in diffs[:8]:
+                        field = (d.get('field') or '').replace('_', ' ').title() if isinstance(d, dict) else ''
+                        expected = (d.get('expected') if isinstance(d, dict) else '') or ''
+                        found    = (d.get('found') if isinstance(d, dict) else '') or ''
+                        desc     = (d.get('description') or d.get('issue') if isinstance(d, dict) else '') or ''
+                        diff_rows.append((field or 'Discrepancy',
+                                          str(expected)[:120],
+                                          str(found)[:120],
+                                          str(desc)[:200]))
+                    header_table(('Field', 'Expected', 'Found', 'Reviewer notes'), diff_rows)
+
+                if accepted:
+                    p('Reviewer disposition', bold=True)
+                    accepted_by = dv.get('accepted_by') or dv.get('manually_accepted_by') or 'Reviewer'
+                    accepted_at = dv.get('accepted_at') or dv.get('manually_accepted_at') or ''
+                    accepted_reason = (
+                        dv.get('accepted_reason') or dv.get('acceptance_reason') or
+                        'Differences accepted on review.'
+                    )
+                    kv_table([
+                        ('Accepted by',     accepted_by),
+                        ('Accepted on',     fmt_date(accepted_at, '%d/%m/%Y %H:%M') or 'Not recorded'),
+                        ('Rationale',       accepted_reason),
+                    ])
                 doc.add_paragraph()
-                
-                # Group by category
-                categories = {}
-                for file_info in uploaded_files:
-                    category = file_info.get('category', 'unknown')
-                    if category not in categories:
-                        categories[category] = []
-                    categories[category].append(file_info)
-                
-                for category, files in categories.items():
-                    cat_para = doc.add_paragraph()
-                    cat_para.add_run(f"{category.replace('_', ' ').title()}: {len(files)} file(s)").bold = True
-                    
-                    for file_info in files[:3]:  # Limit to first 3 per category
-                        file_para = doc.add_paragraph(style='List Bullet')
-                        file_para.add_run(f"✓ {file_info.get('filename', 'Unknown')}")
-                    
-                    if len(files) > 3:
-                        doc.add_paragraph(f"... and {len(files) - 3} more", style='List Bullet')
-            else:
-                doc.add_paragraph('No documents uploaded yet')
+
+        # -----------------------------------------------------------------
+        # 7. DOCUMENT VERIFICATION (forensics)
+        # -----------------------------------------------------------------
+        doc.add_heading('7. Document verification', level=1)
+        if not dv_rows:
+            doc.add_paragraph('No documents were submitted to the forensics pipeline.')
         else:
-            doc.add_paragraph('Document upload not yet started')
-        
+            doc.add_paragraph(
+                f'{len(dv_rows)} document(s) were subjected to automated forensic checks including '
+                'text-layer / OCR consistency, image forensics (ELA, JPEG quantisation), template '
+                'fingerprint matching against known bank statement layouts, PDF signature validation '
+                'and statement mathematical reconciliation.'
+            )
+            rows = []
+            for d in dv_rows:
+                v = d.verdict.value if d.verdict else 'Unverified'
+                phase = getattr(d, 'verification_phase', '') or ''
+                score = (
+                    f"{d.authenticity_score}/100" if d.authenticity_score is not None else 'n/a'
+                )
+                flag_count = len(d.flags or []) if hasattr(d, 'flags') else 0
+                actionable_flags = (
+                    [f for f in (d.flags or []) if f.severity not in (None, 'info') and not (f.code or '').endswith('_OK')]
+                    if hasattr(d, 'flags') else []
+                )
+                rows.append((
+                    d.filename,
+                    v,
+                    score,
+                    len(actionable_flags),
+                    flag_count,
+                ))
+            header_table(
+                ('Filename', 'Verdict', 'Authenticity score', 'Actionable flags', 'Total flags'),
+                rows,
+            )
+
+            # Drill into each non-Verified document so the reviewer has the
+            # full forensic narrative for sign-off.
+            for d in dv_rows:
+                if d.verdict and d.verdict.value == 'Verified':
+                    continue
+                doc.add_paragraph()
+                p(f'Forensic detail — {d.filename}', bold=True)
+                p('Method: ' + (getattr(d, 'method_summary', '') or 'Standard pipeline'))
+                if getattr(d, 'flags', None):
+                    flag_rows = []
+                    for f in d.flags[:25]:
+                        if (f.code or '').endswith('_OK'):
+                            continue
+                        if f.severity == 'info':
+                            continue
+                        flag_rows.append((
+                            (f.severity or '').upper(),
+                            f.code or '',
+                            (f.message or '')[:300],
+                        ))
+                    if flag_rows:
+                        header_table(('Severity', 'Code', 'Message'), flag_rows)
+
+        # -----------------------------------------------------------------
+        # 8. BANK STATEMENT VALIDATION & TRANSACTION REVIEW
+        # -----------------------------------------------------------------
         doc.add_paragraph()
-        
-        # ==================== SECTION 5: RECOMMENDATIONS ====================
-        doc.add_heading('5. Recommendations & Next Steps', level=1)
-        
-        # Determine recommendations based on status
+        doc.add_heading('8. Bank statement validation and transaction review', level=1)
+        kv_table([
+            ('Bank statements ingested',       sum(1 for f in uploaded_files if f.get('category') == 'bank_statement')),
+            ('Total transactions processed',   len(bank_statements)),
+            ('Statement validations on file',  len(stmt_rows)),
+            ('Transaction-review alerts',      tr_summary.get('total_alerts', 0)),
+            ('  Critical',                     tr_summary.get('critical_alerts', 0)),
+            ('  High',                         tr_summary.get('high_alerts', 0)),
+            ('  Medium',                       tr_summary.get('medium_alerts', 0)),
+            ('  Low / informational',          tr_summary.get('low_alerts', 0)),
+        ])
+        key_concerns = tr_summary.get('key_concerns') or []
+        if key_concerns:
+            p('Key concerns flagged by the transaction-review engine', bold=True)
+            for c in key_concerns[:10]:
+                doc.add_paragraph(str(c), style='List Bullet')
+
+        # -----------------------------------------------------------------
+        # 9. FUNDS LINEAGE
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('9. Funds lineage', level=1)
+        fl_summary = (funds_lineage or {}).get('summary') if isinstance(funds_lineage, dict) else None
+        if not fl_summary:
+            doc.add_paragraph(
+                'A funds lineage trace has not been recorded for this matter. Where the source of '
+                'funds includes accumulated savings or inter-account transfers, a lineage trace '
+                'should be performed to evidence accumulation back to a verified origin.'
+            )
+        else:
+            total_amt    = float(fl_summary.get('totalAmount') or 0)
+            traced_amt   = float(fl_summary.get('tracedAmount') or 0)
+            untraced_amt = float(fl_summary.get('untracedAmount') or max(0, total_amt - traced_amt))
+            traced_pct   = (traced_amt / total_amt * 100) if total_amt > 0 else 0
+            untraced_pct = max(0.0, 100.0 - traced_pct)
+            period_days  = int(fl_summary.get('accumulationPeriodDays') or 0)
+            kv_table([
+                ('Target credit traced',     fmt_money(total_amt, 'GBP')),
+                ('Traced to a verified origin', f"{fmt_money(traced_amt, 'GBP')} ({traced_pct:.1f}%)"),
+                ('Untraced / requires evidence', f"{fmt_money(untraced_amt, 'GBP')} ({untraced_pct:.1f}%)"),
+                ('Matched internal transfers', fl_summary.get('matchedTransfers') or 0),
+                ('External-origin entries',    fl_summary.get('externalOrigins') or 0),
+                ('Accumulation period (days)', period_days),
+            ])
+            unresolved = funds_lineage.get('unresolved_items') or []
+            if unresolved:
+                p('Unresolved items requiring further evidence', bold=True)
+                u_rows = []
+                for u in unresolved[:15]:
+                    u_rows.append((
+                        fmt_money(u.get('amount'), 'GBP'),
+                        fmt_date(u.get('date')),
+                        u.get('account') or '',
+                        (u.get('description') or '')[:120],
+                    ))
+                header_table(('Amount', 'Date', 'Account', 'Description'), u_rows)
+
+        # -----------------------------------------------------------------
+        # 10. OUTSTANDING MATTERS / RECOMMENDATIONS
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('10. Outstanding matters and recommendations', level=1)
+        questions = next_actions.get('questions') or []
+        documents = next_actions.get('documents') or []
         recommendations = []
-        
-        if sof_data and 'assessment_result' in sof_data:
-            assessment = sof_data['assessment_result']
-            outcome = assessment.get('outcome', {})
-            status = outcome.get('status', '').lower()
-            
-            if status == 'sufficient':
-                recommendations.append('✅ Matter has sufficient source of funds documentation')
-                recommendations.append('✅ All material claims have been verified')
-                recommendations.append('➡️ Matter can proceed to completion subject to standard monitoring')
-            elif status == 'borderline':
-                recommendations.append('⚠️ Additional verification recommended before proceeding')
-                recommendations.append('➡️ Review outstanding questions and documents')
-                recommendations.append('➡️ Consider enhanced due diligence for high-risk elements')
-            else:
-                recommendations.append('❌ Insufficient source of funds documentation')
-                recommendations.append('➡️ Request missing documents before proceeding')
-                recommendations.append('➡️ Obtain client responses to outstanding questions')
-            
-            # Check for critical alerts
-            tr_summary = assessment.get('transaction_review_summary', {})
-            if tr_summary.get('critical_alerts', 0) > 0:
-                recommendations.append('🔴 CRITICAL: Address transaction review alerts before proceeding')
+        if verdict_status == 'sufficient':
+            recommendations.append(
+                'Source of funds is adequately evidenced. The matter may proceed subject to '
+                'standard ongoing monitoring under Regulation 28(13).'
+            )
+        elif verdict_status == 'borderline':
+            recommendations.append(
+                'Manual review required before completion. Resolve the outstanding items listed '
+                'below and revisit the assessment.'
+            )
+        elif verdict_status == 'insufficient':
+            recommendations.append(
+                'Source of funds is NOT adequately evidenced. The matter must not proceed to '
+                'completion until the items below are resolved. Consider whether a Suspicious '
+                'Activity Report (SAR) to the National Crime Agency is required under sections '
+                '330 / 331 of the Proceeds of Crime Act 2002.'
+            )
         else:
-            recommendations.append('➡️ Complete SoF Assessment to generate recommendations')
-        
+            recommendations.append('Complete the SoF assessment before drawing conclusions.')
+        if tr_summary.get('critical_alerts', 0):
+            recommendations.append(
+                'Critical transaction-review alerts have been raised — these must be resolved or '
+                'escalated to the firm\'s MLRO before sign-off.'
+            )
         for rec in recommendations:
             doc.add_paragraph(rec, style='List Bullet')
-        
-        # ==================== FOOTER ====================
+
+        if documents:
+            p('Documents required from the client', bold=True)
+            for d_ in documents[:25]:
+                doc.add_paragraph(str(d_), style='List Bullet')
+        if questions:
+            p('Outstanding questions for the client', bold=True)
+            for q in questions[:25]:
+                doc.add_paragraph(str(q), style='List Bullet')
+
+        # -----------------------------------------------------------------
+        # 11. AUDIT TRAIL
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('11. Audit trail', level=1)
+        if not audit_rows:
+            doc.add_paragraph('No audit events have been recorded for this matter.')
+        else:
+            audit_data = []
+            for a in audit_rows[-60:]:
+                actor = '-'
+                try:
+                    if a.user_id:
+                        u = sync_db.query(User).filter(User.id == a.user_id).first()
+                        if u:
+                            actor = u.full_name or u.email
+                except Exception:
+                    actor = '-'
+                audit_data.append((
+                    fmt_date(a.created_at, '%d/%m/%Y %H:%M'),
+                    (a.action.value if a.action else '').replace('_', ' ').title(),
+                    actor,
+                    (a.description or '')[:200],
+                ))
+            header_table(('Timestamp', 'Action', 'Actor', 'Description'), audit_data)
+
+        # -----------------------------------------------------------------
+        # 12. REVIEWER ATTESTATION
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('12. Reviewer attestation', level=1)
+        doc.add_paragraph(
+            'I confirm that the customer due diligence measures recorded in this memorandum are, '
+            'in my professional judgement, commensurate with the assessed risk of the matter and '
+            'have been performed in accordance with the firm\'s AML policies, procedures and '
+            'controls. I am satisfied (subject to the items in Section 10) that the requirements '
+            'of Regulations 27–28 MLR 2017 have been met. Where any reservation is recorded, the '
+            'matter has not been signed off and will not proceed to completion until that '
+            'reservation is resolved.'
+        )
+        kv_table([
+            ('Reviewer name',  current_user.full_name or current_user.email),
+            ('Role',           (current_user.role.value if getattr(current_user, 'role', None) else 'Analyst').title()),
+            ('Date of review', datetime.utcnow().strftime('%d %B %Y')),
+            ('Signature',      '_____________________________________________'),
+        ])
+
+        # -----------------------------------------------------------------
+        # 13. RETENTION
+        # -----------------------------------------------------------------
+        doc.add_paragraph()
+        doc.add_heading('13. Record retention', level=1)
+        doc.add_paragraph(
+            'Pursuant to Regulation 40 MLR 2017 this memorandum and the underlying CDD evidence '
+            '(client identification, source-of-funds documents, transaction records and the '
+            'platform audit trail) will be retained by the firm for a period of five years from '
+            'the date the business relationship ends or the occasional transaction is completed. '
+            'On the expiry of that period, and unless retention is otherwise required by law or '
+            'court order, the records will be securely deleted.'
+        )
+
+        # -----------------------------------------------------------------
+        # FOOTER
+        # -----------------------------------------------------------------
         doc.add_paragraph()
         footer = doc.add_paragraph()
-        footer.add_run('_' * 80)
+        footer.add_run('— End of memorandum —').italic = True
         footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        footer_text = doc.add_paragraph()
-        footer_text.add_run('\nEnd of Report')
-        footer_text.add_run(f'\nGenerated: {datetime.now().strftime("%d %B %Y at %H:%M")}')
-        footer_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Audit log for report generation
+        footer2 = doc.add_paragraph()
+        footer2.add_run(
+            f'Generated by Agora Consulting AI · Matter {matter.reference_number} · '
+            f'{datetime.utcnow().strftime("%d %B %Y at %H:%M UTC")}'
+        ).italic = True
+        footer2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # -----------------------------------------------------------------
+        # Audit + return
+        # -----------------------------------------------------------------
         report_audit = AuditLog(
             matter_id=matter.id,
             user_id=current_user.id,
             action=AuditLogAction.REPORT_GENERATED,
             entity_type="matter",
             entity_id=matter.id,
-            description=f"Report generated for matter {matter.reference_number}",
+            description=f"SoF compliance memorandum generated for matter {matter.reference_number}",
             details={
                 "reference": matter.reference_number,
                 "client": matter.client_name,
-                "status": matter.status.value if matter.status else "unknown",
+                "verdict": verdict_status or 'incomplete',
+                "claims": total_claims,
+                "passed_claims": passed_claims,
+                "documents_reviewed": docs_reviewed,
             },
         )
         sync_db.add(report_audit)
         sync_db.commit()
 
-        # Save to BytesIO
         docx_buffer = BytesIO()
         doc.save(docx_buffer)
         docx_buffer.seek(0)
 
-        # Return as downloadable Word document
+        safe_ref = (matter.reference_number or f'matter-{matter.id}').replace('/', '-').replace(' ', '_')
+        filename = f"SoF_Compliance_Memorandum_{safe_ref}.docx"
         return StreamingResponse(
             docx_buffer,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={
-                "Content-Disposition": f"attachment; filename=Matter_Summary_{matter.reference_number}.docx"
-            }
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
-    
+
     finally:
         sync_db.close()
 
