@@ -140,6 +140,7 @@ function renderUploadedList(
   verificationResults: Record<string, { verdict: string; score?: number }>,
   category: 'client_info' | 'bank_statement' | 'supporting_doc',
   emptyCopy: string,
+  onDelete?: (filename: string) => void,
 ) {
   const files: Array<{ filename: string; category: string; records_count?: number }> =
     (status?.uploaded_files ?? []).filter((f: any) => f.category === category);
@@ -169,7 +170,22 @@ function renderUploadedList(
               <span className="text-xs text-zinc-400 tabular-nums">{idx + 1}.</span>
               <span className="truncate">{file.filename}</span>
             </span>
-            {verdictBadge(ver?.verdict)}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {verdictBadge(ver?.verdict)}
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(file.filename)}
+                  title="Remove this file"
+                  className="p-1 text-zinc-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                  aria-label={`Remove ${file.filename}`}
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </li>
         );
       })}
@@ -523,6 +539,36 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/file-note`,
       '_blank'
     );
+  };
+
+  // Remove one uploaded file from this matter. Cleans up storage,
+  // DocumentVerification rows, and the file on disk. Triggers a
+  // status refresh on success so the uploaded-files list re-renders.
+  const deleteUploadedFile = async (
+    filename: string,
+    category: 'client_info' | 'bank_statement' | 'supporting_doc',
+  ) => {
+    if (!confirm(`Remove "${filename}"? This will clear it from the assessment.`)) return;
+
+    try {
+      const url = `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/uploaded-file?filename=${encodeURIComponent(filename)}&category=${encodeURIComponent(category)}`;
+      const response = await authFetch(url, { method: 'DELETE' });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert(`Could not remove file: ${err.detail || response.statusText}`);
+        return;
+      }
+      setFileVerificationResults((prev) => {
+        const { [filename]: _, ...rest } = prev;
+        return rest;
+      });
+      // Stale results aren't useful once the inputs change.
+      setResult(null);
+      await fetchStatus();
+    } catch (error: any) {
+      console.error('Error deleting file:', error);
+      alert(`Could not remove file: ${error?.message || 'Unknown error'}`);
+    }
   };
 
   const deleteMatter = async () => {
@@ -1076,7 +1122,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
                 {/* List of client-info files already provided. The toggle
                     below acts as the "Add document" mechanism. */}
-                {renderUploadedList(status, fileVerificationResults, 'client_info', 'No client info provided yet.')}
+                {renderUploadedList(status, fileVerificationResults, 'client_info', 'No client info provided yet.', (fn) => deleteUploadedFile(fn, 'client_info'))}
                 <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-3">Add document</div>
                 <div className="text-center">
                   <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
@@ -1312,7 +1358,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
               {/* Numbered list of bank statements already uploaded */}
-              {renderUploadedList(status, fileVerificationResults, 'bank_statement', 'No bank statements uploaded yet.')}
+              {renderUploadedList(status, fileVerificationResults, 'bank_statement', 'No bank statements uploaded yet.', (fn) => deleteUploadedFile(fn, 'bank_statement'))}
 
               {/* Add document */}
               <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-2">Add document</div>
@@ -1364,7 +1410,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
               {/* Numbered list of supporting documents already uploaded */}
-              {renderUploadedList(status, fileVerificationResults, 'supporting_doc', 'No supporting documents uploaded yet.')}
+              {renderUploadedList(status, fileVerificationResults, 'supporting_doc', 'No supporting documents uploaded yet.', (fn) => deleteUploadedFile(fn, 'supporting_doc'))}
 
               {/* Add document */}
               <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-2">Add document</div>

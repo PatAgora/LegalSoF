@@ -2854,12 +2854,12 @@ async def reset_sof_assessment(
     """
     Reset/clear SoF assessment data for a matter
     """
-    
+
     # Verify matter exists
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
-    
+
     # Clear storage from database
     _db_delete_storage(db, matter_id)
 
@@ -2867,4 +2867,103 @@ async def reset_sof_assessment(
         "success": True,
         "matter_id": matter_id,
         "message": "SoF assessment data cleared"
+    }
+
+
+@router.delete("/matters/{matter_id}/sof-assessment/uploaded-file")
+async def delete_uploaded_file(
+    matter_id: int,
+    filename: str,
+    category: str,  # 'client_info' | 'bank_statement' | 'supporting_doc'
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """
+    Remove a single uploaded file from the SoF assessment workspace.
+
+    Cleans up four places: the entry in storage['uploaded_files'], the
+    category-specific buckets (client_info / bank_statements transactions
+    tagged with source_filename / supporting_docs), every
+    DocumentVerification row (with its cascaded flags + transactions),
+    and the file on disk. After a successful delete the user can
+    re-upload the same file from scratch.
+    """
+    if category not in ("client_info", "bank_statement", "supporting_doc"):
+        raise HTTPException(status_code=400, detail=f"Unknown category: {category}")
+
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No uploaded files for this matter")
+
+    uploaded_files = storage.get("uploaded_files", [])
+    match_idx = next(
+        (i for i, uf in enumerate(uploaded_files)
+         if uf.get("filename") == filename and uf.get("category") == category),
+        None,
+    )
+    if match_idx is None:
+        raise HTTPException(status_code=404, detail="File not found in this matter")
+
+    del uploaded_files[match_idx]
+    storage["uploaded_files"] = uploaded_files
+
+    # Strip out the parsed contents for this file from the category bucket.
+    if category == "client_info":
+        # The client_info slot only holds one document at a time.
+        storage["client_info"] = None
+    elif category == "bank_statement":
+        storage["bank_statements"] = [
+            txn for txn in storage.get("bank_statements", [])
+            if txn.get("source_filename") != filename
+        ]
+    elif category == "supporting_doc":
+        storage["supporting_docs"] = [
+            doc for doc in storage.get("supporting_docs", [])
+            if doc.get("filename") != filename
+        ]
+
+    # Clear any cached assessment outputs — they're stale once the
+    # underlying files change. The user will re-run after re-upload.
+    storage.pop("results", None)
+    storage.pop("rationale", None)
+    storage.pop("funds_lineage", None)
+    storage["last_updated"] = datetime.now(timezone.utc).isoformat()
+    if not storage["uploaded_files"]:
+        storage["status"] = "pending"
+
+    _db_save_storage(db, matter_id, storage)
+
+    # Drop DocumentVerification rows (cascades to flags + transactions
+    # via ondelete=CASCADE on their FKs).
+    dv_rows = db.query(DocumentVerification).filter(
+        DocumentVerification.matter_id == matter_id,
+        DocumentVerification.filename == filename,
+    ).all()
+
+    disk_targets: set[str] = {filename}
+    for dv in dv_rows:
+        if dv.disk_filename:
+            disk_targets.add(dv.disk_filename)
+        db.delete(dv)
+    db.commit()
+
+    upload_dir = f"/app/uploads/{matter_id}"
+    for disk_name in disk_targets:
+        path = os.path.join(upload_dir, os.path.basename(disk_name))
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    return {
+        "success": True,
+        "matter_id": matter_id,
+        "filename": filename,
+        "category": category,
+        "message": "File removed",
     }
