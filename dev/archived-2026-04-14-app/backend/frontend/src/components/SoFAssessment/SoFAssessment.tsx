@@ -1379,22 +1379,75 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
-  const renderSoFSection = (content: string, result: AssessmentResult) => {
-    // Extract status lines (both old and new formats)
-    const bankPaymentMatch = content.match(/BANK PAYMENT STATUS:([^\n]+)/);
-    const docStatusMatch = content.match(/DOCUMENTATION STATUS:([^\n]+)/);
-    const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/); // Legacy format
-    
-    const bankStatus = bankPaymentMatch ? bankPaymentMatch[1].trim() : '';
-    const docStatus = docStatusMatch ? docStatusMatch[1].trim() : '';
-    const overallStatus = overallMatch ? overallMatch[1].trim() : '';
-    
-    const displayStatus = bankStatus || overallStatus;
-    const isGood = displayStatus.includes('✅') || displayStatus.includes('VERIFIED');
-    const isPartial = displayStatus.includes('⚠️') || displayStatus.includes('Partial');
+  const renderSoFSection = (_content: string, result: AssessmentResult) => {
+    // Helper: build a one-line plain-English summary for a single
+    // evidence row based on what the pipeline reported about it.
+    const summariseEvidence = (evidence: any): string[] => {
+      const out: string[] = [];
+      if (!evidence) return out;
+      const dv = evidence.document_verification || {};
+      const accepted = dv.manual_review_status === 'accepted';
+      if (accepted) {
+        out.push(`Differences manually accepted${dv.accepted_by ? ` by ${dv.accepted_by}` : ''}.`);
+        return out;
+      }
+      const diffs = Array.isArray(dv.differences) ? dv.differences : [];
+      diffs.slice(0, 3).forEach((d: any) => {
+        if (d?.description) out.push(d.description);
+        else if (d?.field) out.push(String(d.field));
+      });
+      // Funds lineage summary, if any.
+      const lineage = evidence.lineage_summary || (evidence.funds_lineage && evidence.funds_lineage.summary);
+      if (lineage && typeof lineage.tracedAmount === 'number' && typeof lineage.totalAmount === 'number' && lineage.totalAmount > 0) {
+        const pct = Math.round((lineage.tracedAmount / lineage.totalAmount) * 100);
+        out.push(`${pct}% of funds traced to origin.`);
+        if (lineage.untracedAmount > 0) {
+          out.push(`£${Math.round(lineage.untracedAmount).toLocaleString()} requires further evidence.`);
+        }
+      }
+      // Bank transaction confirmation, if any.
+      if (Array.isArray(evidence.transactions) && evidence.transactions.length > 0) {
+        out.push(`Bank transaction confirmed (${evidence.transactions.length} match${evidence.transactions.length !== 1 ? 'es' : ''}).`);
+      }
+      if (out.length === 0) {
+        if (dv.issues && dv.issues.length > 0) out.push(String(dv.issues[0]));
+        else out.push('Source documentation required.');
+      }
+      return out;
+    };
+
+    // Trigger the accept-differences endpoint inline.
+    const acceptClaim = async (claimIndex: number) => {
+      const reason = window.prompt(
+        'Reason for accepting these differences:',
+        'Manual review completed — differences accepted.',
+      );
+      if (reason === null) return; // cancelled
+      try {
+        const r = await authFetch(
+          `${API_BASE_URL}/api/v1/matters/${result.matter_id}/sof-assessment/accept-differences`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              claim_index: claimIndex,
+              accepted_by: 'Current User',
+              reason: reason || 'Manual review completed — differences accepted',
+            }),
+          },
+        );
+        if (r.ok) {
+          window.location.reload();
+        } else {
+          const err = await r.json();
+          alert(`Could not accept: ${err.detail || 'Unknown error'}`);
+        }
+      } catch (e: any) {
+        alert(`Could not accept: ${e.message || 'Unknown error'}`);
+      }
+    };
     
     return (
-      <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+      <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group" open>
         {/* Header — clickable summary, chevron rotates when open */}
         <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
           <h3 className="text-lg font-bold text-zinc-900">📊 Source of Funds Analysis</h3>
@@ -1402,211 +1455,80 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </summary>
-        
-        {/* Status Lines */}
-        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
-          {bankStatus && (
-            <p className="font-semibold mb-2 text-zinc-900">
-              {bankStatus}
-            </p>
-          )}
-          {docStatus && (
-            <div>
-              <p className="font-semibold text-zinc-900 mb-1">{docStatus}</p>
-              {content.includes('Bank payments alone are INSUFFICIENT') && (
-                <p className="text-sm text-zinc-900 italic ml-4">
-                  Bank payments alone are INSUFFICIENT for AML compliance.
-                </p>
-              )}
-            </div>
-          )}
-          {!bankStatus && overallStatus && (
-            <p className="font-semibold text-zinc-900">
-              {overallStatus}
-            </p>
-          )}
-        </div>
-        
-        {/* Claims Table */}
-        <div className="px-6 py-4">
-          <h4 className="text-sm font-bold text-zinc-600 mb-3">Claim-by-Claim Analysis</h4>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-brand-muted">
-              <thead className="bg-zinc-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Claim</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Outreach Questions</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Summary</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-brand-muted">
-                {result.claims.map((claim, idx) => {
-                  const evidence = result.evidence_matches[idx];
-                  const verified = evidence?.verified || false;
-                  const document_verified = evidence?.document_verified || false;
-                  const transactions = evidence?.transactions || [];
-                  const confidence = evidence?.document_verification?.confidence || 0;
-                  const manuallyAccepted = evidence?.document_verification?.manual_review_status === 'accepted';
-                  // Check if there's a document upload attempt (either file or issues)
-                  const hasDocUploaded = evidence?.document_verification?.verification_details?.document_used;
-                  const hasDocVerificationAttempt = hasDocUploaded || 
-                    (evidence?.document_verification?.issues && evidence.document_verification.issues.length > 0);
-                  // Only show as FULLY VERIFIED if confidence is 100% (>= 0.999 to account for floating point) OR manually accepted
-                  const fullyVerified = (verified && document_verified && confidence >= 0.999) || manuallyAccepted;
-                  const requiresReview = hasDocVerificationAttempt && !fullyVerified;
-                  
-                  return (
-                    <tr key={idx} className="hover:bg-zinc-50">
-                      <td className="px-4 py-3 text-sm text-zinc-900 font-medium">
-                        {claim.source_type} £{claim.expected_amount.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        {fullyVerified ? (
-                          <div className="text-green-700">
-                            <div>✓ Verified</div>
-                            {evidence?.document_verification?.verification_details?.document_used?.filename && (
-                              <div className="text-xs text-zinc-600 mt-1">
-                                Doc: {evidence.document_verification.verification_details.document_used.filename.slice(0, 30)}{evidence.document_verification.verification_details.document_used.filename.length > 30 ? '...' : ''}
-                              </div>
-                            )}
-                          </div>
-                        ) : manuallyAccepted ? (
-                          <div className="text-green-700 text-xs">
-                            <div>✓ Verified via manual acceptance</div>
-                          </div>
-                        ) : document_verified ? (
-                          <div className="text-zinc-900">
-                            {evidence?.document_verification?.verification_details?.document_used?.filename && (
-                              <div className="text-sm">
-                                📄 {evidence.document_verification.verification_details.document_used.filename.slice(0, 25)}{evidence.document_verification.verification_details.document_used.filename.length > 25 ? '...' : ''}
-                              </div>
-                            )}
-                            {evidence?.issues && evidence.issues.length > 0 && (
-                              <div className="text-xs text-amber-700 mt-1 space-y-0.5">
-                                {evidence.issues.slice(0, 3).map((issue: string, issueIdx: number) => (
-                                  <div key={issueIdx}>⚠️ {issue}</div>
-                                ))}
-                                {evidence.issues.length > 3 && (
-                                  <div className="text-zinc-400">+ {evidence.issues.length - 3} more issues</div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ) : verified ? (
-                          <span className="text-zinc-900">
-                            Request {
-                              claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
-                              claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
-                              claim.source_type.toLowerCase().includes('loan') ? 'loan agreement' :
-                              claim.source_type.toLowerCase().includes('business') ? 'sale agreement' :
-                              'documentation'
-                            }
-                          </span>
-                        ) : (
-                          <span className="text-zinc-900">
-                            Request {
-                              claim.source_type.toLowerCase().includes('inheritance') ? 'probate grant' :
-                              claim.source_type.toLowerCase().includes('property') ? 'completion statement' :
-                              claim.source_type.toLowerCase().includes('loan') ? 'loan agreement' :
-                              claim.source_type.toLowerCase().includes('business') ? 'sale agreement' :
-                              'documentation'
-                            }
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {fullyVerified ? (
-                          <div className="space-y-1">
-                            {manuallyAccepted ? (
-                              <>
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                                  ✅ VERIFIED (following acceptance of differences)
-                                </span>
-                                <div className="bg-green-50 rounded p-2 mt-1 text-xs">
-                                  <div className="text-green-700 font-semibold mb-1">Acceptance Details:</div>
-                                  <div className="text-zinc-600">
-                                    <div>• Accepted by: {evidence?.document_verification?.manually_accepted_by || 'User'}</div>
-                                    <div>• Date: {evidence?.document_verification?.manually_accepted_at 
-                                      ? new Date(evidence.document_verification.manually_accepted_at).toLocaleString('en-GB', {
-                                          day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-                                        }) 
-                                      : 'N/A'}</div>
-                                    {evidence?.document_verification?.acceptance_reason && (
-                                      <div>• Rationale: {evidence.document_verification.acceptance_reason}</div>
-                                    )}
-                                  </div>
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                                  ✅ FULLY VERIFIED
-                                </span>
-                                {/* Show verified data summary */}
-                                {evidence?.document_verification?.verification_details?.extracted_data && (
-                                  <div className="bg-green-50 rounded p-2 mt-1 text-xs">
-                                    {Object.entries(evidence.document_verification.verification_details.extracted_data)
-                                      .filter(([key]) => ['payment_amount', 'net_proceeds', 'completion_date', 'deceased_name', 'payment_date'].includes(key))
-                                      .slice(0, 3)
-                                      .map(([key, value]: [string, any]) => (
-                                        <div key={key} className="flex justify-between py-0.5">
-                                          <span className="text-green-700">{key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span>
-                                          <span className="text-green-700 font-medium ml-2">
-                                            {typeof value === 'number' ? `£${value.toLocaleString()}` : String(value).slice(0, 20)}
-                                          </span>
-                                        </div>
-                                      ))
-                                    }
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        ) : requiresReview ? (
-                          <div className="text-sm space-y-1">
-                            <div className="text-amber-700 font-semibold mb-1">
-                              ⚠️ Review Required
-                            </div>
-                            {/* Simplified: Just show bullet points of what's missing/different */}
-                            <ul className="list-disc list-inside text-xs text-zinc-600 space-y-0.5">
-                              {evidence?.document_verification?.differences && evidence.document_verification.differences.length > 0 ? (
-                                evidence.document_verification.differences.map((diff: any, diffIdx: number) => (
-                                  <li key={diffIdx}>
-                                    <span className="font-medium">{diff.field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span> {diff.issue}
-                                    {/* Show full details for funds_discrepancy */}
-                                    {diff.field === 'funds_discrepancy' && (
-                                      <div className="ml-4 mt-1 text-xs space-y-0.5">
-                                        <div className="text-zinc-600">{diff.expected}</div>
-                                        <div className="text-red-700 font-medium">→ {diff.found}</div>
-                                      </div>
-                                    )}
-                                  </li>
-                                ))
-                              ) : evidence?.issues && evidence.issues.length > 0 ? (
-                                evidence.issues.map((issue: string, issueIdx: number) => (
-                                  <li key={issueIdx}>{issue}</li>
-                                ))
-                              ) : (
-                                <li>Document verification incomplete</li>
-                              )}
-                            </ul>
-                          </div>
-                        ) : verified ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-zinc-200 text-zinc-900">
-                            ⚠️ Payment found, docs req'd
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
-                            ❌ MISSING
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+
+        {/* Claims table — Claim / Status / Summary / Action.
+            One row per evidence_match. The action column triggers the
+            existing /sof-assessment/accept-differences endpoint with a
+            rationale prompt so the reviewer can mark a row as
+            manually-accepted without leaving the page. */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-zinc-200">
+            <thead className="bg-zinc-50">
+              <tr>
+                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Claim</th>
+                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Status</th>
+                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Summary</th>
+                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Action</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-zinc-100">
+              {(result.claims || []).map((claim, idx) => {
+                const evidence = result.evidence_matches[idx] || {};
+                const dv = evidence.document_verification || {};
+                const verified = evidence.verified === true;
+                const accepted = dv.manual_review_status === 'accepted';
+                const confidence = dv.confidence ?? 0;
+                const fullyVerified = (verified && evidence.document_verified === true && confidence >= 0.999) || accepted;
+                const summary = summariseEvidence(evidence);
+
+                const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
+                const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
+
+                let statusChip;
+                if (accepted) {
+                  statusChip = <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />ACCEPTED</span>;
+                } else if (fullyVerified) {
+                  statusChip = <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />VERIFIED</span>;
+                } else {
+                  statusChip = <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200/80"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />REVIEW</span>;
+                }
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-50/60 align-top">
+                    <td className="px-5 py-3 text-sm text-zinc-900 whitespace-nowrap">
+                      <div className="font-medium capitalize">{sourceLabel}</div>
+                      <div className="text-xs text-zinc-500 tabular-nums">{amountStr}</div>
+                    </td>
+                    <td className="px-5 py-3 text-sm whitespace-nowrap">
+                      {statusChip}
+                    </td>
+                    <td className="px-5 py-3 text-sm text-zinc-700">
+                      <ul className="space-y-1">
+                        {summary.map((s, si) => (
+                          <li key={si} className="leading-snug">{s}</li>
+                        ))}
+                      </ul>
+                      {accepted && dv.accepted_reason && (
+                        <div className="mt-2 text-xs italic text-zinc-500">"{dv.accepted_reason}"</div>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-sm whitespace-nowrap">
+                      {!accepted && !fullyVerified ? (
+                        <button
+                          onClick={() => acceptClaim(idx)}
+                          className="px-3 py-1.5 text-xs font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors"
+                        >
+                          Accept differences
+                        </button>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
 
@@ -2769,164 +2691,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
           {/* Next Actions */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Questions - deduplicated and including lineage-based questions */}
-            {(result.next_actions.questions.length > 0 || 
-              (fundsLineageData?.funds_lineage?.unresolved_items?.length > 0)) && (
-              <div className="bg-white border border-zinc-200 rounded-md p-6">
-                <h3 className="text-lg font-bold text-zinc-900 mb-4">
-                  ❓ Questions for Client
-                </h3>
-                <ol className="list-decimal list-inside space-y-2">
-                  {/* INTELLIGENT QUESTION GENERATOR - Analyzes all assessment data and generates appropriate questions */}
-                  {(() => {
-                    const seen = new Set<string>();
-                    const uniqueQuestions: string[] = [];
-                    
-                    // Helper to format currency
-                    const formatCurrency = (amount: number) => `£${amount.toLocaleString()}`;
-                    
-                    // Helper to format date
-                    const formatDate = (dateStr: string) => {
-                      if (!dateStr) return 'unknown date';
-                      if (dateStr.includes('-')) {
-                        const parts = dateStr.split('-');
-                        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
-                      }
-                      return dateStr;
-                    };
-                    
-                    // Helper to add question if not duplicate
-                    const addQuestion = (key: string, question: string) => {
-                      if (!seen.has(key)) {
-                        seen.add(key);
-                        uniqueQuestions.push(question);
-                      }
-                    };
-                    
-                    // ============================================
-                    // INTELLIGENT ANALYSIS: Scan all differences
-                    // ============================================
-                    result.evidence_matches?.forEach((evidence: any, claimIdx: number) => {
-                      const claim = result.claims?.[claimIdx];
-                      const claimType = claim?.source_type || 'funds';
-                      const claimAmount = claim?.expected_amount || 0;
-                      
-                      // Analyze each difference and generate appropriate question
-                      evidence?.document_verification?.differences?.forEach((diff: any) => {
-                        const field = diff.field || '';
-                        const severity = diff.severity || '';
-                        const amount = diff.amount || diff.discrepancy_amount || 0;
-                        
-                        // UNTRACED FUNDS - Ask about source
-                        if (field === 'untraced_funds' && amount >= 5000) {
-                          addQuestion(
-                            `untraced-${amount}-${diff.date}`,
-                            `What is the source of the ${formatCurrency(amount)} deposit on ${formatDate(diff.date)}? (${diff.found || diff.description || 'No description'})`
-                          );
-                        }
-                        
-                        // FUNDS DISCREPANCY - Ask about missing amount
-                        else if (field === 'funds_discrepancy') {
-                          addQuestion(
-                            'funds-discrepancy',
-                            `We have traced ${formatCurrency(diff.traced_amount || 0)} to origin and identified ${formatCurrency(diff.untraced_amount || 0)} in deposits requiring evidence, totalling ${formatCurrency(diff.accounted_for || 0)}. Your claimed savings is ${formatCurrency(diff.claimed_amount || 0)}. Please explain or provide evidence for the remaining ${formatCurrency(diff.discrepancy_amount || 0)}.`
-                          );
-                        }
-                        
-                        // STATEMENT GAP - Ask for earlier statements
-                        else if (field === 'statement_gap') {
-                          addQuestion(
-                            `gap-${diff.gap_account}-${diff.date}`,
-                            `Please provide bank statements for ${diff.gap_account || 'the source account'} covering the period before ${formatDate(diff.gap_account_earliest || diff.date)} to trace the ${formatCurrency(amount)} transfer.`
-                          );
-                        }
-                        
-                        // MISSING FIELD on documents (e.g., payment_amount not found)
-                        else if (severity === 'missing' || diff.issue?.toLowerCase().includes('not found')) {
-                          const fieldName = field.replace(/_/g, ' ');
-                          addQuestion(
-                            `missing-${field}-${claimIdx}`,
-                            `The ${fieldName} could not be found in the provided document for your ${claimType} claim. Please provide documentation showing this information or explain the discrepancy.`
-                          );
-                        }
-                        
-                        // AMOUNT MISMATCH
-                        else if (field.includes('amount') && (severity === 'mismatch' || diff.issue?.toLowerCase().includes('mismatch'))) {
-                          addQuestion(
-                            `mismatch-amount-${claimIdx}`,
-                            `There is a discrepancy between your claimed ${claimType} amount and the document evidence. ${diff.issue || ''} Please clarify or provide additional documentation.`
-                          );
-                        }
-                        
-                        // DATE MISMATCH
-                        else if (field.includes('date') && severity === 'mismatch') {
-                          addQuestion(
-                            `mismatch-date-${claimIdx}`,
-                            `The date on your supporting document does not match your claim. ${diff.issue || ''} Please explain this discrepancy.`
-                          );
-                        }
-                        
-                        // NAME/BENEFICIARY MISMATCH
-                        else if ((field.includes('name') || field.includes('beneficiary')) && severity === 'mismatch') {
-                          addQuestion(
-                            `mismatch-name-${claimIdx}`,
-                            `The name on the document does not match your records. ${diff.issue || ''} Please provide evidence of the connection or explain.`
-                          );
-                        }
-                        
-                        // GENERIC CATCH-ALL for any other difference with severity
-                        else if (severity && severity !== 'info' && severity !== 'verified' && !field.includes('lineage_analysis') && !field.includes('coverage')) {
-                          const fieldName = field.replace(/_/g, ' ');
-                          addQuestion(
-                            `generic-${field}-${claimIdx}`,
-                            `Regarding your ${claimType} claim: ${diff.issue || `Please provide clarification about the ${fieldName}`}.`
-                          );
-                        }
-                      });
-                      
-                      // Check for unverified claims without specific differences
-                      if (!evidence?.verified && !evidence?.document_verified && 
-                          (!evidence?.document_verification?.differences || evidence.document_verification.differences.length === 0)) {
-                        addQuestion(
-                          `unverified-${claimIdx}`,
-                          `Your ${claimType} claim of ${formatCurrency(claimAmount)} has not been verified. Please provide supporting documentation.`
-                        );
-                      }
-                    });
-                    
-                    // ============================================
-                    // ADD EXISTING BACKEND QUESTIONS (deduped)
-                    // ============================================
-                    result.next_actions.questions?.forEach((q: string) => {
-                      const amountMatch = q.match(/£[\d,]+(?:\.\d{2})?/);
-                      const key = `backend-${amountMatch?.[0] || q.substring(0, 50)}`;
-                      addQuestion(key, q);
-                    });
-                    
-                    // ============================================
-                    // LINEAGE-BASED QUESTIONS (small items < £5k)
-                    // ============================================
-                    if (fundsLineageData?.funds_lineage?.unresolved_items?.length > 0) {
-                      const smallItems = fundsLineageData.funds_lineage.unresolved_items.filter(
-                        (item: any) => item.amount < 5000 && item.amount >= 1000
-                      );
-                      
-                      if (smallItems.length > 0) {
-                        const totalSmall = smallItems.reduce((sum: number, i: any) => sum + (i.amount || 0), 0);
-                        addQuestion(
-                          'small-untraced-items',
-                          `There are ${smallItems.length} smaller deposits totalling ${formatCurrency(totalSmall)} that could not be traced to origin. Please provide source documentation or explanation for these amounts.`
-                        );
-                      }
-                    }
-                    
-                    return uniqueQuestions.map((question, idx) => (
-                      <li key={idx} className="text-sm text-zinc-600">{question}</li>
-                    ));
-                  })()}
-                </ol>
-              </div>
-            )}
 
             {/* Documents Required - INTELLIGENT DOCUMENT GENERATOR */}
             {(result.next_actions.documents.length > 0 || 
