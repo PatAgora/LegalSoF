@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import { translateFlag } from '../DocumentVerification/flagTranslations';
 import { FileUploader, StatusChip } from '../ui';
+import { useAuthStore } from '../../stores/authStore';
 
 // Helper to format dates as dd/mm/yyyy
 const formatDate = (dateStr: string | undefined): string => {
@@ -197,6 +198,7 @@ function renderUploadedList(
 
 const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const navigate = useNavigate();
+  const currentUser = useAuthStore((s) => s.user);
   const [status, setStatus] = useState<AssessmentStatus | null>(null);
   const [result, setResult] = useState<AssessmentResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -742,15 +744,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     };
 
     // Build a 1–3 line plain-English summary for a single evidence row.
+    // We surface the original issues even after a manual acceptance so a
+    // reviewer reading the page later still sees WHAT was accepted; the
+    // who/when/why disposition lives in the Action column.
     const summariseEvidence = (evidence: any): string[] => {
       const out: string[] = [];
       if (!evidence) return out;
       const dv = evidence.document_verification || {};
-      const accepted = dv.manual_review_status === 'accepted';
-      if (accepted) {
-        out.push(`Differences manually accepted${dv.accepted_by ? ` by ${dv.accepted_by}` : ''}.`);
-        return out;
-      }
       const diffs = Array.isArray(dv.differences) ? dv.differences : [];
       diffs.slice(0, 3).forEach((d: any) => {
         const line = prettyDifference(d);
@@ -787,7 +787,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             method: 'POST',
             body: JSON.stringify({
               claim_index: claimIndex,
-              accepted_by: 'Current User',
+              accepted_by: currentUser?.full_name || currentUser?.email || 'Reviewer',
               reason: reason || 'Manual review completed — differences accepted',
             }),
           },
@@ -865,15 +865,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           <li key={si} className="leading-snug">{s}</li>
                         ))}
                       </ul>
-                      {accepted && dv.accepted_reason && (
-                        <div className="mt-2 text-xs italic text-zinc-500">"{dv.accepted_reason}"</div>
-                      )}
                     </td>
-                    <td className="px-5 py-3 text-sm whitespace-nowrap">
-                      {!accepted && !fullyVerified ? (
+                    <td className="px-5 py-3 text-sm align-top">
+                      {accepted ? (() => {
+                        const acceptedBy = dv.accepted_by || dv.manually_accepted_by || 'Reviewer';
+                        const acceptedAtRaw = dv.accepted_at || dv.manually_accepted_at || null;
+                        let acceptedAtLabel = '';
+                        if (acceptedAtRaw) {
+                          const dObj = new Date(acceptedAtRaw);
+                          acceptedAtLabel = isNaN(dObj.getTime())
+                            ? String(acceptedAtRaw)
+                            : dObj.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        }
+                        const reason = dv.accepted_reason || dv.acceptance_reason || 'Differences accepted on review.';
+                        return (
+                          <div className="max-w-[26rem] text-xs leading-snug text-zinc-700">
+                            <div className="italic text-zinc-600">"{reason}"</div>
+                            <div className="mt-1.5 text-[11px] text-zinc-500">
+                              <span className="text-zinc-700">{acceptedBy}</span>
+                              {acceptedAtLabel && <span> · {acceptedAtLabel}</span>}
+                            </div>
+                          </div>
+                        );
+                      })() : !fullyVerified ? (
                         <button
                           onClick={() => acceptClaim(idx)}
-                          className="px-3 py-1.5 text-xs font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors"
+                          className="px-3 py-1.5 text-xs font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors whitespace-nowrap"
                         >
                           Accept differences
                         </button>
