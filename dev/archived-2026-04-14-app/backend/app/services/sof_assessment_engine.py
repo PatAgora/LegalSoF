@@ -339,104 +339,223 @@ class SoFAssessmentEngine:
             "matter_id": self.matter_id
         }
     
+    # Source-of-funds keyword lexicon. Ordered most-specific first —
+    # when an amount is near keywords from two families, the keyword
+    # physically closest to the amount wins, so order only matters for
+    # exact-distance ties. Each entry: (canonical type, [keywords]).
+    _SOURCE_KEYWORDS = [
+        ('Inheritance',   ['inheritance', 'inherited', 'inherit', 'probate', 'bequest',
+                           'bequeath', 'legacy', 'estate of', 'left to me', 'left me',
+                           'passed away', 'deceased', 'the will of', "my late "]),
+        ('Property Sale', ['property sale', 'sale of property', 'sale of my property',
+                           'sold my property', 'sold the property', 'sold our property',
+                           'sold my house', 'sold the house', 'sold our house',
+                           'sold my home', 'sold our home', 'sold my flat', 'sold the flat',
+                           'sold my apartment', 'house sale', 'flat sale', 'net proceeds',
+                           'sale proceeds', 'proceeds of sale', 'proceeds from the sale',
+                           'completion statement', 'conveyance', 'previous property',
+                           'former home', 'sold a property', 'disposal of property',
+                           'sale of the house', 'sale of the flat']),
+        ('Business Sale', ['sold my business', 'sold the business', 'sale of the business',
+                           'sale of my business', 'sold my company', 'sale of my company',
+                           'sale of shares in', 'business sale', 'company sale',
+                           'sold my shares', 'disposal of the company', 'sold the company']),
+        ('Gift',          ['gifted to me', 'a gift from', 'gift from', 'generous gift',
+                           'gifted', 'gift of', 'given to me by', 'donated to me']),
+        ('Pension',       ['pension lump sum', 'tax-free lump sum', 'tax free lump sum',
+                           'retirement lump sum', 'pension', 'drawdown', 'annuity']),
+        ('Compensation',  ['compensation', 'settlement', 'damages award', 'damages',
+                           'redundancy payment', 'redundancy package', 'tribunal award']),
+        ('Insurance',     ['insurance payout', 'insurance claim', 'life insurance',
+                           'policy matured', 'matured policy', 'endowment']),
+        ('Lottery',       ['lottery', 'winnings', 'premium bond', 'jackpot']),
+        ('Loan',          ['mortgage advance', 'remortgage', 'bridging finance',
+                           'bridging loan', 'credit facility', 'loan from', 'a loan of',
+                           'borrowed', 'loan']),
+        ('Investment',    ['investment portfolio', 'investments', 'investment',
+                           'shares', 'stocks', 'dividend', 'dividends', 'portfolio',
+                           'mutual fund', 'bonds', 'cryptocurrency', 'crypto', 'isa']),
+        ('Salary',        ['employment income', 'salary', 'wages', 'bonus', 'earnings',
+                           'remuneration', 'paid by my employer', 'income from my job']),
+        ('Savings',       ['savings account', 'personal savings', 'savings', 'saved',
+                           'accumulated', 'set aside', 'put aside', 'put away', 'nest egg']),
+    ]
+
+    # Phrases that, when they precede an amount, mean "this is the net /
+    # actual figure that reached the client" — preferred over a gross
+    # headline price for the same source.
+    _NET_PHRASES = [
+        'net proceeds', 'net of', 'net amount', 'net figure', 'proceeds of',
+        'proceeds from', 'received', 'totalling', 'totaling', 'amounting to',
+        'after deduct', 'after fees', 'after the mortgage', 'after redemption',
+        'left with', 'remaining',
+    ]
+
+    _UK_BANKS = ['barclays', 'hsbc', 'lloyds', 'natwest', 'santander', 'nationwide',
+                 'rbs', 'halifax', 'bank of scotland', 'tesco bank', 'metro bank',
+                 'monzo', 'starling', 'revolut', 'co-operative bank', 'tsb',
+                 'first direct', 'virgin money']
+
+    def _extract_money(self, text: str) -> List[Dict[str, Any]]:
+        """Find money amounts in free text.
+
+        Matches a £/GBP prefix OR a pounds/sterling/GBP suffix, with an
+        optional k / m / thousand / million multiplier. Requiring an
+        explicit currency marker keeps house numbers, postcodes, dates
+        and percentages from being mistaken for amounts.
+
+        Returns a list of {amount, start, end, raw}.
+        """
+        money_re = re.compile(
+            r'(?:£|GBP\s?)(?P<a>[\d,]+(?:\.\d+)?)\s?(?P<am>k|m|bn|thousand|million|billion)?'
+            r'|'
+            r'(?P<b>[\d,]+(?:\.\d+)?)\s?(?P<bm>k|m|bn|thousand|million|billion)?'
+            r'\s?(?:pounds?|sterling|gbp)\b',
+            re.IGNORECASE,
+        )
+        mult = {'k': 1e3, 'thousand': 1e3, 'm': 1e6, 'million': 1e6,
+                'bn': 1e9, 'billion': 1e9}
+        out: List[Dict[str, Any]] = []
+        for m in money_re.finditer(text):
+            num = m.group('a') or m.group('b')
+            if not num:
+                continue
+            suffix = (m.group('am') or m.group('bm') or '').lower()
+            try:
+                val = float(num.replace(',', ''))
+            except ValueError:
+                continue
+            if suffix:
+                val *= mult.get(suffix, 1)
+            # Sub-£500 figures are almost always fees / noise, not a
+            # source of funds for a property-scale matter.
+            if val < 500:
+                continue
+            out.append({'amount': val, 'start': m.start(), 'end': m.end(),
+                        'raw': m.group(0).strip()})
+        return out
+
     def parse_sof_claims(
-        self, 
-        sof_explanation: str, 
+        self,
+        sof_explanation: str,
         purchase: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Extract testable claims from client's SoF explanation
+        Extract testable claims from a free-text Source of Funds
+        explanation.
+
+        Real client narratives are prose, not structured data — e.g.
+        "I sold my previous house for £425,000 with net proceeds of
+        £269,280, and I also have £50k in personal savings." This
+        parser anchors on every money amount, pairs each with the
+        nearest declared source of funds, groups amounts by source,
+        and — where a source quotes both a gross and a net figure —
+        keeps the net (the money that actually reached the client).
         """
-        claims = []
-        
-        # Defensive checks
+        claims: List[Dict[str, Any]] = []
+
         if not sof_explanation:
             print("⚠️ sof_explanation is empty or None")
             return claims
-        
         if not purchase:
             purchase = {'currency': 'GBP', 'amount': 0}
-        
-        # Common source patterns - require currency symbol or "for" to avoid false matches
-        patterns = {
-            'inheritance': r'inherit(?:ed|ance).*?(?:of|worth|totalling)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'property_sale': r'(?:sold|sale of).*?property.*?(?:for|of|at)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'savings': r'savings.*?(?:of|totalling)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'loan': r'loan.*?(?:of|for)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'business_sale': r'(?:sold|sale of).*?(?:business|company).*?(?:for|of)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'investment': r'investment.*?(?:of|worth)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'gift': r'gift.*?(?:of)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)',
-            'dividend': r'dividend.*?(?:of)?\s*(?:£|GBP)\s*([0-9,]+(?:\.[0-9]{2})?)'
-        }
-        
-        # Bank account mentions
-        banks = ['barclays', 'hsbc', 'lloyds', 'natwest', 'santander', 'nationwide', 
-                 'rbs', 'halifax', 'bank of scotland', 'tesco bank', 'metro bank']
-        
+
+        text = str(sof_explanation)
+        lower = text.lower()
+        currency = purchase.get('currency', 'GBP')
+
+        money = self._extract_money(text)
+
+        # Pair every amount with the source keyword closest to it.
+        paired: List[Dict[str, Any]] = []
+        for mm in money:
+            mid = (mm['start'] + mm['end']) // 2
+            best_source = None
+            best_dist = 10 ** 9
+            for source_type, keywords in self._SOURCE_KEYWORDS:
+                for kw in keywords:
+                    idx = lower.find(kw)
+                    while idx != -1:
+                        kw_mid = idx + len(kw) // 2
+                        dist = abs(kw_mid - mid)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_source = source_type
+                        idx = lower.find(kw, idx + 1)
+            # Only keep the pairing if a source keyword sits within a
+            # plausible window of the amount (~one or two sentences).
+            if best_source and best_dist <= 240:
+                paired.append({**mm, 'source_type': best_source})
+
+        # Group amounts under their source type.
+        by_source: Dict[str, List[Dict[str, Any]]] = {}
+        for p in paired:
+            by_source.setdefault(p['source_type'], []).append(p)
+
+        def _is_net(item: Dict[str, Any]) -> bool:
+            window = lower[max(0, item['start'] - 32):item['start']]
+            return any(phrase in window for phrase in self._NET_PHRASES)
+
         claim_id = 1
-        sof_lower = str(sof_explanation).lower()  # Ensure it's a string
-        
-        for source_type, pattern in patterns.items():
-            matches = re.finditer(pattern, sof_lower, re.IGNORECASE)
-            for match in matches:
-                amount_str = match.group(1).replace(',', '')
-                try:
-                    amount = float(amount_str)
-                    
-                    # Extract date mentions near this claim
-                    date_range = self._extract_date_range(sof_explanation, match.start())
-                    
-                    # Extract payer/counterparty mentions
-                    counterparty = self._extract_counterparty(
-                        sof_explanation, 
-                        match.start(),
-                        source_type
-                    )
-                    
-                    # Extract account mentions
-                    expected_account = None
-                    for bank in banks:
-                        if bank in sof_lower:
-                            expected_account = bank.title()
-                            break
-                    
-                    # Extract broader context (±150 chars around match)
-                    start_pos = max(0, match.start() - 150)
-                    end_pos = min(len(sof_explanation), match.end() + 150)
-                    claim_context = sof_explanation[start_pos:end_pos].strip()
-                    if start_pos > 0:
-                        claim_context = "..." + claim_context
-                    if end_pos < len(sof_explanation):
-                        claim_context = claim_context + "..."
-                    
-                    claims.append({
-                        "claim_id": claim_id,
-                        "source_type": source_type.replace('_', ' ').title(),
-                        "expected_amount": amount,
-                        "expected_currency": purchase.get('currency', 'GBP'),
-                        "expected_date_range": date_range,
-                        "expected_payer": counterparty,
-                        "expected_account": expected_account,
-                        "claim_text": match.group(0),
-                        "description": claim_context  # Full context snippet
-                    })
-                    claim_id += 1
-                except ValueError:
-                    continue
-        
-        # If no claims extracted, create a generic claim based on purchase amount
+        for source_type, items in by_source.items():
+            # Prefer a net / proceeds / received figure; among those
+            # take the smallest (net is post-deduction). Otherwise take
+            # the largest amount mentioned for the source.
+            net_items = [it for it in items if _is_net(it)]
+            chosen = (min(net_items, key=lambda it: it['amount'])
+                      if net_items else max(items, key=lambda it: it['amount']))
+
+            date_range = self._extract_date_range(text, chosen['start'])
+            cp_key = source_type.lower().replace(' ', '_')
+            counterparty = self._extract_counterparty(text, chosen['start'], cp_key)
+
+            expected_account = None
+            for bank in self._UK_BANKS:
+                if bank in lower:
+                    expected_account = bank.title()
+                    break
+
+            start_pos = max(0, chosen['start'] - 160)
+            end_pos = min(len(text), chosen['end'] + 160)
+            ctx = text[start_pos:end_pos].strip()
+            if start_pos > 0:
+                ctx = "..." + ctx
+            if end_pos < len(text):
+                ctx = ctx + "..."
+
+            claims.append({
+                "claim_id": claim_id,
+                "source_type": source_type,
+                "expected_amount": chosen['amount'],
+                "expected_currency": currency,
+                "expected_date_range": date_range,
+                "expected_payer": counterparty,
+                "expected_account": expected_account,
+                "claim_text": chosen['raw'],
+                "description": ctx,
+            })
+            claim_id += 1
+
+        # Sort the largest sources first so the headline claim leads.
+        claims.sort(key=lambda c: c['expected_amount'], reverse=True)
+        for idx, c in enumerate(claims, start=1):
+            c['claim_id'] = idx
+
+        # Nothing recognisable — fall back to a single generic claim so
+        # the matter still produces a reviewable result.
         if not claims:
             claims.append({
                 "claim_id": 1,
                 "source_type": "Unspecified",
                 "expected_amount": purchase.get('amount', 0),
-                "expected_currency": purchase.get('currency', 'GBP'),
+                "expected_currency": currency,
                 "expected_date_range": None,
                 "expected_payer": None,
                 "expected_account": None,
-                "claim_text": "Source not clearly specified in explanation"
+                "claim_text": "Source not clearly specified in explanation",
             })
-        
+
+        print(f"✅ parse_sof_claims extracted {len(claims)} claim(s) from free text")
         return claims
     
     def parse_structured_sof(
