@@ -322,15 +322,14 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
             </div>
             <div className="flex items-center gap-2">
               {!verification.admin_override && (
-                <Button
-                  variant="primary"
-                  size="sm"
+                <button
                   onClick={acceptVerification}
-                  loading={accepting}
+                  disabled={accepting}
                   title="Mark this verification as accepted with a rationale; the action is captured in the audit log."
+                  className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-wait transition-colors"
                 >
                   {accepting ? 'Saving…' : 'Accept document'}
-                </Button>
+                </button>
               )}
               <Button
                 variant="secondary"

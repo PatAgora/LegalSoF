@@ -890,7 +890,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       })() : !fullyVerified ? (
                         <button
                           onClick={() => acceptClaim(idx)}
-                          className="px-3 py-1.5 text-xs font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors whitespace-nowrap"
+                          className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 transition-colors whitespace-nowrap"
                         >
                           Accept differences
                         </button>
