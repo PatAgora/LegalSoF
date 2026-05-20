@@ -62,7 +62,7 @@ class StatusUpdateResponse(BaseModel):
 class CreateMatterRequest(BaseModel):
     client_name: str
     reference: Optional[str] = None
-    transaction_value: float
+    transaction_value: Optional[float] = None
     risk_level: Optional[str] = "medium"
     description: Optional[str] = None
     status: Optional[str] = "draft"
@@ -94,7 +94,7 @@ async def create_matter(
             'high': RiskRating.HIGH,
             'critical': RiskRating.CRITICAL
         }
-        risk_rating = risk_map.get(request.risk_level.lower(), RiskRating.MEDIUM)
+        risk_rating = risk_map.get((request.risk_level or 'medium').lower(), RiskRating.MEDIUM)
         
         # Map status string to enum
         status_map = {
@@ -104,11 +104,12 @@ async def create_matter(
         }
         status = status_map.get(request.status.lower(), MatterStatus.DRAFT)
         
-        # Create the new matter
+        # Create the new matter. Transaction value is optional — when
+        # not supplied it defaults to 0 (the column is NOT NULL).
         new_matter = Matter(
             reference_number=reference,
             client_name=request.client_name,
-            target_amount=request.transaction_value,
+            target_amount=request.transaction_value if request.transaction_value is not None else 0,
             target_currency="GBP",
             transaction_type=TransactionType.PROPERTY_PURCHASE,
             status=status,

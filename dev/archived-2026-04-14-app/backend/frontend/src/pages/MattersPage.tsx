@@ -15,8 +15,6 @@ export default function MattersPage() {
   const [newMatter, setNewMatter] = useState({
     client_name: '',
     reference: '',
-    transaction_value: '',
-    risk_level: 'medium',
     description: ''
   })
 
@@ -43,8 +41,8 @@ export default function MattersPage() {
   }, [])
 
   const handleCreateMatter = async () => {
-    if (!newMatter.client_name || !newMatter.transaction_value) {
-      alert('Please fill in client name and transaction value')
+    if (!newMatter.client_name.trim()) {
+      alert('Please enter a client name')
       return
     }
 
@@ -53,11 +51,9 @@ export default function MattersPage() {
       const response = await authFetch(`${API_BASE_URL}/api/v1/matters`, {
         method: 'POST',
         body: JSON.stringify({
-          client_name: newMatter.client_name,
-          reference: newMatter.reference || `MAT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100).padStart(3, '0')}`,
-          transaction_value: parseFloat(newMatter.transaction_value),
-          risk_level: newMatter.risk_level,
-          description: newMatter.description || 'Property purchase',
+          client_name: newMatter.client_name.trim(),
+          reference: newMatter.reference.trim() || undefined,
+          description: newMatter.description.trim() || undefined,
           status: 'draft'
         }),
       })
@@ -65,7 +61,7 @@ export default function MattersPage() {
       if (response.ok) {
         const created = await response.json()
         setShowCreateModal(false)
-        setNewMatter({ client_name: '', reference: '', transaction_value: '', risk_level: 'medium', description: '' })
+        setNewMatter({ client_name: '', reference: '', description: '' })
         // Navigate to the new matter
         navigate(`/matters/${created.id}`)
       } else {
@@ -457,57 +453,16 @@ export default function MattersPage() {
                     className="w-full rounded border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
                   />
                 </div>
-                {/* Two-column row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Transaction Value */}
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-600 mb-1.5">
-                      Transaction Value ({'\u00A3'}) <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-                        <span className="text-zinc-400 text-sm">{'\u00A3'}</span>
-                      </div>
-                      <input
-                        type="number"
-                        value={newMatter.transaction_value}
-                        onChange={(e) => setNewMatter({...newMatter, transaction_value: e.target.value})}
-                        placeholder="450,000"
-                        className="w-full rounded border border-zinc-200 bg-white pl-8 pr-4 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
-                      />
-                    </div>
-                  </div>
-                  {/* Risk Level */}
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-600 mb-1.5">Risk Level</label>
-                    <div className="relative">
-                      <select
-                        value={newMatter.risk_level}
-                        onChange={(e) => setNewMatter({...newMatter, risk_level: e.target.value})}
-                        className="block w-full appearance-none rounded border border-zinc-200 bg-white px-4 py-2.5 pr-10 text-sm text-zinc-900 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                        <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                        </svg>
-                      </div>
-                    </div>
-                  </div>
-                </div>
                 {/* Description */}
                 <div>
                   <label className="block text-sm font-medium text-zinc-600 mb-1.5">
                     Description <span className="text-zinc-400 font-normal">(optional)</span>
                   </label>
-                  <input
-                    type="text"
+                  <textarea
                     value={newMatter.description}
                     onChange={(e) => setNewMatter({...newMatter, description: e.target.value})}
                     placeholder="e.g., Residential property purchase"
+                    rows={3}
                     className="w-full rounded border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
                   />
                 </div>
