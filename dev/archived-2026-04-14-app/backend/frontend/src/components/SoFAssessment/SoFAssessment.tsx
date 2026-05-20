@@ -392,9 +392,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               })();
           setManualSofExplanation(prev => prev || sofText);
         }
-        // Flip to manual mode so the user sees the pre-filled form and
-        // can verify / tweak before submission.
-        setClientInfoInputMethod('manual');
+        // Show the uploaded-success state, NOT the manual form.
+        //
+        // The uploaded JSON is already stored on the backend with its
+        // full structure intact — including any `sources` array or
+        // explicit `claims`. If we flipped to manual mode here the user
+        // would re-submit the form, and handleManualSubmit rebuilds the
+        // payload with sof_explanation flattened to prose text and no
+        // sources/claims — which destroys the structured data and the
+        // assessment then finds zero claims. The pre-filled fields
+        // above are still kept, so 'View / edit' works if the user
+        // explicitly chooses to revise the upload.
+        setClientInfoInputMethod(null);
       }
 
       await fetchStatus();

@@ -328,6 +328,21 @@ class FileProcessor:
                     "error": "Purchase must include 'amount' and 'currency'"
                 }
             
+            # Resolve an explicit claims array. Client info JSON comes in
+            # two shapes:
+            #   (a) a top-level "claims" array, or
+            #   (b) a structured "sof_explanation" object carrying a
+            #       "sources" array (property_sale / savings / etc.).
+            # Either way we surface a single canonical "claims" list so
+            # downstream code never has to dig the sources out of
+            # sof_explanation — and so the structured data survives even
+            # if sof_explanation later gets flattened to prose text.
+            claims = data.get('claims') or []
+            if not claims:
+                sof = data.get('sof_explanation')
+                if isinstance(sof, dict) and isinstance(sof.get('sources'), list):
+                    claims = sof['sources']
+
             return {
                 "success": True,
                 "data": {
@@ -337,7 +352,7 @@ class FileProcessor:
                     "known_documents": data.get('known_documents', []),
                     "flags": data.get('flags', {}),
                     "constraints": data.get('constraints', {}),
-                    "claims": data.get('claims', [])  # Support explicit claims array
+                    "claims": claims  # canonical claims list (see above)
                 },
                 "file_type": "json"
             }
