@@ -2,11 +2,12 @@
 Source of Funds (SoF) Assessment Engine
 UK Legal Sector - Business Purchase Matters
 
-Free-text client explanations are extracted by Google Gemini when a
-GEMINI_API_KEY is configured (see gemini_claim_extractor); otherwise a
-fully local deterministic parser is used. All other analysis —
-evidence matching, scoring, transaction review — runs locally.
-Integrates with Transaction Review for comprehensive AML assessment.
+Free-text client explanations are extracted by an LLM (see
+ai_claim_extractor — Anthropic by default, Gemini optional) when the
+active provider's API key is configured; otherwise a fully local
+deterministic parser is used. All other analysis — evidence matching,
+scoring, transaction review — runs locally. Integrates with
+Transaction Review for comprehensive AML assessment.
 """
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -447,21 +448,21 @@ class SoFAssessmentEngine:
         """
         if self.settings.get('sof_ai_extraction', True):
             try:
-                from app.services import gemini_claim_extractor as gce
-                if gce.is_configured():
-                    sources = gce.extract_sources(text)
+                from app.services import ai_claim_extractor as ace
+                if ace.is_configured():
+                    sources = ace.extract_sources(text)
                     if sources:
                         claims = self.parse_structured_sof(
                             {'sources': sources}, purchase
                         )
                         if claims:
-                            print(f"✅ Gemini extracted {len(claims)} claim(s) "
+                            print(f"✅ AI extracted {len(claims)} claim(s) "
                                   f"from free-text explanation")
                             return claims
                     # sources is None (API failure) or [] / unusable —
                     # fall through to the deterministic parser.
             except Exception as exc:
-                print(f"[gemini] smart extraction unavailable — "
+                print(f"[ai_extract] smart extraction unavailable — "
                       f"{type(exc).__name__}: {exc}")
         return self.parse_sof_claims(text, purchase)
 

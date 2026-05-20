@@ -61,9 +61,16 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_MAX_TOKENS: int = 4000
 
-    # Google Gemini — used for AI-assisted Source of Funds claim
-    # extraction from free-text client explanations. When GEMINI_API_KEY
-    # is unset the platform falls back to the deterministic regex parser.
+    # AI-assisted Source of Funds claim extraction from free-text
+    # client explanations. AI_PROVIDER selects the model provider
+    # ('anthropic' now, 'gemini' later). When the active provider's
+    # API key is unset the platform falls back to the deterministic
+    # regex parser.
+    AI_PROVIDER: str = os.environ.get("AI_PROVIDER", "anthropic")
+
+    ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    ANTHROPIC_MODEL: str = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
     GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
     

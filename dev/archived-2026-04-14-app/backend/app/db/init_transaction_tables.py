@@ -168,7 +168,7 @@ def seed_transaction_config(engine):
 
             # ── Source of Funds Analysis ──────────────────────────────
             ('sof_ai_extraction', 'true', 'bool',
-             'When enabled, free-text Source of Funds explanations are read by Google Gemini AI to identify the claimed sources and amounts — this understands paraphrasing and unusual wording, so claims are far less likely to be missed. When disabled (or when no Gemini API key is configured on the server) the platform falls back to a built-in keyword parser. Note: enabling this sends the client explanation text to Google for processing.'),
+             'When enabled, free-text Source of Funds explanations are read by an AI model to identify the claimed sources and amounts — this understands paraphrasing and unusual wording, so claims are far less likely to be missed. When disabled (or when no AI provider API key is configured on the server) the platform falls back to a built-in keyword parser. Note: enabling this sends the client explanation text to the configured AI provider for processing.'),
             ('sof_amount_tolerance_pct', '5.0', 'float',
              'How much the amount on a supporting document is allowed to differ from the amount the client declared, before the claim is flagged for manual review. Worked as a percentage. Example: 5% on a £10,000 claim allows for ±£500. Lower the percentage to be stricter, raise it to be more forgiving.'),
             ('sof_date_tolerance_days', '7', 'int',
