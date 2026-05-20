@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_MAX_TOKENS: int = 4000
+
+    # Google Gemini — used for AI-assisted Source of Funds claim
+    # extraction from free-text client explanations. When GEMINI_API_KEY
+    # is unset the platform falls back to the deterministic regex parser.
+    GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
     
     # Storage
     STORAGE_TYPE: str = "local"  # local, s3, minio

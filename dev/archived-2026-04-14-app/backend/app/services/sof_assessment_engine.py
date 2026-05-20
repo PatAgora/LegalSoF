@@ -2,8 +2,11 @@
 Source of Funds (SoF) Assessment Engine
 UK Legal Sector - Business Purchase Matters
 
-100% LOCAL - No external API calls
-Integrates with Transaction Review for comprehensive AML assessment
+Free-text client explanations are extracted by Google Gemini when a
+GEMINI_API_KEY is configured (see gemini_claim_extractor); otherwise a
+fully local deterministic parser is used. All other analysis —
+evidence matching, scoring, transaction review — runs locally.
+Integrates with Transaction Review for comprehensive AML assessment.
 """
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -31,6 +34,7 @@ class SoFAssessmentEngine:
         unit tests that don't run the boot path."""
         defaults = {
             'sof_enabled':                   True,
+            'sof_ai_extraction':             True,
             'sof_amount_tolerance_pct':       5.0,
             'sof_date_tolerance_days':        7,
             'sof_confidence_threshold':       0.999,
@@ -145,32 +149,19 @@ class SoFAssessmentEngine:
         print(f"✅ Risk rating: {risk_rating}")
         
         # Step 1: Parse SoF explanation into testable claims
-        # Handle both string and structured dict formats
         if isinstance(sof_explanation, dict):
-            # New structured format with sources array
+            # Structured format with a sources array
             claims = self.parse_structured_sof(sof_explanation, purchase)
         else:
-            # Legacy text format
-            claims = self.parse_sof_claims(str(sof_explanation), purchase)
-        
+            # Free-text explanation — AI extraction with regex fallback
+            claims = self.extract_claims_smart(str(sof_explanation), purchase)
+
         print(f"✅ Parsed {len(claims)} claims")
-        
+
         # Step 2: Find evidence in bank statements
         evidence_matches = self.match_evidence(claims, bank_statements)
-        
+
         print(f"✅ Found {len(evidence_matches)} evidence matches")
-        
-        # Step 1: Parse SoF explanation into testable claims
-        # Handle both string and structured dict formats
-        if isinstance(sof_explanation, dict):
-            # New structured format with sources array
-            claims = self.parse_structured_sof(sof_explanation, purchase)
-        else:
-            # Legacy text format
-            claims = self.parse_sof_claims(sof_explanation, purchase)
-        
-        # Step 2: Find evidence in bank statements
-        evidence_matches = self.match_evidence(claims, bank_statements)
         
         # Step 2.5: Verify supporting documents against claims (NEW!)
         document_verification = None
@@ -438,6 +429,41 @@ class SoFAssessmentEngine:
             out.append({'amount': val, 'start': m.start(), 'end': m.end(),
                         'raw': m.group(0).strip()})
         return out
+
+    def extract_claims_smart(
+        self,
+        text: str,
+        purchase: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Extract claims from a free-text Source of Funds explanation.
+
+        Prefers Google Gemini for extraction — the model understands
+        paraphrasing, so the platform is not limited to an exact-phrase
+        keyword bank and is far less likely to miss an unusually-worded
+        source. Falls back to the deterministic regex parser when AI
+        extraction is turned off in the Configuration page, when no
+        Gemini API key is configured, or when the API call fails — so
+        the assessment always produces a result.
+        """
+        if self.settings.get('sof_ai_extraction', True):
+            try:
+                from app.services import gemini_claim_extractor as gce
+                if gce.is_configured():
+                    sources = gce.extract_sources(text)
+                    if sources:
+                        claims = self.parse_structured_sof(
+                            {'sources': sources}, purchase
+                        )
+                        if claims:
+                            print(f"✅ Gemini extracted {len(claims)} claim(s) "
+                                  f"from free-text explanation")
+                            return claims
+                    # sources is None (API failure) or [] / unusable —
+                    # fall through to the deterministic parser.
+            except Exception as exc:
+                print(f"[gemini] smart extraction unavailable — "
+                      f"{type(exc).__name__}: {exc}")
+        return self.parse_sof_claims(text, purchase)
 
     def parse_sof_claims(
         self,
