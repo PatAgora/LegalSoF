@@ -339,46 +339,50 @@ class SoFAssessmentEngine:
             "matter_id": self.matter_id
         }
     
-    # Source-of-funds keyword lexicon. Ordered most-specific first —
-    # when an amount is near keywords from two families, the keyword
-    # physically closest to the amount wins, so order only matters for
-    # exact-distance ties. Each entry: (canonical type, [keywords]).
-    _SOURCE_KEYWORDS = [
-        ('Inheritance',   ['inheritance', 'inherited', 'inherit', 'probate', 'bequest',
-                           'bequeath', 'legacy', 'estate of', 'left to me', 'left me',
-                           'passed away', 'deceased', 'the will of', "my late "]),
-        ('Property Sale', ['property sale', 'sale of property', 'sale of my property',
-                           'sold my property', 'sold the property', 'sold our property',
-                           'sold my house', 'sold the house', 'sold our house',
-                           'sold my home', 'sold our home', 'sold my flat', 'sold the flat',
-                           'sold my apartment', 'house sale', 'flat sale', 'net proceeds',
-                           'sale proceeds', 'proceeds of sale', 'proceeds from the sale',
-                           'completion statement', 'conveyance', 'previous property',
-                           'former home', 'sold a property', 'disposal of property',
-                           'sale of the house', 'sale of the flat']),
-        ('Business Sale', ['sold my business', 'sold the business', 'sale of the business',
-                           'sale of my business', 'sold my company', 'sale of my company',
-                           'sale of shares in', 'business sale', 'company sale',
-                           'sold my shares', 'disposal of the company', 'sold the company']),
-        ('Gift',          ['gifted to me', 'a gift from', 'gift from', 'generous gift',
-                           'gifted', 'gift of', 'given to me by', 'donated to me']),
-        ('Pension',       ['pension lump sum', 'tax-free lump sum', 'tax free lump sum',
-                           'retirement lump sum', 'pension', 'drawdown', 'annuity']),
-        ('Compensation',  ['compensation', 'settlement', 'damages award', 'damages',
-                           'redundancy payment', 'redundancy package', 'tribunal award']),
-        ('Insurance',     ['insurance payout', 'insurance claim', 'life insurance',
-                           'policy matured', 'matured policy', 'endowment']),
-        ('Lottery',       ['lottery', 'winnings', 'premium bond', 'jackpot']),
-        ('Loan',          ['mortgage advance', 'remortgage', 'bridging finance',
-                           'bridging loan', 'credit facility', 'loan from', 'a loan of',
-                           'borrowed', 'loan']),
-        ('Investment',    ['investment portfolio', 'investments', 'investment',
-                           'shares', 'stocks', 'dividend', 'dividends', 'portfolio',
-                           'mutual fund', 'bonds', 'cryptocurrency', 'crypto', 'isa']),
-        ('Salary',        ['employment income', 'salary', 'wages', 'bonus', 'earnings',
-                           'remuneration', 'paid by my employer', 'income from my job']),
-        ('Savings',       ['savings account', 'personal savings', 'savings', 'saved',
-                           'accumulated', 'set aside', 'put aside', 'put away', 'nest egg']),
+    # Source-of-funds lexicon. Each family is a list of REGEX patterns
+    # (matched case-insensitively) so natural phrasing variations are
+    # caught — "sold my previous house", "sold the flat", "sale of our
+    # property" all hit the Property Sale family without needing an
+    # exact-string entry for every wording. When an amount is near
+    # keywords from two families the one physically closest wins, so
+    # ordering only breaks exact-distance ties.
+    _SOURCE_PATTERNS = [
+        ('Inheritance',   [r'inherit(?:ed|ance|s|ing)?', r'\bprobate\b', r'\bbequest\b',
+                           r'bequeath\w*', r'\blegacy\b', r'estate of', r'left (?:to )?me\b',
+                           r'passed away', r'\bdeceased\b', r'the will of', r'my late \w+']),
+        ('Property Sale', [r'sold (?:my |the |our |a )?(?:previous |former |old |current )?'
+                           r'(?:house|home|flat|property|apartment|maisonette|bungalow|land)',
+                           r'sale of (?:my |the |our |a )?(?:previous |former )?'
+                           r'(?:house|home|flat|property|apartment|land)',
+                           r'(?:house|flat|property|home|land) sale',
+                           r'net proceeds', r'sale proceeds',
+                           r'proceeds (?:of|from) (?:the )?sale',
+                           r'completion statement', r'conveyanc\w*', r'previous property',
+                           r'former home', r'disposal of (?:the |my )?propert\w+']),
+        ('Business Sale', [r'sold (?:my |the |our )?(?:business|company|firm)',
+                           r'sale of (?:my |the |our )?(?:business|company|firm)',
+                           r'(?:business|company) sale',
+                           r'sold (?:my |the |our )?shares', r'sale of shares',
+                           r'disposal of (?:the |my )?compan\w+']),
+        ('Gift',          [r'gift(?:ed|s)?\b', r'a gift from', r'given to me by',
+                           r'donat\w+ to me']),
+        ('Pension',       [r'\bpension\b', r'(?:tax[- ]free |retirement )?lump sum',
+                           r'drawdown', r'annuity']),
+        ('Compensation',  [r'compensation', r'\bsettlement\b', r'\bdamages\b',
+                           r'redundancy']),
+        ('Insurance',     [r'insurance (?:payout|claim|settlement)', r'life insurance',
+                           r'(?:policy|endowment)(?: has)? matured',
+                           r'matured (?:policy|endowment)', r'\bendowment\b']),
+        ('Lottery',       [r'lottery', r'winnings', r'premium bond', r'jackpot']),
+        ('Loan',          [r'\bmortgage\b', r'remortgage', r'bridging (?:finance|loan)',
+                           r'credit facility', r'\bloan\b', r'borrowed']),
+        ('Investment',    [r'investment\w*', r'\bshares\b', r'\bstocks\b', r'dividend\w*',
+                           r'\bportfolio\b', r'mutual fund', r'\bbonds\b', r'crypto\w*',
+                           r'\bisa\b']),
+        ('Salary',        [r'\bsalary\b', r'\bwages\b', r'employment income', r'\bbonus\b',
+                           r'\bearnings\b', r'remuneration', r'paid by my employer']),
+        ('Savings',       [r'savings', r'\bsaved\b', r'accumulated', r'set aside',
+                           r'put aside', r'put away', r'nest egg']),
     ]
 
     # Phrases that, when they precede an amount, mean "this is the net /
@@ -466,26 +470,54 @@ class SoFAssessmentEngine:
 
         money = self._extract_money(text)
 
-        # Pair every amount with the source keyword closest to it.
+        # All source-keyword hits across the text: (source_type, mid_pos).
+        # Patterns are regexes so natural phrasing variants all match.
+        kw_hits: List[Tuple[str, int]] = []
+        for source_type, patterns in self._SOURCE_PATTERNS:
+            for pat in patterns:
+                for m in re.finditer(pat, lower):
+                    kw_hits.append((source_type, (m.start() + m.end()) // 2))
+
+        # Sentence/clause spans. An amount must pair with a keyword in
+        # its OWN sentence first — otherwise an amount at the end of one
+        # sentence ("...for £600,000.") wrongly grabs a keyword in the
+        # next sentence ("My savings are £55,000.") just because it is
+        # physically closer. Boundaries: . ; ! ? followed by whitespace,
+        # or a newline. A decimal point inside a number is never
+        # followed by whitespace, so "£1.5m" is left intact.
+        clause_spans: List[Tuple[int, int]] = []
+        pos = 0
+        for m in re.finditer(r'[.;!?]\s+|\n+', text):
+            clause_spans.append((pos, m.start()))
+            pos = m.end()
+        if pos < len(text):
+            clause_spans.append((pos, len(text)))
+        if not clause_spans:
+            clause_spans = [(0, len(text))]
+
+        def clause_index(p: int) -> int:
+            for i, (s, e) in enumerate(clause_spans):
+                if s <= p <= e:
+                    return i
+            return -1
+
+        # Pair every amount with a source keyword — keywords in the
+        # SAME sentence are always preferred; only when the amount's
+        # sentence has none do we fall back to the nearest keyword
+        # elsewhere (and only if it is reasonably close).
         paired: List[Dict[str, Any]] = []
         for mm in money:
             mid = (mm['start'] + mm['end']) // 2
-            best_source = None
-            best_dist = 10 ** 9
-            for source_type, keywords in self._SOURCE_KEYWORDS:
-                for kw in keywords:
-                    idx = lower.find(kw)
-                    while idx != -1:
-                        kw_mid = idx + len(kw) // 2
-                        dist = abs(kw_mid - mid)
-                        if dist < best_dist:
-                            best_dist = dist
-                            best_source = source_type
-                        idx = lower.find(kw, idx + 1)
-            # Only keep the pairing if a source keyword sits within a
-            # plausible window of the amount (~one or two sentences).
-            if best_source and best_dist <= 240:
-                paired.append({**mm, 'source_type': best_source})
+            m_clause = clause_index(mid)
+            same_sentence = [h for h in kw_hits if clause_index(h[1]) == m_clause]
+            pool = same_sentence if same_sentence else kw_hits
+            if not pool:
+                continue
+            best_source, best_pos = min(pool, key=lambda h: abs(h[1] - mid))
+            # A cross-sentence fallback must be within ~one sentence.
+            if not same_sentence and abs(best_pos - mid) > 200:
+                continue
+            paired.append({**mm, 'source_type': best_source})
 
         # Group amounts under their source type.
         by_source: Dict[str, List[Dict[str, Any]]] = {}
