@@ -27,7 +27,8 @@ const SECTIONS: Section[] = [
     id: 'sof',
     title: 'Source of Funds Analysis',
     prefix: 'sof_',
-    enabledKey: 'sof_enabled',
+    // No master on/off switch — Source of Funds Analysis is the core
+    // of the platform and is always on.
     blurb:
       'Tolerances applied to each Source of Funds claim — how close the document evidence has to be to the declared amount, the date, and the auto-pass confidence threshold.',
   },

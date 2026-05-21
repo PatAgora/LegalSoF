@@ -157,8 +157,9 @@ def seed_transaction_config(engine):
             # runs at all. When OFF, the module is skipped and its
             # outputs come back empty so the operator can disable a
             # whole section of the platform if it isn't applicable.
-            ('sof_enabled', 'true', 'bool',
-             'Turn the Source of Funds Analysis on or off. When OFF, the platform will not try to match the client\'s declared sources of funds against their bank statements and supporting documents — assessments will return as Incomplete.'),
+            # NOTE: there is deliberately no sof_enabled switch — Source
+            # of Funds Analysis is the core of the platform and is
+            # always on; the dv/tr/fl modules below are optional.
             ('dv_enabled', 'true', 'bool',
              'Turn the Document Verification on or off. When OFF, uploaded documents are kept on file but the platform will not run any forgery / tampering checks on them. Only turn this off if you have a separate process for verifying document authenticity.'),
             ('tr_enabled', 'true', 'bool',
@@ -256,6 +257,17 @@ def seed_transaction_config(engine):
             ('fl_statement_gap_warn_days', '30', 'int',
              'When the tracer hits an incoming transfer from an account whose bank statements are missing (or don\'t cover the relevant date), a "statement gap" review item is raised after this many days of missing coverage. Default 30 days — i.e. if more than a month of statements is missing from the source account, ask the client for them.'),
         ]
+
+        # Keys removed from the catalogue in a later release. Delete
+        # them so they don't linger as orphan rows on the Configuration
+        # page. sof_enabled was retired — Source of Funds Analysis is
+        # the core module and is always on.
+        retired_keys = ['sof_enabled']
+        for rk in retired_keys:
+            conn.execute(
+                text("DELETE FROM transaction_config WHERE key = :key"),
+                {"key": rk},
+            )
 
         existing_keys = {
             row[0] for row in conn.execute(text("SELECT key FROM transaction_config")).all()

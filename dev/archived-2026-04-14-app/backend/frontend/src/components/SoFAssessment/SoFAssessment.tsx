@@ -627,27 +627,26 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const renderStructuredRationale = (result: AssessmentResult) => {
-    // Parse the rationale into sections
-    const rationale = result.outcome.rationale;
+    // Renders only the Transaction Review section, which genuinely
+    // needs the engine's free-text rationale. The Source of Funds
+    // Analysis tile is rendered separately and directly from
+    // result.claims (see the renderResult body) so it can never be
+    // lost to a header-less or malformed rationale. Null-guarded —
+    // rationale may be empty on a degraded result.
+    const rationale = (result.outcome && result.outcome.rationale) || '';
     const sections = rationale.split('===').filter(s => s.trim());
-    
+
     return (
       <div className="space-y-6">
-        {sections.map((section, idx) => {
+        {sections.map((section) => {
           const lines = section.trim().split('\n');
-          const title = lines[0].trim();
+          const title = (lines[0] || '').trim().toUpperCase();
           const content = lines.slice(1).join('\n');
-          
-          // Determine section type
-          // Skip CLIENT INFORMATION section - not needed in UI
-          if (title.includes('CLIENT INFORMATION')) {
-            return null; // Hidden
-          } else if (title.includes('SOURCE OF FUNDS')) {
-            return renderSoFSection(content, result);
-          } else if (title.includes('TRANSACTION REVIEW')) {
+          if (title.includes('TRANSACTION REVIEW')) {
             return renderTransactionReviewSection(content, result);
           }
-          // Don't render Final Assessment here - it's in the top decision box
+          // CLIENT INFORMATION / SOURCE OF FUNDS / FINAL ASSESSMENT
+          // are handled elsewhere or intentionally not shown here.
           return null;
         })}
       </div>
@@ -812,6 +811,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       }
     };
     
+    const claimList = result.claims || [];
+
     return (
       <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group" open>
         {/* Header — clickable summary, chevron rotates when open */}
@@ -822,6 +823,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </svg>
         </summary>
 
+        {/* Explicit empty state — a zero-claim result must be loud, not
+            an invisible missing tile. */}
+        {claimList.length === 0 && (
+          <div className="px-6 py-8 text-center">
+            <div className="text-sm font-semibold text-amber-700">
+              No source-of-funds claims were extracted
+            </div>
+            <p className="mt-1.5 text-xs text-zinc-500 max-w-md mx-auto">
+              The client's explanation could not be resolved into any declared
+              source of funds. Check that a Client Info file or explanation was
+              provided, then re-run the assessment. Manual review required.
+            </p>
+          </div>
+        )}
+
+        {claimList.length > 0 && (
+        <>
         {/* Claims table — Claim / Status / Summary / Action.
             One row per evidence_match. The action column triggers the
             existing /sof-assessment/accept-differences endpoint with a
@@ -913,8 +931,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </tbody>
           </table>
         </div>
-
-
+        </>
+        )}
       </details>
     );
   };
@@ -1521,7 +1539,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               insufficient:{label: 'FAIL',           severity: 'critical',headline: 'Source of funds is not adequately evidenced.' },
             };
             const v = verdictMap[status] || { label: status.toUpperCase() || 'UNKNOWN', severity: 'medium' as const, headline: 'Assessment complete.' };
-            const total = result.evidence_matches?.length || 0;
+            // Count from result.claims — the same array the Claims
+            // table renders — so the card and the table can never
+            // disagree on how many claims there are.
+            const total = (result.claims?.length || result.evidence_matches?.length) || 0;
             // A claim "passed" only if EITHER:
             //   - an analyst has manually accepted any differences, OR
             //   - the document was verified AND the confidence is high
@@ -1569,7 +1590,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             );
           })()}
 
-          {/* Parsed Rationale Sections */}
+          {/* Source of Funds Analysis — the claims table.
+              Rendered DIRECTLY from result.claims, always. It used to
+              be gated behind finding a "SOURCE OF FUNDS" header inside
+              the free-text rationale, which silently deleted the whole
+              tile whenever the rationale was header-less. */}
+          {renderSoFSection('', result)}
+
+          {/* Remaining rationale sections (Transaction Review). */}
           {renderStructuredRationale(result)}
 
           {/* ============================================================ */}

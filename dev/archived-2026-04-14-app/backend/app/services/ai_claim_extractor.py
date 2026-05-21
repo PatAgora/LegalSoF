@@ -39,14 +39,22 @@ _PROMPT = (
     "Read the client's Source of Funds explanation below and identify EVERY "
     "distinct source of funds the client describes.\n\n"
     "Rules:\n"
+    "- Be EXHAUSTIVE. Capture a source even if the client mentions it only "
+    "briefly, in passing, or as a secondary contribution. It is better to "
+    "record a borderline source for the reviewer to assess than to omit it. "
+    "Do not merge two genuinely separate sources into one.\n"
     "- One entry per distinct source. If the client mentions three sources, "
     "return three entries.\n"
-    "- source_type MUST be one of: " + ", ".join(_ALLOWED_SOURCE_TYPES) + ".\n"
+    "- source_type MUST be one of: " + ", ".join(_ALLOWED_SOURCE_TYPES) + ". "
+    "Use 'other' only when no listed type fits.\n"
     "- amount is the figure in GBP as a plain number (no symbols, no commas). "
-    "Where the client states BOTH a gross figure and a net figure for the "
-    "same source (e.g. 'sold for 425000 with net proceeds of 269280'), use "
-    "the NET figure — the money that actually reached the client.\n"
-    "- Convert shorthand: '50k' = 50000, '1.2m' = 1200000.\n"
+    "Convert amounts written in words ('forty thousand pounds' = 40000) and "
+    "shorthand ('50k' = 50000, '1.2m' = 1200000). Where the client states "
+    "BOTH a gross figure and a net figure for the same source (e.g. 'sold "
+    "for 425000 with net proceeds of 269280'), use the NET figure — the "
+    "money that actually reached the client.\n"
+    "- If a source is named but no amount is given, still include it with "
+    "amount 0 so the reviewer is aware of it.\n"
     "- date: the relevant date for the source (completion date, distribution "
     "date, etc.) as written, or an empty string if none is given.\n"
     "- description: a short plain-English summary of that source.\n"
@@ -230,10 +238,11 @@ def _normalise(items: List[Any]) -> List[Dict[str, Any]]:
             amount = float(it.get("amount") or 0)
         except (TypeError, ValueError):
             amount = 0.0
-        if amount <= 0:
-            # A source with no usable amount can't be matched against
-            # bank evidence — skip it rather than emit a £0 claim.
-            continue
+        if amount < 0:
+            amount = 0.0
+        # A £0 entry is kept on purpose — a source the client named
+        # without an amount must still surface as a claim row so the
+        # reviewer is aware of it (it just won't auto-match evidence).
         entry: Dict[str, Any] = {
             "source_type": source_type,
             "amount": amount,
