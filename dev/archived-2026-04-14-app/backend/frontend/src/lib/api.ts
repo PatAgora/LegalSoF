@@ -1,12 +1,12 @@
 // Resolve the API base URL.
 //
 // Production (single-service deploy): backend serves the frontend bundle, so
-// the API lives at the SAME origin as the page — base URL must be empty so
+// the API lives at the SAME origin as the page - base URL must be empty so
 // fetch('/api/v1/...') stays on this host.
 //
 // We deliberately ignore VITE_API_BASE_URL when running on a *.railway.app
 // host. A previous build accidentally baked a stale separate-backend URL into
-// the bundle, and env-var changes only take effect on the next rebuild —
+// the bundle, and env-var changes only take effect on the next rebuild -
 // this guard makes the running bundle robust regardless of what was baked.
 //
 // Local dev still honours VITE_API_BASE_URL if you point the frontend at a

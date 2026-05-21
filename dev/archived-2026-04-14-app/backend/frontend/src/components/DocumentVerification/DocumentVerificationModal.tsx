@@ -78,7 +78,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
   const acceptVerification = async () => {
     if (verification.admin_override) return;
     const rationale = window.prompt(
-      `Add a rationale for accepting "${verification.filename}". Required — please include enough detail for the audit log.`,
+      `Add a rationale for accepting "${verification.filename}". Required - please include enough detail for the audit log.`,
       '',
     );
     if (rationale === null) return;
@@ -156,7 +156,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
     return base.filter(f => f.severity === severityFilter);
   }, [verification.flags, severityFilter]);
 
-  // Sorted flags (no filter applied) — used for the top-issue hint so it
+  // Sorted flags (no filter applied) - used for the top-issue hint so it
   // always reflects the truly most important problem.
   const sortedFlags = useMemo(() => {
     return [...(verification.flags || [])]
@@ -203,7 +203,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
     { name: 'Score', value: score },
     { name: 'Remaining', value: 100 - score },
   ];
-  // green-500 / amber-500 / red-500 — match the StatusChip palette.
+  // green-500 / amber-500 / red-500 - match the StatusChip palette.
   const scoreColor = score >= 75 ? '#22c55e' : score >= 45 ? '#f59e0b' : '#ef4444';
 
   const handleFlagClick = (flag: typeof sortedFlags[0], idx: number) => {
@@ -233,25 +233,25 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
   };
 
   const verdictLabel = verification.verdict === 'Verified' ? 'VERIFIED'
-    : verification.verdict === 'Suspicious' ? 'SUSPICIOUS — REVIEW BEFORE APPROVING'
-    : verification.verdict === 'LikelyTampered' ? 'LIKELY TAMPERED — DO NOT ACCEPT'
+    : verification.verdict === 'Suspicious' ? 'SUSPICIOUS - REVIEW BEFORE APPROVING'
+    : verification.verdict === 'LikelyTampered' ? 'LIKELY TAMPERED - DO NOT ACCEPT'
     : verification.verdict;
 
   const verdictColor = verification.verdict === 'Verified' ? 'bg-green-100 text-green-700'
     : verification.verdict === 'Suspicious' ? 'bg-amber-100 text-amber-700'
     : 'bg-red-100 text-red-700';
 
-  // Top-issue action hint — shown above the flag list to point reviewers
+  // Top-issue action hint - shown above the flag list to point reviewers
   // at the highest-severity flag without needing to scroll.
   const topIssueHint = sortedFlags.length > 0
     ? (() => {
         const top = sortedFlags[0];
         const t = translateFlag(top);
         const action = top.severity === 'critical'
-          ? 'Block this document — '
+          ? 'Block this document - '
           : top.severity === 'high'
-          ? 'Investigate before approving — '
-          : 'Worth checking — ';
+          ? 'Investigate before approving - '
+          : 'Worth checking - ';
         return `${action}${t.headline.toLowerCase()}.`;
       })()
     : null;
@@ -268,12 +268,12 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
     if (entries.length === 0) return null;
 
     const fmtValue = (v: any): string => {
-      if (v === null || v === undefined) return '—';
+      if (v === null || v === undefined) return '-';
       if (typeof v === 'boolean') return v ? 'yes' : 'no';
       if (Array.isArray(v)) {
         // Array of primitives → comma-separated. Array of objects → JSON.
         if (v.every(x => typeof x !== 'object' || x === null)) {
-          return v.map(x => String(x)).join(', ') || '—';
+          return v.map(x => String(x)).join(', ') || '-';
         }
         return JSON.stringify(v);
       }
@@ -351,7 +351,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
             </div>
           </div>
 
-          {/* Acceptance banner — shown when a reviewer has signed off
+          {/* Acceptance banner - shown when a reviewer has signed off
               this document. Records who, when and why for the audit log. */}
           {verification.admin_override && (
             <div className="px-6 py-3 bg-green-50 border-b border-green-200">
@@ -419,7 +419,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
                           const amt = Math.abs(t.amount ?? 0);
                           return (
                             <tr key={t.id} className="border-b border-zinc-200 hover:bg-zinc-50/40">
-                              <td className="px-2 py-1.5 whitespace-nowrap text-zinc-600">{t.date || '—'}</td>
+                              <td className="px-2 py-1.5 whitespace-nowrap text-zinc-600">{t.date || '-'}</td>
                               <td className="px-2 py-1.5 text-zinc-900">{t.description || ''}</td>
                               <td className="px-2 py-1.5 text-right tabular-nums text-green-700">
                                 {credit && amt ? amt.toFixed(2) : ''}
@@ -571,7 +571,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                   </svg>
-                                  Pages: {flag.details!.page_numbers.map((p: number) => p + 1).join(', ')} — click to view
+                                  Pages: {flag.details!.page_numbers.map((p: number) => p + 1).join(', ')} - click to view
                                 </div>
                               )}
                               {isActive && renderFlagDetails(flag.details)}

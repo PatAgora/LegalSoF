@@ -16,7 +16,7 @@ interface ModalProps {
   onClose: () => void;
   title?: ReactNode;
   size?: Size;
-  // Optional footer row — buttons live here.
+  // Optional footer row - buttons live here.
   footer?: ReactNode;
   // Hide the X close button in the header (rare).
   hideCloseButton?: boolean;

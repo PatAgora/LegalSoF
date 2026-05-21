@@ -74,13 +74,19 @@ _CHECKLIST: Dict[str, Dict[str, List[str]]] = {
         ],
     },
     "gift": {
+        # A third-party gift must be checked in the same way as the
+        # client's own funds (SRA thematic review, case study 1): the
+        # donor's identity, a gift deed, and the donor's own source of
+        # funds are required on every matter, not only high-risk ones.
         "base": [
-            "Gift letter from the donor confirming the amount and that it is unconditional",
+            "Signed gift letter or deed from the donor confirming the amount and that it is unconditional",
+            "Identity verification of the donor",
+            "Evidence of the donor's own source of funds for the gift (e.g. the donor's bank statements)",
             "Bank statement showing the gift received",
         ],
         "enhanced": [
-            "Evidence of the donor's own source of funds for the gift",
-            "Identity verification of the donor",
+            "Confirmation of the donor's relationship to the client",
+            "Independent corroboration of the donor's wealth",
         ],
     },
     "pension": {
@@ -105,11 +111,12 @@ _CHECKLIST: Dict[str, Dict[str, List[str]]] = {
     "loan": {
         "base": [
             "Loan or mortgage agreement",
+            "Confirmation of the lender's regulated status, or for a private lender their verified identity",
+            "Evidence of the lender's own source of funds (private / non-regulated loans)",
             "Bank statement showing the loan advance received",
         ],
         "enhanced": [
-            "Confirmation of the lender's regulated status",
-            "Evidence of the lender's source of funds (private loans)",
+            "Confirmation of the lender's relationship to the client (private loans)",
         ],
     },
     "compensation": {

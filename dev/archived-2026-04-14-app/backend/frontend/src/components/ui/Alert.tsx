@@ -1,4 +1,4 @@
-// CDD-style inline alert. Banner-row variant — sits in-flow above
+// CDD-style inline alert. Banner-row variant - sits in-flow above
 // content, not a toast. Use Modal for confirmation prompts.
 import { HTMLAttributes, ReactNode } from 'react';
 

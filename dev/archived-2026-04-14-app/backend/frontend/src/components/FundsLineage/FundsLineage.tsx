@@ -991,7 +991,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             </div>
           </div>
 
-          {/* Review Required for — enumerated open issues a reviewer
+          {/* Review Required for - enumerated open issues a reviewer
               must clear before this lineage can be signed off.
               Sources walked from the live lineage tree so the list
               stays in sync with the current rendering. */}
@@ -1038,7 +1038,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                         <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
                         <span>
                           <strong>{evidenceNodes.length} transaction{evidenceNodes.length === 1 ? '' : 's'}</strong> need
-                          {evidenceNodes.length === 1 ? 's' : ''} source documentation —
+                          {evidenceNodes.length === 1 ? 's' : ''} source documentation -
                           obtain proof of origin (payslip, contract, completion statement, etc.).
                         </span>
                       </div>
@@ -1047,14 +1047,14 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                           <li key={i}>
                             {fmtMoney(Math.abs(n.transaction?.amount || n.amount || 0))} on{' '}
                             {formatDate(n.transaction?.date || n.date)}
-                            {(n.transaction?.account || n.account) && ` — ${n.transaction?.account || n.account}`}
+                            {(n.transaction?.account || n.account) && ` - ${n.transaction?.account || n.account}`}
                             {(n.transaction?.description || n.description) && (
                               <span className="text-zinc-500"> · {(n.transaction?.description || n.description).slice(0, 60)}</span>
                             )}
                           </li>
                         ))}
                         {evidenceNodes.length > 6 && (
-                          <li className="italic">…and {evidenceNodes.length - 6} more — expand the ledger below.</li>
+                          <li className="italic">…and {evidenceNodes.length - 6} more - expand the ledger below.</li>
                         )}
                       </ul>
                     </li>
@@ -1064,7 +1064,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                       <div className="flex items-start gap-3">
                         <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
                         <span>
-                          <strong>{gapNodes.length} statement gap{gapNodes.length === 1 ? '' : 's'}</strong> — earlier
+                          <strong>{gapNodes.length} statement gap{gapNodes.length === 1 ? '' : 's'}</strong> - earlier
                           statements are needed for the source accounts of these inbound transfers.
                         </span>
                       </div>

@@ -35,9 +35,10 @@ def derive_matter_status(matter, sof_data) -> str:
     """Derive the single overarching status of a matter from its state.
 
     Priority:
-      Verified                 — an assessment has run and every claim
-                                  has been marked "Sufficient Evidence
-                                  Provided" by the reviewer.
+      Verified                 — an assessment has run, every claim has
+                                  been marked "Sufficient Evidence
+                                  Provided", and the fee earner has
+                                  confirmed the source of funds adequate.
       Returned from Compliance  — compliance has returned the matter.
       Sent to Compliance        — at least one claim is with compliance.
       Under Review              — an assessment has been run.
@@ -52,7 +53,9 @@ def derive_matter_status(matter, sof_data) -> str:
     all_verified = bool(claims) and all(
         (actions.get(str(i)) or {}).get('sufficient') for i in range(len(claims))
     )
-    if all_verified:
+    # Verified also requires the fee earner's final "source of funds
+    # adequate" sign-off — the file cannot proceed without it.
+    if all_verified and sof_data.get('sof_confirmed'):
         return "Verified"
     if comp == 'returned':
         return "Returned from Compliance"

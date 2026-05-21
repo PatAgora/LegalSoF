@@ -2468,6 +2468,103 @@ async def get_sof_assessment_results(
         'claim_evidence': {}, 'transaction_alerts': [],
     }
 
+    # The fee earner's final "source of funds adequate" sign-off.
+    assessment['sof_confirmed'] = storage.get('sof_confirmed') or None
+
+    # Funds-sufficiency check — flag when the declared sources total
+    # less than the transaction value (SRA poor practice: evidence
+    # showing less money than the transaction needs).
+    _ci = storage.get('client_info') or {}
+    _purchase = _ci.get('purchase') if isinstance(_ci.get('purchase'), dict) else {}
+    try:
+        _txn_value = float(_purchase.get('amount') or _ci.get('purchase_amount') or 0)
+    except (TypeError, ValueError):
+        _txn_value = 0.0
+    _claims_total = 0.0
+    for _c in (assessment.get('claims') or []):
+        try:
+            _claims_total += float(_c.get('expected_amount') or 0)
+        except (TypeError, ValueError):
+            pass
+    if _txn_value > 0 and _claims_total > 0 and _claims_total < _txn_value - 1:
+        assessment['funds_shortfall'] = {
+            'transaction_value': _txn_value,
+            'claimed_total': _claims_total,
+            'shortfall': round(_txn_value - _claims_total, 2),
+        }
+
+    # Funding-change and plausibility monitoring flags (SRA thematic
+    # review, Nov 2025). A change or addition to the expected funding,
+    # and accumulation that may not be plausible, are red flags.
+    monitoring_flags: List[str] = []
+    _claims = assessment.get('claims') or []
+    _bank_txns = storage.get('bank_statements') or []
+
+    def _claim_amt(c) -> float:
+        try:
+            return float(c.get('expected_amount') or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # Gap 3 — undeclared lump-sum funding: a single large credit that
+    # corresponds to no declared lump-sum source (SRA case study 4).
+    _credits = []
+    for _t in _bank_txns:
+        if str(_t.get('direction', '')).lower() != 'credit':
+            continue
+        try:
+            _a = float(_t.get('amount') or 0)
+        except (TypeError, ValueError):
+            _a = 0.0
+        if _a > 0:
+            _credits.append((_a, _t))
+    if _credits and _txn_value > 0:
+        _credits.sort(key=lambda x: x[0], reverse=True)
+        _largest_amt, _largest_txn = _credits[0]
+        if _largest_amt >= _txn_value * 0.2:
+            _matched = any(
+                abs(_claim_amt(c) - _largest_amt) <= _largest_amt * 0.2
+                for c in _claims
+            )
+            if not _matched:
+                _desc = str(
+                    _largest_txn.get('description') or _largest_txn.get('narrative') or 'no description'
+                ).strip()
+                monitoring_flags.append(
+                    f"An inbound payment of £{_largest_amt:,.0f} ({_desc}) does not correspond "
+                    f"to any declared source of funds. Establish where it came from and whether "
+                    f"the funding has changed before proceeding."
+                )
+
+    # Gap 6 — implausible rate of accumulation: a large savings claim
+    # evidenced over a short period (SRA case study 3).
+    def _parse_d(s):
+        for _f in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+            try:
+                return datetime.strptime(str(s), _f)
+            except (ValueError, TypeError):
+                continue
+        return None
+    _dates = [d for d in (_parse_d(t.get('date')) for t in _bank_txns) if d]
+    if _dates:
+        _span_months = max(1.0, (max(_dates) - min(_dates)).days / 30.0)
+        for _c in _claims:
+            _st = str(_c.get('source_type') or '').lower()
+            if 'saving' not in _st and 'accumul' not in _st:
+                continue
+            _ca = _claim_amt(_c)
+            if _ca <= 0:
+                continue
+            _per_month = _ca / _span_months
+            if _per_month >= 8000:
+                monitoring_flags.append(
+                    f"The {_st.replace('_', ' ')} claim of £{_ca:,.0f} is evidenced over about "
+                    f"{round(_span_months)} month(s) — an average of £{_per_month:,.0f} per month. "
+                    f"Confirm this rate of accumulation is consistent with the client's income."
+                )
+    if monitoring_flags:
+        assessment['monitoring_flags'] = monitoring_flags
+
     return {
         "matter_id": matter_id,
         "assessment": assessment,
@@ -3104,11 +3201,22 @@ def _any_claim_in_review(storage: dict) -> bool:
 async def mark_claim_sufficient(
     matter_id: int,
     claim_index: int,
+    request: Dict[str, Any],
     current_user: User = Depends(require_analyst),
     db: Session = Depends(get_sync_db),
 ):
-    """Mark a claim's evidence as sufficient — the reviewer confirms
-    nothing further is needed and the claim is treated as verified."""
+    """Mark a claim's evidence as sufficient. The reviewer must record
+    the conclusion they reached — the SRA expects firms to assess and
+    document evidence, not merely collect it (thematic review, Nov 2025)."""
+    rationale = (request.get('rationale') or '').strip()
+    if len(rationale) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Record your conclusion (at least 10 characters) — what the "
+                "evidence shows and why it is sufficient."
+            ),
+        )
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
@@ -3119,7 +3227,7 @@ async def mark_claim_sufficient(
     who = current_user.full_name or current_user.email
     when = datetime.now(timezone.utc).isoformat()
     entry = _claim_action_entry(storage, claim_index)
-    entry['sufficient'] = {'by': who, 'at': when}
+    entry['sufficient'] = {'by': who, 'at': when, 'rationale': rationale}
     _db_save_storage(db, matter_id, storage)
 
     claims = (storage.get('assessment_result') or {}).get('claims') or []
@@ -3135,12 +3243,66 @@ async def mark_claim_sufficient(
         entity_id=matter_id,
         description=(
             f"Claim {claim_index + 1} ({claim_label}) marked as having sufficient "
-            f"evidence by {who}."
+            f"evidence by {who}. Conclusion: {rationale}"
         ),
-        details={"claim_index": claim_index, "reviewer": who},
+        details={"claim_index": claim_index, "reviewer": who, "rationale": rationale},
     ))
     db.commit()
     return {"success": True, "claim_actions": storage.get('claim_actions', {})}
+
+
+@router.post("/matters/{matter_id}/confirm-sof-adequate")
+async def confirm_sof_adequate(
+    matter_id: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Final fee-earner sign-off that the source of funds is adequate.
+    The matter cannot reach Verified — the file cannot proceed — until
+    this confirmation is given, and every claim must already be marked
+    as having sufficient evidence."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    claims = (storage.get('assessment_result') or {}).get('claims') or []
+    actions = storage.get('claim_actions') or {}
+    if not claims:
+        raise HTTPException(status_code=409, detail="There are no source-of-funds claims to confirm.")
+    unverified = [
+        i for i in range(len(claims))
+        if not (actions.get(str(i)) or {}).get('sufficient')
+    ]
+    if unverified:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(unverified)} of {len(claims)} claim(s) are not yet marked as "
+                f"having sufficient evidence. Resolve every claim before confirming."
+            ),
+        )
+
+    who = current_user.full_name or current_user.email
+    storage['sof_confirmed'] = {'by': who, 'at': datetime.now(timezone.utc).isoformat()}
+    _db_save_storage(db, matter_id, storage)
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.APPROVED,
+        entity_type="matter",
+        entity_id=matter_id,
+        description=(
+            f"Source of funds confirmed adequate for matter "
+            f"{matter.reference_number} by {who} — the matter may proceed."
+        ),
+        details={"confirmed_by": who},
+    ))
+    db.commit()
+    return {"success": True, "sof_confirmed": storage['sof_confirmed']}
 
 
 @router.post("/matters/{matter_id}/sof-assessment/claims/{claim_index}/send-to-compliance")

@@ -113,6 +113,17 @@ interface AssessmentResult {
     claim_evidence?: Record<string, string[]>;
     transaction_alerts?: string[];
   };
+  // The fee earner's final "source of funds adequate" sign-off. The
+  // matter cannot reach Verified until this is given.
+  sof_confirmed?: { by: string; at: string } | null;
+  // Set when the declared sources total less than the transaction value.
+  funds_shortfall?: {
+    transaction_value: number;
+    claimed_total: number;
+    shortfall: number;
+  };
+  // Funding-change and plausibility flags from ongoing-monitoring checks.
+  monitoring_flags?: string[];
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -264,7 +275,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const [alertRationales, setAlertRationales] = useState<{ [key: number]: string }>({});
   const [alertSatisfied, setAlertSatisfied] = useState<{ [key: number]: boolean }>({});
 
-  // Validation summary state (used by assessment run response — now unified with document verification)
+  // Validation summary state (used by assessment run response - now unified with document verification)
   const [validationSummary, setValidationSummary] = useState<any>(null);
 
   // Document Verification state
@@ -428,11 +439,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         // Show the uploaded-success state, NOT the manual form.
         //
         // The uploaded JSON is already stored on the backend with its
-        // full structure intact — including any `sources` array or
+        // full structure intact - including any `sources` array or
         // explicit `claims`. If we flipped to manual mode here the user
         // would re-submit the form, and handleManualSubmit rebuilds the
         // payload with sof_explanation flattened to prose text and no
-        // sources/claims — which destroys the structured data and the
+        // sources/claims - which destroys the structured data and the
         // assessment then finds zero claims. The pre-filled fields
         // above are still kept, so 'View / edit' works if the user
         // explicitly chooses to revise the upload.
@@ -592,12 +603,42 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     setResult((prev) => (prev ? ({ ...prev, claim_actions: claimActions } as any) : prev));
   };
 
+  // Final sign-off that the source of funds is adequate. The matter
+  // cannot proceed to Verified until the fee earner gives this.
+  const confirmSofAdequate = async () => {
+    if (!confirm('Confirm the source of funds is adequate for this matter? The matter cannot proceed to Verified until this is given.')) return;
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/confirm-sof-adequate`,
+        { method: 'POST' },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not confirm: ${err.detail || r.statusText}`);
+        return;
+      }
+      const data = await r.json();
+      setResult((prev) => (prev ? ({ ...prev, sof_confirmed: data.sof_confirmed } as any) : prev));
+    } catch (e: any) {
+      alert(`Could not confirm: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
   const markClaimSufficient = async (claimIndex: number) => {
-    if (!confirm('Mark this claim as having sufficient evidence? It will be treated as verified.')) return;
+    const rationale = window.prompt(
+      'Mark this claim as having sufficient evidence. Record your conclusion (required) - '
+      + 'what the evidence shows and why it is sufficient.',
+      '',
+    );
+    if (rationale === null) return;
+    if (rationale.trim().length < 10) {
+      alert('A conclusion of at least 10 characters is required.');
+      return;
+    }
     try {
       const r = await authFetch(
         `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/sufficient-evidence`,
-        { method: 'POST' },
+        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
       );
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
@@ -613,7 +654,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
   const sendClaimToCompliance = async (claimIndex: number) => {
     const reason = window.prompt(
-      'Send this claim to compliance. Give the reason for the referral (required) — '
+      'Send this claim to compliance. Give the reason for the referral (required) - '
       + 'the compliance team sees this so they know why it has come to them.',
       '',
     );
@@ -641,7 +682,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
   const cancelClaimCompliance = async (claimIndex: number) => {
     const rationale = window.prompt(
-      'This claim no longer needs compliance review. Give a rationale (required) — it is recorded in the audit trail.',
+      'This claim no longer needs compliance review. Give a rationale (required) - it is recorded in the audit trail.',
       '',
     );
     if (rationale === null) return;
@@ -667,10 +708,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   // Compliance officer (admin) responds to a referred claim and returns
-  // it to the fee earner — the compliance side of the conversation.
+  // it to the fee earner - the compliance side of the conversation.
   const complianceReturnClaim = async (claimIndex: number) => {
     const response = window.prompt(
-      'Return this claim to the fee earner. Give your response (required) — '
+      'Return this claim to the fee earner. Give your response (required) - '
       + 'the fee earner sees this so they know what compliance found.',
       '',
     );
@@ -696,36 +737,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     }
   };
 
-  // ── Evidence Checklist worklist ─────────────────────────────────
-  // The fee earner's tick-offs live on result.evidence_checklist and are
-  // persisted to the matter so worklist progress survives a refresh.
-  const saveChecklist = async (next: { claim_evidence: Record<string, string[]>; transaction_alerts: string[] }) => {
-    setResult((prev) => (prev ? ({ ...prev, evidence_checklist: next } as any) : prev));
-    try {
-      await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/checklist`, {
-        method: 'PUT',
-        body: JSON.stringify(next),
-      });
-    } catch {
-      /* optimistic — the tick stays and re-syncs on the next results load */
-    }
-  };
-
-  const toggleClaimEvidence = (claimIdx: number, item: string) => {
-    const ec = result?.evidence_checklist || {};
-    const claimEvidence: Record<string, string[]> = { ...(ec.claim_evidence || {}) };
-    const set = new Set(claimEvidence[String(claimIdx)] || []);
-    if (set.has(item)) set.delete(item); else set.add(item);
-    claimEvidence[String(claimIdx)] = Array.from(set);
-    saveChecklist({ claim_evidence: claimEvidence, transaction_alerts: ec.transaction_alerts || [] });
-  };
-
-  const toggleTransactionAlert = (alertKey: string) => {
-    const ec = result?.evidence_checklist || {};
-    const set = new Set(ec.transaction_alerts || []);
-    if (set.has(alertKey)) set.delete(alertKey); else set.add(alertKey);
-    saveChecklist({ claim_evidence: ec.claim_evidence || {}, transaction_alerts: Array.from(set) });
-  };
 
   // Remove one uploaded file from this matter. Cleans up storage,
   // DocumentVerification rows, and the file on disk. Triggers a
@@ -832,7 +843,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     // needs the engine's free-text rationale. The Source of Funds
     // Analysis tile is rendered separately and directly from
     // result.claims (see the renderResult body) so it can never be
-    // lost to a header-less or malformed rationale. Null-guarded —
+    // lost to a header-less or malformed rationale. Null-guarded -
     // rationale may be empty on a degraded result.
     const rationale = (result.outcome && result.outcome.rationale) || '';
     const sections = rationale.split('===').filter(s => s.trim());
@@ -870,17 +881,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
-  // Source of Funds Claims — one row per declared claim, with a
+  // Source of Funds Claims - one row per declared claim, with a
   // Pass / Information Required status driven by the evidence the
   // client has provided for that claim.
   const renderSoFSection = (_content: string, result: AssessmentResult) => {
     const claimList = result.claims || [];
 
     // Claim status is reviewer-driven, one of four states:
-    //   verified  — the reviewer pressed "Sufficient Evidence Provided"
-    //   sent      — the claim has been sent to compliance
-    //   returned  — compliance returned the matter with queries
-    //   review    — the default; still under review
+    //   verified  - the reviewer pressed "Sufficient Evidence Provided"
+    //   sent      - the claim has been sent to compliance
+    //   returned  - compliance returned the matter with queries
+    //   review    - the default; still under review
     const claimStatus = (idx: number): 'verified' | 'sent' | 'returned' | 'review' => {
       const action = (result.claim_actions || {})[String(idx)] || {};
       if (action.sufficient) return 'verified';
@@ -892,7 +903,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
     return (
       <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group" open>
-        {/* Header — clickable summary, chevron rotates when open */}
+        {/* Header - clickable summary, chevron rotates when open */}
         <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
           <h3 className="text-lg font-bold text-zinc-900">Source of Funds Claims</h3>
           <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -900,7 +911,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           </svg>
         </summary>
 
-        {/* Explicit empty state — a zero-claim result must be loud, not
+        {/* Explicit empty state - a zero-claim result must be loud, not
             an invisible missing tile. */}
         {claimList.length === 0 && (
           <div className="px-6 py-8 text-center">
@@ -1163,15 +1174,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Upload Step */}
       {activeStep === 'upload' && (
         <div className="space-y-6">
-          {/* Upload tiles — full-width accordion rows. Each tile collapses
+          {/* Upload tiles - full-width accordion rows. Each tile collapses
               once its category has at least one upload, so reviewers see
               counts at a glance and only expand the section they're
               working on. Uses native <details> for the open/close
               behaviour (no extra state needed). */}
           <div className="space-y-3">
-            {/* Client Info — tile #1.
-                key includes the uploaded flag so the tile remounts —
-                and therefore reliably re-applies its `open` default —
+            {/* Client Info - tile #1.
+                key includes the uploaded flag so the tile remounts -
+                and therefore reliably re-applies its `open` default -
                 the moment the category flips to uploaded. React does
                 not consistently reconcile the uncontrolled <details
                 open> attribute on its own. */}
@@ -1202,12 +1213,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
                 
                 {/* Branch priority:
-                    1. clientInfoInputMethod === 'manual' — the form is
+                    1. clientInfoInputMethod === 'manual' - the form is
                        open for review/edit (either user clicked Enter
                        Manually, or an uploaded file pre-filled the
                        fields and switched mode). Falls through to the
                        final else branch where the form is rendered.
-                    2. Uploaded AND not currently editing — show the
+                    2. Uploaded AND not currently editing - show the
                        success state with a View / Edit button to enter
                        the form.
                     3. Otherwise initial choice / file picker.
@@ -1274,7 +1285,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 ) : (
                   // Manual input mode
                   <div className="text-left space-y-3 mt-4">
-                    {/* Pre-filled banner — shown when an uploaded
+                    {/* Pre-filled banner - shown when an uploaded
                         client-info file populated the form. The user
                         should review and edit before submitting. */}
                     {status && status.files_summary && status.files_summary.client_info === 'uploaded' && manualClientInfo.client_name && (
@@ -1412,11 +1423,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
             </details>
 
-            {/* Bank Statements — tile #2.
-                Keyed on the uploaded flag so it remounts and collapses
-                on the first upload (see Client Info tile note). */}
+            {/* Bank Statements - tile #2.
+                Keyed on the running record count so the tile remounts -
+                and therefore collapses - after every statement upload,
+                not just the first. */}
             <details
-              key={`tile-bank-${(status?.files_summary?.bank_statements_count ?? 0) > 0}`}
+              key={`tile-bank-${status?.files_summary?.bank_statements_count ?? 0}`}
               className="bg-white border border-zinc-200 rounded-md group"
               open={!status || !status.files_summary || status.files_summary.bank_statements_count === 0}
             >
@@ -1467,7 +1479,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </div>
             </details>
 
-            {/* Supporting Documents — tile #3.
+            {/* Supporting Documents - tile #3.
                 Keyed on the uploaded flag so it remounts and collapses
                 on the first upload (see Client Info tile note). */}
             <details
@@ -1553,7 +1565,86 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Results Step */}
       {activeStep === 'results' && result && (
         <div className="space-y-6">
-          {/* Verdict summary card — the top-of-page "what's the answer" panel.
+          {/* Funds-sufficiency flag - SRA poor practice is evidence
+              showing less money than the transaction needs. */}
+          {result.funds_shortfall && (
+            <div className="bg-red-50 border border-red-200 rounded-md px-5 py-4">
+              <div className="text-sm font-semibold text-red-800">Declared funds do not cover the transaction</div>
+              <p className="mt-1 text-xs text-red-700">
+                The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but the
+                transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a shortfall
+                of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for the difference, or
+                establish and record how the balance is funded, before proceeding.
+              </p>
+            </div>
+          )}
+
+          {/* Funding-change and plausibility checks (ongoing monitoring). */}
+          {result.monitoring_flags && result.monitoring_flags.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-md px-5 py-4">
+              <div className="text-sm font-semibold text-amber-800">Funding and plausibility checks</div>
+              <ul className="mt-1.5 space-y-1.5">
+                {result.monitoring_flags.map((f: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-amber-800 leading-snug">
+                    <span className="mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-amber-500" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Source-of-funds adequacy gate. The matter cannot proceed to
+              Verified until the fee earner confirms it is adequate. */}
+          {(() => {
+            const claims = result.claims || [];
+            const allSufficient = claims.length > 0 && claims.every((_c: any, i: number) =>
+              !!((result.claim_actions || {})[String(i)] || {}).sufficient);
+            const confirmed = result.sof_confirmed;
+            if (confirmed) {
+              const d = new Date(confirmed.at);
+              const when = isNaN(d.getTime())
+                ? ''
+                : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              return (
+                <div className="bg-green-50 border border-green-200 rounded-md px-5 py-4 flex items-center gap-3">
+                  <svg className="h-5 w-5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <div className="text-sm text-green-800">
+                    <span className="font-semibold">Source of funds confirmed adequate.</span>{' '}
+                    <span className="text-xs text-green-700">{confirmed.by}{when ? ` - ${when}` : ''}</span>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-md px-5 py-4 flex items-center justify-between gap-4">
+                <div className="text-sm text-amber-800 min-w-0">
+                  <span className="font-semibold">Source of funds not yet confirmed.</span>
+                  <p className="mt-0.5 text-xs text-amber-700">
+                    {allSufficient
+                      ? 'Every claim has sufficient evidence. Confirm the source of funds is adequate so the matter can proceed.'
+                      : 'The matter cannot proceed to Verified until every claim is marked as having sufficient evidence and the source of funds is confirmed adequate.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={confirmSofAdequate}
+                  disabled={!allSufficient}
+                  className={`flex-shrink-0 px-4 py-2 text-xs font-semibold rounded-full transition-colors ${
+                    allSufficient
+                      ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+                      : 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                  }`}
+                >
+                  Confirm Source of Funds Adequate
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* Verdict summary card - the top-of-page "what's the answer" panel.
               Replaces the previous emoji-decorated bold-text header. */}
           {(() => {
             const status = (result.outcome.status || '').toLowerCase();
@@ -1563,8 +1654,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               insufficient:{label: 'FAIL',           severity: 'critical',headline: 'Source of funds is not adequately evidenced.' },
             };
             const v = verdictMap[status] || { label: status.toUpperCase() || 'UNKNOWN', severity: 'medium' as const, headline: 'Assessment complete.' };
-            // Count from result.claims — the same array the Claims
-            // table renders — so the card and the table can never
+            // Count from result.claims - the same array the Claims
+            // table renders - so the card and the table can never
             // disagree on how many claims there are.
             const total = (result.claims?.length || result.evidence_matches?.length) || 0;
             // A claim "passed" only if EITHER:
@@ -1573,8 +1664,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             //     (>= 0.999, the existing "no manual review needed"
             //     threshold used elsewhere in this file).
             //
-            // Anything else — failed, no document, low confidence, awaiting
-            // review — counts as needing review. e.verified alone is not
+            // Anything else - failed, no document, low confidence, awaiting
+            // review - counts as needing review. e.verified alone is not
             // sufficient because the pipeline sometimes flags it true on
             // claims that still failed downstream document checks.
             const passed = result.evidence_matches?.filter((e: any) => {
@@ -1614,7 +1705,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             );
           })()}
 
-          {/* Source of Funds Analysis — the claims table.
+          {/* Source of Funds Analysis - the claims table.
               Rendered DIRECTLY from result.claims, always. It used to
               be gated behind finding a "SOURCE OF FUNDS" header inside
               the free-text rationale, which silently deleted the whole
@@ -1624,7 +1715,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {/* Source of Funds evidence checklist. For each claim that is
               NOT yet verified, splits the expected evidence into what
               has been provided (ticked) and what is still suggested to
-              obtain. Verified claims are omitted — nothing further is
+              obtain. Verified claims are omitted - nothing further is
               needed. Provided-detection is a filename heuristic against
               the matter's uploads. */}
           {(() => {
@@ -1662,7 +1753,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             };
 
             // A claim is Verified only once the reviewer has pressed
-            // "Sufficient Evidence Provided" — status is user-driven.
+            // "Sufficient Evidence Provided" - status is user-driven.
             const claimVerified = (idx: number): boolean =>
               !!((result.claim_actions || {})[String(idx)] || {}).sufficient;
 
@@ -1678,7 +1769,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             };
 
             // What the other modules have flagged for review against
-            // THIS claim — the per-claim gap detail the Documents
+            // THIS claim - the per-claim gap detail the Documents
             // Required tile used to carry, now folded into the checklist
             // so the fee earner sees it claim-by-claim.
             const claimGaps = (claim: any, ev: any, verified: boolean, hasProvided: boolean): string[] => {
@@ -1694,24 +1785,41 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 } else if (field === 'funds_discrepancy' && Number(d.discrepancy_amount || 0) > 0) {
                   const gap = Number(d.discrepancy_amount);
                   const pct = claimAmt > 0 ? Math.round((gap / claimAmt) * 100) : 0;
-                  out.push(`${pct > 0 ? `≈${pct}% of the ${fmtMoney(claimAmt)} claimed` : fmtMoney(gap)} is not yet evidenced — further statements confirming ${fmtMoney(gap)} required.`);
+                  out.push(`${fmtMoney(gap)} of the ${fmtMoney(claimAmt)} claimed${pct > 0 ? ` (${pct}%)` : ''} still requires confirmation. Obtain further bank statements covering this amount.`);
                 } else if (field === 'statement_gap') {
                   out.push(`Bank statements for ${d.gap_account || 'the source account'} before ${fmtGapDate(d.gap_account_earliest || d.date)} are required to close a statement gap.`);
                 } else if (d.severity === 'missing') {
                   out.push(`A document showing ${field.replace(/_/g, ' ')} is required.`);
                 }
               }
+              // Stated source vs evidence mismatch - the SRA's headline
+              // finding (8% of files): the declared source must match
+              // what the evidence actually shows. Where a claim is not a
+              // gift/loan but the evidence shows funds arriving from a
+              // third party, flag it for the reviewer to resolve.
+              const stype = String(claim?.source_type || '').toLowerCase();
+              const isThirdPartySource = stype.includes('gift') || stype.includes('loan');
+              const thirdPartyCredit = diffs.some((d: any) => {
+                if (String(d.field || '') !== 'untraced_funds') return false;
+                const desc = String(d.found || d.description || '').toLowerCase();
+                return /(transfer|faster payment|\bfp\b|from [a-z])/.test(desc);
+              });
+              if (!isThirdPartySource && thirdPartyCredit) {
+                out.push(
+                  `The evidence shows funds arriving from a third party, which may not match the declared source (${stype.replace(/_/g, ' ') || 'as stated'}). Confirm the true origin of these funds.`,
+                );
+              }
               const verdict = dv.verdict;
               if (verdict === 'Suspicious' || verdict === 'LikelyTampered') {
-                out.push('Document Verification flagged this claim’s evidence — see the Document Verification tile.');
+                out.push('Document Verification flagged this claim’s evidence - see the Document Verification tile.');
               }
               if (!verified && !hasProvided && out.length === 0) {
-                out.push('No corroborating evidence has been matched yet — obtain and upload the suggested evidence above.');
+                out.push('No corroborating evidence has been matched yet - obtain and upload the suggested evidence above.');
               }
               return out;
             };
 
-            // Build the rows — every claim with a checklist or an open
+            // Build the rows - every claim with a checklist or an open
             // gap. Provided / Suggested / Gaps are precomputed here.
             const rows = (result.claims || []).map((claim: any, idx: number) => {
               const docs: string[] = claim.expected_evidence || [];
@@ -1737,19 +1845,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   </svg>
                 </summary>
                 <div className="px-6 py-4">
-                  <p className="text-xs text-zinc-500 mb-4">
-                    The fee earner's worklist: what has been provided for each claim, what is
-                    still suggested to obtain (tick each item off as you go), and what the
-                    other modules have flagged as outstanding for that claim. Tiered to the
-                    matter's risk rating (LSAG §6.8).
-                  </p>
                   <div className="space-y-4">
                     {rows.map((row: any) => {
                       const label = String(row.claim.source_type || 'Source').replace(/_/g, ' ');
                       const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
                       const provided = row.provided;
                       const suggested = row.suggested;
-                      const ticked: string[] = (result.evidence_checklist?.claim_evidence || {})[String(row.idx)] || [];
                       return (
                         <div key={row.idx} className="border border-zinc-100 rounded p-3">
                           <div className="text-sm font-medium text-zinc-900 capitalize">
@@ -1779,37 +1880,26 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
                           {suggested.length > 0 && (
                             <div className="mt-2.5">
-                              {/* Tickable worklist — the fee earner ticks
-                                  each item off as they obtain it. Provided
-                                  items are auto-matched and not listed here. */}
                               <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${
                                 row.verified ? 'text-zinc-400' : 'text-amber-600'
                               }`}>
                                 {row.verified ? 'Other possible evidence' : 'Suggested Evidence to Obtain'}
                               </div>
                               <ul className="space-y-1">
-                                {suggested.map((doc: string, di: number) => {
-                                  const done = ticked.includes(doc);
-                                  return (
-                                    <li key={di}>
-                                      <label className="flex items-start gap-2 text-xs leading-snug cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={done}
-                                          onChange={() => toggleClaimEvidence(row.idx, doc)}
-                                          className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-zinc-300 text-green-600 focus:ring-green-500"
-                                        />
-                                        <span className={done ? 'text-zinc-400 line-through' : 'text-zinc-700'}>{doc}</span>
-                                      </label>
-                                    </li>
-                                  );
-                                })}
+                                {suggested.map((doc: string, di: number) => (
+                                  <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                                    <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                                      row.verified ? 'bg-zinc-300' : 'bg-amber-400'
+                                    }`} />
+                                    {doc}
+                                  </li>
+                                ))}
                               </ul>
                             </div>
                           )}
 
                           {/* What the other modules have flagged for this
-                              specific claim — the per-claim gap detail. */}
+                              specific claim - the per-claim gap detail. */}
                           {row.gaps.length > 0 && (
                             <div className="mt-2.5">
                               <div className="text-[10px] font-semibold uppercase tracking-wider text-red-600 mb-1">
@@ -1826,7 +1916,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             </div>
                           )}
 
-                          {/* Compliance conversation — the audit trail of
+                          {/* Compliance conversation - the audit trail of
                               messages between the fee earner and compliance. */}
                           {(() => {
                             const thread: any[] = (row.action.compliance || {}).thread || [];
@@ -1870,7 +1960,21 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             );
                           })()}
 
-                          {/* Per-claim actions — bottom-right. */}
+                          {/* Reviewer's recorded conclusion for a verified claim. */}
+                          {(() => {
+                            const suff = row.action.sufficient;
+                            if (!suff || !suff.rationale) return null;
+                            return (
+                              <div className="mt-2.5">
+                                <div className="text-[11px] font-semibold text-green-700 mb-1">
+                                  {suff.by || 'Reviewer'}
+                                </div>
+                                <p className="text-xs text-zinc-700 leading-snug italic">"{suff.rationale}"</p>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Per-claim actions - bottom-right. */}
                           {(() => {
                             const compState = (row.action.compliance || {}).state;
                             const inReview = compState === 'in_review';
@@ -1927,26 +2031,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     })}
                   </div>
 
-                  {/* Transaction Review worklist — alerts as tickable
-                      items, so the fee earner works through them here
-                      and uses the Transaction Review tile for detail. */}
+                  {/* Transaction Review summary - the alerts raised on
+                      the transactions. They are reviewed and signed off
+                      in the Transaction Review tile, not here. */}
                   {(() => {
                     if (result.sections_enabled?.transaction_review === false) return null;
                     const trs = result.transaction_review_summary;
                     const alerts: any[] = (trs?.alerts || (trs as any)?.alert_details || []);
                     if (alerts.length === 0) return null;
-                    const trTicked: string[] = result.evidence_checklist?.transaction_alerts || [];
                     return (
                       <div className="mt-6 pt-4 border-t border-zinc-200">
                         <div className="text-sm font-semibold text-zinc-900">Transaction Review</div>
                         <p className="text-xs text-zinc-500 mt-0.5 mb-3">
-                          Alerts raised against the transactions — work through each and tick it
-                          once reviewed. Open the Transaction Review tile for the full detail.
+                          Alerts raised against the transactions. Review and sign these off in
+                          the Transaction Review tile, which holds the full detail.
                         </p>
                         <ul className="space-y-2">
                           {alerts.map((alert: any, ai: number) => {
-                            const key = String(ai);
-                            const done = trTicked.includes(key);
                             const severity = String(alert.severity || 'HIGH').toUpperCase();
                             const txn = alert.transaction || alert;
                             const amount = txn.amount ?? alert.amount;
@@ -1954,24 +2055,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             const narrative = txn.narrative || alert.counterparty || '';
                             const issue = (alert.reasons && alert.reasons.length > 0) ? alert.reasons[0] : 'AML concern';
                             return (
-                              <li key={ai}>
-                                <label className="flex items-start gap-2 text-xs leading-snug cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={done}
-                                    onChange={() => toggleTransactionAlert(key)}
-                                    className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-zinc-300 text-green-600 focus:ring-green-500"
-                                  />
-                                  <span className="min-w-0">
-                                    <span className={done ? 'text-zinc-400 line-through' : 'text-zinc-900 font-medium'}>{issue}</span>
-                                    <span className={`ml-1.5 text-[10px] font-semibold uppercase ${
-                                      severity === 'CRITICAL' ? 'text-red-600' : severity === 'HIGH' ? 'text-amber-600' : 'text-zinc-400'
-                                    }`}>{severity}</span>
-                                    <div className={done ? 'text-zinc-300' : 'text-zinc-500'}>
-                                      {amount != null && `£${Number(amount).toLocaleString()}`}{date && ` · ${date}`}{narrative && ` · ${narrative}`}
-                                    </div>
-                                  </span>
-                                </label>
+                              <li key={ai} className="flex items-start gap-2 text-xs leading-snug">
+                                <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                                  severity === 'CRITICAL' ? 'bg-red-500' : severity === 'HIGH' ? 'bg-amber-500' : 'bg-zinc-400'
+                                }`} />
+                                <span className="min-w-0">
+                                  <span className="text-zinc-900 font-medium">{issue}</span>
+                                  <span className={`ml-1.5 text-[10px] font-semibold uppercase ${
+                                    severity === 'CRITICAL' ? 'text-red-600' : severity === 'HIGH' ? 'text-amber-600' : 'text-zinc-400'
+                                  }`}>{severity}</span>
+                                  <div className="text-zinc-500">
+                                    {amount != null && `£${Number(amount).toLocaleString()}`}{date && ` · ${date}`}{narrative && ` · ${narrative}`}
+                                  </div>
+                                </span>
                               </li>
                             );
                           })}
@@ -2030,7 +2126,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       </div>
                     </div>
 
-                    {/* Progress bar — traced vs untraced */}
+                    {/* Progress bar - traced vs untraced */}
                     {total > 0 && (
                       <div className="px-6 py-4 border-t border-zinc-100">
                         <div className="h-2 w-full rounded-full overflow-hidden bg-zinc-100 flex">
@@ -2076,7 +2172,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       )}
                     </div>
 
-                    {/* Circular references — high-priority callout */}
+                    {/* Circular references - high-priority callout */}
                     {(s.circularReferences ?? 0) > 0 && (
                       <div className="px-6 py-4 border-t border-zinc-100 bg-red-50/50">
                         <div className="flex items-start gap-3">
@@ -2089,31 +2185,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               One or more transactions reference funding that loops back to an earlier point in the chain.
                               This can indicate round-tripping. Open the full lineage to review.
                             </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Ambiguous account classification — medium-priority */}
-                    {((s.ambiguousAccounts ?? 0) > 0 || (fundsLineageData.ambiguous_accounts?.length ?? 0) > 0) && (
-                      <div className="px-6 py-4 border-t border-zinc-100 bg-amber-50/50">
-                        <div className="flex items-start gap-3">
-                          <span className="mt-1 h-2 w-2 rounded-full bg-amber-500 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-amber-900">
-                              Account type could not be confidently identified
-                            </div>
-                            <p className="text-xs text-amber-800 mt-0.5">
-                              The classifier wasn't sure whether the following account(s) were savings or current —
-                              this can break matching between accounts. Rename / re-upload with a clearer filename.
-                            </p>
-                            <ul className="mt-2 space-y-1 text-xs text-amber-900">
-                              {(fundsLineageData.ambiguous_accounts || []).slice(0, 3).map((acc, idx) => (
-                                <li key={idx} className="font-mono">
-                                  {acc.account_id} — guessed as <span className="font-semibold">{acc.classified_as}</span> ({acc.confidence} confidence)
-                                </li>
-                              ))}
-                            </ul>
                           </div>
                         </div>
                       </div>
@@ -2135,7 +2206,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     CIRCULAR
                                   </span>
                                 )}
-                                {item.description || item.message || '—'}
+                                {item.description || item.message || '-'}
                               </span>
                               <span className="text-amber-700 tabular-nums font-medium shrink-0">{fmt(item.amount)}</span>
                             </li>
@@ -2146,7 +2217,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             to={`/matters/${matterId}?tab=funds-lineage`}
                             className="mt-2 inline-block text-xs text-zinc-700 hover:text-zinc-900 underline-offset-2 hover:underline"
                           >
-                            + {unresolvedCount - 3} more — open full lineage
+                            + {unresolvedCount - 3} more - open full lineage
                           </Link>
                         )}
                       </div>
@@ -2306,7 +2377,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         )}
                       </div>
 
-                      {/* Issues list — plain-English bullet points, no
+                      {/* Issues list - plain-English bullet points, no
                           coloured boxes (matches the Evidence Checklist). */}
                       {actionableFlags.length > 0 && !isVerified && (
                         <div className="border-t border-zinc-200 mx-4 pt-3 pb-4">

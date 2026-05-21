@@ -37,10 +37,10 @@ export function ComplianceStatusChip({ status }: { status: string }) {
 }
 
 function fmtDate(s: string | null): string {
-  if (!s) return '—';
+  if (!s) return '-';
   const d = new Date(s);
   return isNaN(d.getTime())
-    ? '—'
+    ? '-'
     : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 

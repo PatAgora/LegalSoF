@@ -1,7 +1,7 @@
 // The single matter-status badge, used everywhere a matter status is
 // shown (Matters list, Dashboard, matter detail, Compliance views) so
 // the status reads identically across the whole app. The status value
-// is auto-derived on the backend — see derive_matter_status().
+// is auto-derived on the backend - see derive_matter_status().
 
 export const MATTER_STATUSES = [
   'Draft',

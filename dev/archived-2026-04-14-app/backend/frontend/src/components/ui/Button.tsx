@@ -1,10 +1,10 @@
 // CDD-style button. Variants:
-//   primary   — solid black (zinc-900) on white, used for the main
+//   primary   - solid black (zinc-900) on white, used for the main
 //               action of a screen.
-//   secondary — white with zinc border, used for cancel / dismiss /
+//   secondary - white with zinc border, used for cancel / dismiss /
 //               secondary actions sitting next to a primary.
-//   danger    — solid red, used for destructive actions only.
-//   ghost     — transparent, hover zinc-50. Used for icon-only or
+//   danger    - solid red, used for destructive actions only.
+//   ghost     - transparent, hover zinc-50. Used for icon-only or
 //               inline-link-style buttons.
 //
 // Sizes: sm | md (default) | lg.

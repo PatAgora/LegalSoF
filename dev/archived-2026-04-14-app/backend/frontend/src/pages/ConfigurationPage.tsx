@@ -9,7 +9,7 @@ interface ConfigItem {
 }
 type ConfigMap = Record<string, ConfigItem>;
 
-// Sections — each carries a key-prefix and (optional) explicit ordering
+// Sections - each carries a key-prefix and (optional) explicit ordering
 // of fields. Anything not in the ordering list falls to the end in
 // natural sort order so newly-added settings appear automatically.
 interface Section {
@@ -27,10 +27,10 @@ const SECTIONS: Section[] = [
     id: 'sof',
     title: 'Source of Funds Analysis',
     prefix: 'sof_',
-    // No master on/off switch — Source of Funds Analysis is the core
+    // No master on/off switch - Source of Funds Analysis is the core
     // of the platform and is always on.
     blurb:
-      'Tolerances applied to each Source of Funds claim — how close the document evidence has to be to the declared amount, the date, and the auto-pass confidence threshold.',
+      'Tolerances applied to each Source of Funds claim - how close the document evidence has to be to the declared amount, the date, and the auto-pass confidence threshold.',
   },
   {
     id: 'dv',
@@ -67,7 +67,7 @@ const SECTIONS: Section[] = [
       'unusual_narrative_keywords',
     ],
     blurb:
-      'Rules and thresholds applied by the transaction monitoring engine — high-risk countries, cash, outliers, velocity, narrative keywords, structuring patterns. Toggles control which rules fire; numeric thresholds tune their sensitivity.',
+      'Rules and thresholds applied by the transaction monitoring engine - high-risk countries, cash, outliers, velocity, narrative keywords, structuring patterns. Toggles control which rules fire; numeric thresholds tune their sensitivity.',
   },
   {
     id: 'fl',
@@ -75,7 +75,7 @@ const SECTIONS: Section[] = [
     prefix: 'fl_',
     enabledKey: 'fl_enabled',
     blurb:
-      'Controls for the funds lineage tracer — how strict the amount match must be when linking transfers, how far back to look, and what proportion of the credit must be traced before a savings claim auto-passes.',
+      'Controls for the funds lineage tracer - how strict the amount match must be when linking transfers, how far back to look, and what proportion of the credit must be traced before a savings claim auto-passes.',
   },
 ];
 
@@ -161,7 +161,7 @@ export default function ConfigurationPage() {
   const onRestoreDefaults = async () => {
     if (!confirm(
       'Backfill missing settings from the catalogue defaults? '
-      + 'Existing values are not changed — only missing rows are inserted.',
+      + 'Existing values are not changed - only missing rows are inserted.',
     )) return;
     setReseeding(true);
     try {
@@ -266,7 +266,7 @@ export default function ConfigurationPage() {
           <p className="mt-2 text-sm text-zinc-600 max-w-2xl">
             Tune the platform's risk appetite. Settings are organised by the
             section of the SoF Assessment they affect. Changes take effect
-            on the next assessment run — historical results stay as they were
+            on the next assessment run - historical results stay as they were
             when the matter was scored.
           </p>
         </div>
@@ -310,7 +310,7 @@ export default function ConfigurationPage() {
       {SECTIONS.map((section) => {
         const allKeys = keysBySection[section.id] || [];
         // The master switch is shown as the section toggle, NOT as a
-        // row in the table — so we filter it out before rendering rows.
+        // row in the table - so we filter it out before rendering rows.
         const enabledKey = section.enabledKey;
         const enabledItem = enabledKey ? config[enabledKey] : undefined;
         const enabledDraft = enabledKey ? draft[enabledKey] : undefined;
@@ -365,7 +365,7 @@ export default function ConfigurationPage() {
         );
 
         if (allKeys.length === 0) {
-          // Section has no rows yet — usually means the seed didn't run.
+          // Section has no rows yet - usually means the seed didn't run.
           // Show the section header anyway so the user can see it exists
           // and trigger a re-seed from the page header button.
           return (
@@ -537,7 +537,7 @@ export default function ConfigurationPage() {
           <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
             <h2 className="text-base font-bold text-zinc-900">Other settings</h2>
             <p className="mt-1 text-xs text-zinc-600">
-              Settings not yet grouped into a section. Edit with care — these are usually read by a service directly.
+              Settings not yet grouped into a section. Edit with care - these are usually read by a service directly.
             </p>
           </div>
           <div className="divide-y divide-zinc-100">

@@ -96,7 +96,7 @@ export default function MatterDetailPage() {
 
   return (
     <div>
-      {/* Header — serif title above hairline rule */}
+      {/* Header - serif title above hairline rule */}
       <div className="mb-8 border-b border-zinc-200 pb-6">
         <div className="flex justify-between items-end">
           <div>
@@ -105,7 +105,7 @@ export default function MatterDetailPage() {
               <MatterStatusBadge status={matter.status} />
             </div>
             <p className="mt-2 text-sm text-zinc-500">
-              {matter.client_name} — {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
+              {matter.client_name} - {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
             </p>
           </div>
           <div className="flex space-x-3">
@@ -152,12 +152,12 @@ export default function MatterDetailPage() {
         </div>
       </div>
 
-      {/* Compliance review panel — Compliance route, plus admins anywhere. */}
+      {/* Compliance review panel - Compliance route, plus admins anywhere. */}
       {showCompliancePanel && (
         <ComplianceReviewPanel matter={matter} onReviewed={() => refreshMatter()} />
       )}
 
-      {/* Tab Content — sidebar drives `?tab=`; no in-page tab bar. */}
+      {/* Tab Content - sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
         {activeTab === 'sof-assessment' && <SoFAssessment matterId={matter.id} />}
         {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
@@ -746,7 +746,7 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
 
   const returnToFeeEarner = async () => {
     const rationale = window.prompt(
-      'Return this matter to the fee earner. Give the rationale for the return (required) — '
+      'Return this matter to the fee earner. Give the rationale for the return (required) - '
       + 'the fee earner sees this so they know what compliance found.',
       '',
     )
@@ -776,7 +776,7 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
 
   const allReviewed = referrals.length > 0 && referrals.every((r) => r.reviewed)
   // A matter can be returned once every per-claim referral has been
-  // reviewed — or when there are none (it was sent to compliance as a
+  // reviewed - or when there are none (it was sent to compliance as a
   // whole rather than claim-by-claim).
   const canReturn = referrals.length === 0 || allReviewed
   const tone =
@@ -822,15 +822,15 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
         </div>
       </div>
 
-      {/* Compliance officer surface — per-referral review + return. */}
+      {/* Compliance officer surface - per-referral review + return. */}
       {isAdmin && status === 'in_review' && (
         <div className="mt-4 border-t border-amber-200 pt-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700 mb-2">
-            Referred claims — review each, then return the matter
+            Referred claims - review each, then return the matter
           </div>
           {referrals.length === 0 ? (
             <div className="text-xs text-amber-700">
-              This matter was sent to compliance as a whole — there are no
+              This matter was sent to compliance as a whole - there are no
               individual claim referrals to review. Add a rationale and return
               it to the fee earner below.
             </div>

@@ -19,7 +19,7 @@ export const FLAG_TRANSLATIONS: Record<string, { headline: string; explanation: 
   },
   TEXT_INPUT_FIELDS: {
     headline: 'Editable form fields detected',
-    explanation: 'This document contains fillable text fields. Genuine bank statements are never editable — this strongly suggests the document was created from a blank template.',
+    explanation: 'This document contains fillable text fields. Genuine bank statements are never editable - this strongly suggests the document was created from a blank template.',
   },
   FAKE_REDACTION: {
     headline: 'Content hidden behind black boxes',
@@ -256,7 +256,7 @@ export const FLAG_TRANSLATIONS: Record<string, { headline: string; explanation: 
   },
   IMAGE_QUANT_TABLE_MIXED: {
     headline: 'Embedded images use different compression profiles',
-    explanation: 'The JPEG quantisation tables across the embedded images are not all identical. Genuine bank statements are exported once with a single profile — mixed profiles are a strong indicator of image splicing.',
+    explanation: 'The JPEG quantisation tables across the embedded images are not all identical. Genuine bank statements are exported once with a single profile - mixed profiles are a strong indicator of image splicing.',
   },
   IMAGE_PHASH_RECORDED: {
     headline: 'Image fingerprints recorded',
@@ -300,7 +300,7 @@ export const FLAG_TRANSLATIONS: Record<string, { headline: string; explanation: 
   },
   SIGNATURE_ABSENT: {
     headline: 'No digital signature',
-    explanation: 'The document has no digital signature. This is not by itself suspicious — many genuine documents are unsigned — but it provides no positive assurance.',
+    explanation: 'The document has no digital signature. This is not by itself suspicious - many genuine documents are unsigned - but it provides no positive assurance.',
   },
   SIGNATURE_CHECK_ERROR: {
     headline: 'Signature validation ran into an error',

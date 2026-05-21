@@ -102,7 +102,7 @@ export default function FileUploader({
     setState({ file, status: 'uploading', progress: 0, response: null, error: null })
 
     // Build the request. We use XHR rather than fetch so we can show
-    // real upload progress — fetch doesn't expose progress events.
+    // real upload progress - fetch doesn't expose progress events.
     const xhr = new XMLHttpRequest()
     xhr.open('POST', uploadUrl)
     const token = localStorage.getItem('access_token')
@@ -115,7 +115,7 @@ export default function FileUploader({
     })
 
     xhr.addEventListener('load', () => {
-      // 401 — token expired; fall back to authFetch so it can refresh
+      // 401 - token expired; fall back to authFetch so it can refresh
       // / kick to login. Re-run as a fetch-based request.
       if (xhr.status === 401) {
         authFetch(uploadUrl).catch(() => {})
@@ -164,7 +164,7 @@ export default function FileUploader({
 
   return (
     <div>
-      {/* Dropzone — hidden when a file is being processed or shown */}
+      {/* Dropzone - hidden when a file is being processed or shown */}
       {!state && (
         <label
           htmlFor={`file-upload-${category}`}
@@ -196,7 +196,7 @@ export default function FileUploader({
         </label>
       )}
 
-      {/* File row — replaces the dropzone once a file is staged */}
+      {/* File row - replaces the dropzone once a file is staged */}
       {state && (
         <div className="rounded-md border border-zinc-200 bg-white">
           <div className="px-4 py-3 flex items-center gap-3">

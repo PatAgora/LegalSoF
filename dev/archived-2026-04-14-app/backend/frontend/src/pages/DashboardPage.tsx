@@ -5,7 +5,7 @@ import { Card, Spinner, Alert } from '../components/ui'
 import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
 
 // ---------------------------------------------------------------------------
-// Dashboard — live rollup of the case load. Single round-trip to
+// Dashboard - live rollup of the case load. Single round-trip to
 // /api/v1/analytics/dashboard-summary.
 // ---------------------------------------------------------------------------
 
@@ -28,7 +28,7 @@ interface DashboardSummary {
   recent_matters: RecentMatter[]
 }
 
-// Shade for each status segment in the stacked bar — matches the dot
+// Shade for each status segment in the stacked bar - matches the dot
 // colours in MatterStatusBadge so the bar reads the same as the badges.
 const STATUS_BAR_COLOUR: Record<string, string> = {
   'Draft':                    'bg-zinc-300',
@@ -121,7 +121,7 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      {/* Documents by verdict — small inline strip */}
+      {/* Documents by verdict - small inline strip */}
       <section>
         <SectionHeader
           title="Document verdicts"
@@ -181,13 +181,13 @@ export default function DashboardPage() {
                         {m.reference_number || `#${m.id}`}
                       </Link>
                     </td>
-                    <td className="px-6 py-3 text-zinc-700">{m.client_name || '—'}</td>
+                    <td className="px-6 py-3 text-zinc-700">{m.client_name || '-'}</td>
                     <td className="px-6 py-3">
                       <MatterStatusBadge status={m.status} />
                     </td>
-                    <td className="px-6 py-3 text-zinc-700">{m.risk_rating || '—'}</td>
+                    <td className="px-6 py-3 text-zinc-700">{m.risk_rating || '-'}</td>
                     <td className="px-6 py-3 text-zinc-500 tabular-nums">
-                      {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                      {m.created_at ? new Date(m.created_at).toLocaleDateString() : '-'}
                     </td>
                   </tr>
                 ))}

@@ -98,7 +98,7 @@ export default function DocumentVerificationPage({ matterId }: Props) {
       case 'Verified':
         return { label: 'VERIFIED', bgClass: 'bg-green-100', textClass: 'text-green-700', borderClass: 'border-green-200', cardBg: 'bg-white' };
       case 'Suspicious':
-        return { label: 'SUSPICIOUS — REVIEW', bgClass: 'bg-amber-100', textClass: 'text-amber-700', borderClass: 'border-amber-200', cardBg: 'bg-white' };
+        return { label: 'SUSPICIOUS - REVIEW', bgClass: 'bg-amber-100', textClass: 'text-amber-700', borderClass: 'border-amber-200', cardBg: 'bg-white' };
       case 'LikelyTampered':
         return { label: 'LIKELY TAMPERED', bgClass: 'bg-red-100', textClass: 'text-red-700', borderClass: 'border-red-200', cardBg: 'bg-white' };
       default:
@@ -195,7 +195,7 @@ export default function DocumentVerificationPage({ matterId }: Props) {
                 )}
               </div>
 
-              {/* Verdict chip — replaced by an Accepted chip once a
+              {/* Verdict chip - replaced by an Accepted chip once a
                   reviewer has signed the document off. */}
               <div className="flex justify-center">
                 {v.admin_override ? (

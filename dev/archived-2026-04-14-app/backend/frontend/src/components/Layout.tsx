@@ -14,7 +14,7 @@ interface NotificationItem {
   created_at: string | null
 }
 
-// Sidebar links table — primary navigation lives here.
+// Sidebar links table - primary navigation lives here.
 const NAV_LINKS: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/matters', label: 'Matters' },
@@ -32,7 +32,7 @@ const MATTER_TABS: { id: string; label: string }[] = [
   { id: 'audit-trail',    label: 'Audit Trail' },
 ]
 
-// Optional-module tabs — hidden from the sidebar when their module is
+// Optional-module tabs - hidden from the sidebar when their module is
 // switched OFF on the Configuration page. SoF Assessment and Audit Trail
 // are core and always shown.
 const TAB_MODULE_KEY: Record<string, string> = {
@@ -48,7 +48,7 @@ function SidebarLink({ href, label, currentPath, onClick }: {
   onClick?: () => void;
 }) {
   const isActive = href === '/' ? currentPath === '/' : currentPath === href || currentPath.startsWith(href + '/')
-  // Slightly thinner / smaller type than the SaaS default — reads more
+  // Slightly thinner / smaller type than the SaaS default - reads more
   // premium, more legal-journal.
   const baseCls = 'pl-6 pr-4 py-2 text-[13px] transition-colors'
   const stateCls = isActive
@@ -131,7 +131,7 @@ export default function Layout() {
         }
         if (!cancelled) setDisabledTabs(off)
       } catch {
-        /* config is non-critical for nav — leave all tabs visible */
+        /* config is non-critical for nav - leave all tabs visible */
       }
     })()
     return () => { cancelled = true }
@@ -217,7 +217,7 @@ export default function Layout() {
 
   const SidebarBody = (
     <>
-      {/* Sidebar header — wordmark in serif, like a masthead. Hidden
+      {/* Sidebar header - wordmark in serif, like a masthead. Hidden
           when we're inside a matter so the matter reference becomes
           the title instead. */}
       {!currentMatter && (
@@ -230,7 +230,7 @@ export default function Layout() {
 
       {currentMatter ? (
         <>
-          {/* Matter context header — reference + client */}
+          {/* Matter context header - reference + client */}
           <div className="px-6 pt-5 pb-4 border-b border-zinc-200">
             <Link
               to="/matters"
@@ -271,7 +271,7 @@ export default function Layout() {
         </>
       ) : (
         <>
-          {/* Workspace section — primary app nav */}
+          {/* Workspace section - primary app nav */}
           <div className="px-6 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
             Workspace
           </div>
@@ -287,7 +287,7 @@ export default function Layout() {
             ))}
           </div>
 
-          {/* Compliance section — admin (compliance officer) only */}
+          {/* Compliance section - admin (compliance officer) only */}
           {String(user?.role || '').toLowerCase() === 'admin' && (
             <>
               <div className="px-6 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
@@ -302,7 +302,7 @@ export default function Layout() {
         </>
       )}
 
-      {/* Footer — user + logout, sticks to bottom */}
+      {/* Footer - user + logout, sticks to bottom */}
       {user && (
         <div className="mt-auto border-t border-zinc-200 px-6 py-4 text-[11px] text-zinc-500">
           <div className="font-medium text-zinc-700 truncate text-[12px]">{user.full_name || user.email}</div>
@@ -319,7 +319,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Desktop sidebar — persistent on md+ */}
+      {/* Desktop sidebar - persistent on md+ */}
       <aside className="hidden md:flex md:flex-col md:w-64 md:fixed md:inset-y-0 md:left-0 bg-white border-r border-zinc-200 overflow-y-auto">
         {SidebarBody}
       </aside>
@@ -339,9 +339,9 @@ export default function Layout() {
         {SidebarBody}
       </aside>
 
-      {/* Content area — offset by sidebar width on md+ */}
+      {/* Content area - offset by sidebar width on md+ */}
       <div className="flex-1 md:ml-64 flex flex-col min-w-0">
-        {/* Slim top bar — hamburger on mobile + notification bell on the right */}
+        {/* Slim top bar - hamburger on mobile + notification bell on the right */}
         <header className="bg-white border-b border-zinc-200 h-14 flex items-center justify-between px-4 sm:px-6 lg:px-8">
           <button
             onClick={() => setSidebarOpen(true)}

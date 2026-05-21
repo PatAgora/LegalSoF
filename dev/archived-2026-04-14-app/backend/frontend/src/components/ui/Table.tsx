@@ -1,6 +1,6 @@
 // CDD-style table. Use the bare wrappers <Table>, <Thead>, <Tbody>,
 // <Tr>, <Th>, <Td>. They apply the consistent zinc styling without
-// trying to be a fully-featured datatable — call sites still own row
+// trying to be a fully-featured datatable - call sites still own row
 // content and sorting.
 //
 // Header row: bg-zinc-50/80, uppercase 11 px tracking-wider zinc-400.

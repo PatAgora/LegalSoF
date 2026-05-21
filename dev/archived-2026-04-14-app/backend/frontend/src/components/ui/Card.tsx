@@ -16,7 +16,7 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   // Optional left-accent stripe for status emphasis. Kept available for
   // call sites that want it (matches CDD's accent border) but you can
-  // ignore it — defaults to no accent.
+  // ignore it - defaults to no accent.
   accent?: 'none' | 'zinc' | 'red' | 'amber' | 'green' | 'blue';
 }
 
