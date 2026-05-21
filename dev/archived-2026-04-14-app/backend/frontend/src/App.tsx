@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage'
 import ConfigurationPage from './pages/ConfigurationPage'
 import ComplianceDashboardPage from './pages/ComplianceDashboardPage'
 import ComplianceMattersPage from './pages/ComplianceMattersPage'
+import RCADashboardPage from './pages/RCADashboardPage'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -28,6 +29,7 @@ function App() {
           <Route path="configuration" element={<ConfigurationPage />} />
           <Route path="compliance" element={<ComplianceDashboardPage />} />
           <Route path="compliance/matters" element={<ComplianceMattersPage />} />
+          <Route path="rca" element={<RCADashboardPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

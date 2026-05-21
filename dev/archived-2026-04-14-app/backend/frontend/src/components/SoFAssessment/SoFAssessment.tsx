@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import { translateFlag } from '../DocumentVerification/flagTranslations';
-import { FileUploader, StatusChip } from '../ui';
+import { FileUploader } from '../ui';
 import { useAuthStore } from '../../stores/authStore';
 
 // Helper to format dates as dd/mm/yyyy
@@ -97,6 +97,9 @@ interface AssessmentResult {
   red_flags: any[];
   // Per-claim reviewer / compliance actions, keyed by claim index.
   claim_actions?: Record<string, any>;
+  // Reviewer / compliance actions for non-claim sections (e.g. the
+  // Transaction Review section), keyed by a stable item key.
+  item_actions?: Record<string, any>;
   // The matter's compliance review status (none | in_review | cleared | returned).
   matter_compliance_status?: string;
   // Module master switches from the Configuration page. A results tile
@@ -737,6 +740,115 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     }
   };
 
+  // ── Review-item actions (non-claim sections, e.g. Transaction Review) ──
+  const applyItemActions = (itemActions: any) => {
+    setResult((prev) => (prev ? ({ ...prev, item_actions: itemActions } as any) : prev));
+  };
+
+  const markItemSufficient = async (itemKey: string) => {
+    const rationale = window.prompt(
+      'Mark this section as having sufficient evidence. Record your conclusion (required) - '
+      + 'what you reviewed and why it is sufficient.',
+      '',
+    );
+    if (rationale === null) return;
+    if (rationale.trim().length < 10) {
+      alert('A conclusion of at least 10 characters is required.');
+      return;
+    }
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/sufficient-evidence`,
+        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not update: ${err.detail || r.statusText}`);
+        return;
+      }
+      applyItemActions((await r.json()).item_actions);
+    } catch (e: any) {
+      alert(`Could not update: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  const sendItemToCompliance = async (itemKey: string) => {
+    const reason = window.prompt(
+      'Send this section to compliance. Give the reason for the referral (required) - '
+      + 'the compliance team sees this so they know why it has come to them.',
+      '',
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 10) {
+      alert('A reason of at least 10 characters is required.');
+      return;
+    }
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/send-to-compliance`,
+        { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not send: ${err.detail || r.statusText}`);
+        return;
+      }
+      applyItemActions((await r.json()).item_actions);
+    } catch (e: any) {
+      alert(`Could not send: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  const cancelItemCompliance = async (itemKey: string) => {
+    const rationale = window.prompt(
+      'This section no longer needs compliance review. Give a rationale (required) - it is recorded in the audit trail.',
+      '',
+    );
+    if (rationale === null) return;
+    if (rationale.trim().length < 10) {
+      alert('A rationale of at least 10 characters is required.');
+      return;
+    }
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/cancel-compliance`,
+        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not cancel: ${err.detail || r.statusText}`);
+        return;
+      }
+      applyItemActions((await r.json()).item_actions);
+    } catch (e: any) {
+      alert(`Could not cancel: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  // Mark a single transaction-review alert satisfied, with the rationale
+  // typed into that alert's box.
+  const markAlertSatisfied = async (itemKey: string, alertIndex: number) => {
+    const rationale = (alertRationales[alertIndex] || '').trim();
+    if (rationale.length < 10) {
+      alert('Enter a rationale of at least 10 characters before marking the alert satisfied.');
+      return;
+    }
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/alerts/${alertIndex}/satisfied`,
+        { method: 'POST', body: JSON.stringify({ rationale }) },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not update: ${err.detail || r.statusText}`);
+        return;
+      }
+      applyItemActions((await r.json()).item_actions);
+    } catch (e: any) {
+      alert(`Could not update: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
 
   // Remove one uploaded file from this matter. Cleans up storage,
   // DocumentVerification rows, and the file on disk. Triggers a
@@ -910,6 +1022,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </summary>
+
+        {/* Funds-sufficiency warning - the declared sources do not add
+            up to the transaction value (SRA poor practice). */}
+        {result.funds_shortfall && (
+          <div className="bg-red-50 border-b border-red-200 px-6 py-3">
+            <div className="text-sm font-semibold text-red-800">Declared funds do not cover the transaction</div>
+            <p className="mt-1 text-xs text-red-700">
+              The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but the
+              transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a shortfall
+              of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for the difference, or
+              establish and record how the balance is funded, before proceeding.
+            </p>
+          </div>
+        )}
 
         {/* Explicit empty state - a zero-claim result must be loud, not
             an invisible missing tile. */}
@@ -1565,20 +1691,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       {/* Results Step */}
       {activeStep === 'results' && result && (
         <div className="space-y-6">
-          {/* Funds-sufficiency flag - SRA poor practice is evidence
-              showing less money than the transaction needs. */}
-          {result.funds_shortfall && (
-            <div className="bg-red-50 border border-red-200 rounded-md px-5 py-4">
-              <div className="text-sm font-semibold text-red-800">Declared funds do not cover the transaction</div>
-              <p className="mt-1 text-xs text-red-700">
-                The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but the
-                transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a shortfall
-                of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for the difference, or
-                establish and record how the balance is funded, before proceeding.
-              </p>
-            </div>
-          )}
-
           {/* Funding-change and plausibility checks (ongoing monitoring). */}
           {result.monitoring_flags && result.monitoring_flags.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-md px-5 py-4">
@@ -1640,67 +1752,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 >
                   Confirm Source of Funds Adequate
                 </button>
-              </div>
-            );
-          })()}
-
-          {/* Verdict summary card - the top-of-page "what's the answer" panel.
-              Replaces the previous emoji-decorated bold-text header. */}
-          {(() => {
-            const status = (result.outcome.status || '').toLowerCase();
-            const verdictMap: Record<string, { label: string; severity: 'critical' | 'high' | 'medium' | 'info'; headline: string }> = {
-              sufficient: { label: 'PASS',           severity: 'info',    headline: 'Source of funds is sufficiently evidenced.' },
-              borderline: { label: 'REVIEW REQUIRED',severity: 'high',    headline: 'Manual review required before approval.' },
-              insufficient:{label: 'FAIL',           severity: 'critical',headline: 'Source of funds is not adequately evidenced.' },
-            };
-            const v = verdictMap[status] || { label: status.toUpperCase() || 'UNKNOWN', severity: 'medium' as const, headline: 'Assessment complete.' };
-            // Count from result.claims - the same array the Claims
-            // table renders - so the card and the table can never
-            // disagree on how many claims there are.
-            const total = (result.claims?.length || result.evidence_matches?.length) || 0;
-            // A claim "passed" only if EITHER:
-            //   - an analyst has manually accepted any differences, OR
-            //   - the document was verified AND the confidence is high
-            //     (>= 0.999, the existing "no manual review needed"
-            //     threshold used elsewhere in this file).
-            //
-            // Anything else - failed, no document, low confidence, awaiting
-            // review - counts as needing review. e.verified alone is not
-            // sufficient because the pipeline sometimes flags it true on
-            // claims that still failed downstream document checks.
-            const passed = result.evidence_matches?.filter((e: any) => {
-              if (e.document_verification?.manual_review_status === 'accepted') return true;
-              const confidence = e.document_verification?.confidence ?? 0;
-              return e.document_verified === true && confidence >= 0.999;
-            }).length || 0;
-            const needsReview = Math.max(0, total - passed);
-            return (
-              <div className="bg-white border border-zinc-200 rounded-md">
-                <div className="px-6 py-5 flex items-start gap-6 border-b border-zinc-100">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-serif text-3xl font-normal text-zinc-900 tracking-tight">
-                      {v.label}
-                    </div>
-                    <p className="mt-2 text-sm text-zinc-600">{v.headline}</p>
-                  </div>
-                  <StatusChip severity={v.severity} label={v.label} />
-                </div>
-                <div className="grid grid-cols-3 divide-x divide-zinc-100">
-                  <div className="px-6 py-4">
-                    <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{total}</div>
-                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims made</div>
-                  </div>
-                  <div className="px-6 py-4">
-                    <div className={`font-serif text-2xl font-normal tabular-nums ${needsReview > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{needsReview}</div>
-                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Claims requiring review</div>
-                  </div>
-                  <div className="px-6 py-4">
-                    <div className={`font-serif text-2xl font-normal tabular-nums ${(docVerificationSummary?.likely_tampered_count ?? 0) > 0 ? 'text-red-700' : 'text-zinc-900'}`}>
-                      {docVerificationSummary?.total_documents ?? 0}
-                    </div>
-                    <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Documents reviewed</div>
-                  </div>
-                </div>
               </div>
             );
           })()}
@@ -1835,6 +1886,83 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             }).filter((r: any) => r.docs.length > 0 || r.gaps.length > 0);
 
             if (rows.length === 0) return null;
+
+            // Section-level compliance controls (conversation thread +
+            // Send to Compliance + Sufficient Evidence Provided), shared
+            // by the Transaction Review and Funds Lineage sections.
+            const renderItemControls = (itemKey: string) => {
+              const ia = (result.item_actions || {})[itemKey] || {};
+              const comp = ia.compliance || {};
+              const inReview = comp.state === 'in_review';
+              const sufficient = !!ia.sufficient;
+              const thread: any[] = comp.thread || [];
+              const fmtTs = (s: string) => {
+                const d = new Date(s);
+                return isNaN(d.getTime())
+                  ? ''
+                  : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              };
+              return (
+                <>
+                  {sufficient && ia.sufficient.rationale && (
+                    <div className="mt-3">
+                      <div className="text-[11px] font-semibold text-green-700 mb-1">{ia.sufficient.by || 'Reviewer'}</div>
+                      <p className="text-xs text-zinc-700 leading-snug italic">"{ia.sufficient.rationale}"</p>
+                    </div>
+                  )}
+                  {thread.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-zinc-100">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
+                        Compliance conversation
+                      </div>
+                      <ul className="space-y-2">
+                        {thread.map((m: any, ti: number) => {
+                          const isCompliance = m.actor === 'compliance';
+                          const who = isCompliance ? 'Compliance' : 'Fee earner';
+                          const verb = m.action === 'returned'
+                            ? 'returned to fee earner'
+                            : m.action === 'cancelled' ? 'cancelled referral' : 'sent to compliance';
+                          return (
+                            <li key={ti} className="text-xs leading-snug">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                isCompliance ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
+                              }`}>{who}</span>
+                              <span className="ml-1.5 text-zinc-400">
+                                {verb} · {m.by || 'unknown'}{m.at ? ` · ${fmtTs(m.at)}` : ''}
+                              </span>
+                              <div className="mt-0.5 italic text-zinc-700">"{m.message}"</div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="mt-3 pt-3 border-t border-zinc-100 flex items-center justify-end gap-2">
+                    {inReview ? (
+                      <button type="button" onClick={() => cancelItemCompliance(itemKey)} className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors">
+                        Cancel Compliance Referral
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => sendItemToCompliance(itemKey)} className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors">
+                        Send to Compliance
+                      </button>
+                    )}
+                    {sufficient ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-green-50 text-green-700 ring-1 ring-inset ring-green-200">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Sufficient Evidence Provided
+                      </span>
+                    ) : (
+                      <button type="button" onClick={() => markItemSufficient(itemKey)} className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 transition-colors">
+                        Sufficient Evidence Provided
+                      </button>
+                    )}
+                  </div>
+                </>
+              );
+            };
 
             return (
               <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
@@ -2031,22 +2159,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     })}
                   </div>
 
-                  {/* Transaction Review summary - the alerts raised on
-                      the transactions. They are reviewed and signed off
-                      in the Transaction Review tile, not here. */}
+                  {/* Transaction Review section - each alert carries a
+                      rationale box and an Alert Satisfied button; the
+                      section can be sent to compliance as a whole. */}
                   {(() => {
                     if (result.sections_enabled?.transaction_review === false) return null;
                     const trs = result.transaction_review_summary;
                     const alerts: any[] = (trs?.alerts || (trs as any)?.alert_details || []);
                     if (alerts.length === 0) return null;
+                    const alertActions = ((result.item_actions || {})['transaction-review'] || {}).alerts || {};
                     return (
                       <div className="mt-6 pt-4 border-t border-zinc-200">
                         <div className="text-sm font-semibold text-zinc-900">Transaction Review</div>
                         <p className="text-xs text-zinc-500 mt-0.5 mb-3">
-                          Alerts raised against the transactions. Review and sign these off in
-                          the Transaction Review tile, which holds the full detail.
+                          Alerts raised against the transactions. Record a rationale and mark each
+                          alert satisfied; the Transaction Review tile holds the full detail.
                         </p>
-                        <ul className="space-y-2">
+                        <div className="space-y-3">
                           {alerts.map((alert: any, ai: number) => {
                             const severity = String(alert.severity || 'HIGH').toUpperCase();
                             const txn = alert.transaction || alert;
@@ -2054,24 +2183,117 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             const date = txn.date || alert.date || '';
                             const narrative = txn.narrative || alert.counterparty || '';
                             const issue = (alert.reasons && alert.reasons.length > 0) ? alert.reasons[0] : 'AML concern';
+                            const satisfied = alertActions[String(ai)];
                             return (
-                              <li key={ai} className="flex items-start gap-2 text-xs leading-snug">
-                                <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
-                                  severity === 'CRITICAL' ? 'bg-red-500' : severity === 'HIGH' ? 'bg-amber-500' : 'bg-zinc-400'
-                                }`} />
-                                <span className="min-w-0">
-                                  <span className="text-zinc-900 font-medium">{issue}</span>
-                                  <span className={`ml-1.5 text-[10px] font-semibold uppercase ${
-                                    severity === 'CRITICAL' ? 'text-red-600' : severity === 'HIGH' ? 'text-amber-600' : 'text-zinc-400'
-                                  }`}>{severity}</span>
-                                  <div className="text-zinc-500">
-                                    {amount != null && `£${Number(amount).toLocaleString()}`}{date && ` · ${date}`}{narrative && ` · ${narrative}`}
+                              <div key={ai} className="border border-zinc-100 rounded p-3">
+                                <div className="flex items-start gap-2 text-xs leading-snug">
+                                  <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                                    severity === 'CRITICAL' ? 'bg-red-500' : severity === 'HIGH' ? 'bg-amber-500' : 'bg-zinc-400'
+                                  }`} />
+                                  <span className="min-w-0">
+                                    <span className="text-zinc-900 font-medium">{issue}</span>
+                                    <span className={`ml-1.5 text-[10px] font-semibold uppercase ${
+                                      severity === 'CRITICAL' ? 'text-red-600' : severity === 'HIGH' ? 'text-amber-600' : 'text-zinc-400'
+                                    }`}>{severity}</span>
+                                    <div className="text-zinc-500">
+                                      {amount != null && `£${Number(amount).toLocaleString()}`}{date && ` · ${date}`}{narrative && ` · ${narrative}`}
+                                    </div>
+                                  </span>
+                                </div>
+                                {satisfied ? (
+                                  <div className="mt-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wider text-green-600 mb-1">
+                                      Alert satisfied
+                                    </div>
+                                    <p className="text-xs text-zinc-700 italic leading-snug">"{satisfied.rationale}"</p>
+                                    {satisfied.by && <p className="text-[10px] text-zinc-400 mt-0.5">{satisfied.by}</p>}
                                   </div>
-                                </span>
-                              </li>
+                                ) : (
+                                  <div className="mt-2">
+                                    <textarea
+                                      value={alertRationales[ai] || ''}
+                                      onChange={(e) => setAlertRationales({ ...alertRationales, [ai]: e.target.value })}
+                                      placeholder="Rationale - what you reviewed and why this alert is satisfied..."
+                                      rows={2}
+                                      className="w-full px-2 py-1.5 text-xs border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                                    />
+                                    <div className="mt-2 flex justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => markAlertSatisfied('transaction-review', ai)}
+                                        className="px-3 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 transition-colors"
+                                      >
+                                        Alert Satisfied
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             );
                           })}
+                        </div>
+                        {renderItemControls('transaction-review')}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Funds Lineage section - a summary of the Funds
+                      Lineage tile, with the same compliance controls. */}
+                  {(() => {
+                    if (result.sections_enabled?.funds_lineage === false) return null;
+                    if (!fundsLineageData?.exists || !fundsLineageData.summary) return null;
+                    const s = fundsLineageData.summary;
+                    const total = s.totalAmount || 0;
+                    const traced = s.tracedAmount || 0;
+                    const untraced = s.untracedAmount || 0;
+                    const tracedPct = total > 0 ? Math.round((traced / total) * 100) : 0;
+                    const untracedPct = Math.max(0, 100 - tracedPct);
+                    const fmt = (n: any) => `£${Math.round(Number(n) || 0).toLocaleString()}`;
+                    const items: { label: string; value: string }[] = [
+                      { label: 'Total amount', value: fmt(total) },
+                      { label: `Traced (${tracedPct}%)`, value: fmt(traced) },
+                      { label: `Untraced (${untracedPct}%)`, value: fmt(untraced) },
+                      { label: 'Matched transfers', value: String(s.matchedTransfers || 0) },
+                    ];
+                    if ((s.accumulationPeriodDays || 0) > 0) {
+                      items.push({
+                        label: 'Accumulation period',
+                        value: `${s.accumulationPeriodDays} day${s.accumulationPeriodDays !== 1 ? 's' : ''}`,
+                      });
+                    }
+                    return (
+                      <div className="mt-6 pt-4 border-t border-zinc-200">
+                        <div className="text-sm font-semibold text-zinc-900">Funds Lineage</div>
+                        <p className="text-xs text-zinc-500 mt-0.5 mb-3">
+                          A summary of the funds lineage. The Funds Lineage tile holds the full trace.
+                        </p>
+                        <ul className="space-y-1 mb-3">
+                          {items.map((it, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs leading-snug">
+                              <span className="mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
+                              <span className="text-zinc-700">
+                                <span className="font-medium text-zinc-900">{it.value}</span> {it.label}
+                              </span>
+                            </li>
+                          ))}
                         </ul>
+                        {total > 0 && (
+                          <div>
+                            <div className="h-2 w-full rounded-full overflow-hidden bg-zinc-100 flex">
+                              {traced > 0 && <div className="bg-green-500" style={{ width: `${tracedPct}%` }} />}
+                              {untraced > 0 && <div className="bg-amber-500" style={{ width: `${untracedPct}%` }} />}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-500">
+                              <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-sm bg-green-500" />Traced to source
+                              </span>
+                              <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-sm bg-amber-500" />Untraced / requires evidence
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        {renderItemControls('funds-lineage')}
                       </div>
                     );
                   })()}

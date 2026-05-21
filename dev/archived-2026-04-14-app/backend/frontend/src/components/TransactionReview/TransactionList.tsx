@@ -355,10 +355,9 @@ export default function TransactionList({ matterId }: TransactionListProps) {
             <div className="col-span-2">Transaction ID</div>
             <div className="col-span-1">Date</div>
             <div className="col-span-1">Severity</div>
-            <div className="col-span-4">Description</div>
+            <div className="col-span-5">Description</div>
             <div className="col-span-1 text-right">Amount</div>
             <div className="col-span-2">Country</div>
-            <div className="col-span-1 text-center">Actions</div>
           </div>
         </div>
 
@@ -418,7 +417,7 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                   </div>
 
                   {/* Description */}
-                  <div className="col-span-4">
+                  <div className="col-span-5">
                     <div className="text-sm text-zinc-600 break-words">{txn.narrative}</div>
                   </div>
 
@@ -432,18 +431,6 @@ export default function TransactionList({ matterId }: TransactionListProps) {
                   {/* Country */}
                   <div className="col-span-2">
                     <div className="text-sm text-zinc-600">{getCountryName(txn.country_iso2)}</div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="col-span-1 text-center">
-                    {txnAlerts.length > 0 && (
-                      <button 
-                        className="text-zinc-700 hover:text-zinc-900 text-sm font-medium"
-                        onClick={() => {/* Toggle alert details */}}
-                      >
-                        🔍 Review
-                      </button>
-                    )}
                   </div>
                 </div>
 

@@ -296,6 +296,7 @@ export default function Layout() {
               <div className="flex flex-col">
                 <SidebarLink href="/compliance" label="Compliance Dashboard" currentPath={location.pathname} onClick={() => setSidebarOpen(false)} />
                 <SidebarLink href="/compliance/matters" label="Compliance Matters" currentPath={location.pathname} onClick={() => setSidebarOpen(false)} />
+                <SidebarLink href="/rca" label="Root Cause Analysis" currentPath={location.pathname} onClick={() => setSidebarOpen(false)} />
               </div>
             </>
           )}

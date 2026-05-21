@@ -2449,6 +2449,7 @@ async def get_sof_assessment_results(
     # so the frontend can render claim status + the action buttons.
     assessment = dict(storage['assessment_result'])
     assessment['claim_actions'] = storage.get('claim_actions', {})
+    assessment['item_actions'] = storage.get('item_actions', {})
     assessment['matter_compliance_status'] = getattr(matter, 'compliance_status', None) or 'none'
 
     # Section master switches from the Configuration page — the frontend
@@ -3190,11 +3191,238 @@ def _claim_action_entry(storage: dict, claim_index: int) -> dict:
 
 
 def _any_claim_in_review(storage: dict) -> bool:
-    for entry in (storage.get('claim_actions') or {}).values():
-        comp = entry.get('compliance') or {}
-        if comp.get('state') == 'in_review':
-            return True
+    """True if any claim or review-item referral is still with compliance."""
+    for bucket in ('claim_actions', 'item_actions'):
+        for entry in (storage.get(bucket) or {}).values():
+            if (entry.get('compliance') or {}).get('state') == 'in_review':
+                return True
     return False
+
+
+def _item_action_entry(storage: dict, item_key: str) -> dict:
+    """Reviewer / compliance actions for a non-claim review item (such as
+    the Transaction Review section), keyed by a stable string."""
+    return storage.setdefault('item_actions', {}).setdefault(str(item_key), {})
+
+
+_ITEM_LABELS = {'transaction-review': 'Transaction Review'}
+
+
+def _item_label(item_key: str) -> str:
+    return _ITEM_LABELS.get(
+        item_key, str(item_key).replace('-', ' ').replace('_', ' ').title()
+    )
+
+
+@router.post("/matters/{matter_id}/sof-assessment/items/{item_key}/sufficient-evidence")
+async def mark_item_sufficient(
+    matter_id: int,
+    item_key: str,
+    request: Dict[str, Any],
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Mark a non-claim review item (e.g. the Transaction Review section)
+    as having sufficient evidence. A written conclusion is required."""
+    rationale = (request.get('rationale') or '').strip()
+    if len(rationale) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Record your conclusion (at least 10 characters) - what you reviewed and why it is sufficient.",
+        )
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    entry = _item_action_entry(storage, item_key)
+    entry['sufficient'] = {
+        'by': who, 'at': datetime.now(timezone.utc).isoformat(), 'rationale': rationale,
+    }
+    _db_save_storage(db, matter_id, storage)
+    db.add(AuditLog(
+        matter_id=matter_id, user_id=current_user.id, action=AuditLogAction.APPROVED,
+        entity_type="sof_item", entity_id=matter_id,
+        description=(
+            f"{_item_label(item_key)} marked as having sufficient evidence on matter "
+            f"{matter.reference_number} by {who}. Conclusion: {rationale}"
+        ),
+        details={"item_key": item_key, "reviewer": who, "rationale": rationale},
+    ))
+    db.commit()
+    return {"success": True, "item_actions": storage.get('item_actions', {})}
+
+
+@router.post("/matters/{matter_id}/sof-assessment/items/{item_key}/send-to-compliance")
+async def send_item_to_compliance(
+    matter_id: int,
+    item_key: str,
+    request: Dict[str, Any],
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Send a non-claim review item to the compliance team for review."""
+    reason = (request.get('reason') or '').strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="A reason (at least 10 characters) is required so compliance can see why it was referred.",
+        )
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    now = datetime.now(timezone.utc)
+    entry = _item_action_entry(storage, item_key)
+    prior = entry.get('compliance') or {}
+    thread = list(prior.get('thread') or [])
+    thread.append({
+        'actor': 'fee_earner', 'action': 'sent',
+        'message': reason, 'by': who, 'at': now.isoformat(),
+    })
+    entry['compliance'] = {
+        'state': 'in_review', 'sent_by': who, 'sent_at': now.isoformat(),
+        'reason': reason, 'thread': thread,
+    }
+    _db_save_storage(db, matter_id, storage)
+
+    matter.compliance_status = 'in_review'
+    matter.compliance_submitted_at = now
+    matter.compliance_submitted_by = who
+    matter.compliance_reason = reason
+
+    label = _item_label(item_key)
+    db.add(AuditLog(
+        matter_id=matter_id, user_id=current_user.id, action=AuditLogAction.UPDATED,
+        entity_type="sof_item", entity_id=matter_id,
+        description=(
+            f"{label} on matter {matter.reference_number} sent to compliance "
+            f"review by {who}. Reason: {reason}"
+        ),
+        details={"item_key": item_key, "sent_by": who, "reason": reason},
+    ))
+    for admin in db.query(User).filter(User.role == UserRole.ADMIN).all():
+        try:
+            db.add(Notification(
+                user_id=admin.id, matter_id=matter_id, type="compliance_review",
+                title=f"{label} sent for compliance review",
+                message=(
+                    f"{who} sent the {label} on matter {matter.reference_number} "
+                    f"({matter.client_name}) for compliance review. Reason: {reason}"
+                ),
+            ))
+        except Exception:
+            pass
+    db.commit()
+    return {
+        "success": True, "item_actions": storage.get('item_actions', {}),
+        "compliance_status": matter.compliance_status,
+    }
+
+
+@router.post("/matters/{matter_id}/sof-assessment/items/{item_key}/cancel-compliance")
+async def cancel_item_compliance(
+    matter_id: int,
+    item_key: str,
+    request: Dict[str, Any],
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Cancel a non-claim review item's compliance review. A rationale is required."""
+    rationale = (request.get('rationale') or '').strip()
+    if len(rationale) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="A rationale (at least 10 characters) is required to cancel a compliance review.",
+        )
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    now = datetime.now(timezone.utc)
+    entry = _item_action_entry(storage, item_key)
+    comp = entry.setdefault('compliance', {})
+    comp['state'] = 'cancelled'
+    comp['cancelled_by'] = who
+    comp['cancelled_at'] = now.isoformat()
+    comp['cancel_rationale'] = rationale
+    comp.setdefault('thread', []).append({
+        'actor': 'fee_earner', 'action': 'cancelled',
+        'message': rationale, 'by': who, 'at': now.isoformat(),
+    })
+    _db_save_storage(db, matter_id, storage)
+    if not _any_claim_in_review(storage):
+        matter.compliance_status = 'none'
+    db.add(AuditLog(
+        matter_id=matter_id, user_id=current_user.id, action=AuditLogAction.UPDATED,
+        entity_type="sof_item", entity_id=matter_id,
+        description=(
+            f"Compliance review cancelled for {_item_label(item_key)} on matter "
+            f"{matter.reference_number} by {who}. Rationale: {rationale}"
+        ),
+        details={"item_key": item_key, "cancelled_by": who, "rationale": rationale},
+    ))
+    db.commit()
+    return {
+        "success": True, "item_actions": storage.get('item_actions', {}),
+        "compliance_status": matter.compliance_status,
+    }
+
+
+@router.post("/matters/{matter_id}/sof-assessment/items/{item_key}/alerts/{alert_index}/satisfied")
+async def mark_alert_satisfied(
+    matter_id: int,
+    item_key: str,
+    alert_index: int,
+    request: Dict[str, Any],
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Mark a single transaction-review alert as satisfied, recording the
+    reviewer's rationale for clearing it."""
+    rationale = (request.get('rationale') or '').strip()
+    if len(rationale) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="A rationale (at least 10 characters) is required to satisfy an alert.",
+        )
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    entry = _item_action_entry(storage, item_key)
+    alerts = entry.setdefault('alerts', {})
+    alerts[str(alert_index)] = {
+        'satisfied': True, 'by': who,
+        'at': datetime.now(timezone.utc).isoformat(), 'rationale': rationale,
+    }
+    _db_save_storage(db, matter_id, storage)
+    db.add(AuditLog(
+        matter_id=matter_id, user_id=current_user.id, action=AuditLogAction.APPROVED,
+        entity_type="sof_item", entity_id=matter_id,
+        description=(
+            f"{_item_label(item_key)} alert {alert_index + 1} marked satisfied on matter "
+            f"{matter.reference_number} by {who}. Rationale: {rationale}"
+        ),
+        details={"item_key": item_key, "alert_index": alert_index, "reviewer": who, "rationale": rationale},
+    ))
+    db.commit()
+    return {"success": True, "item_actions": storage.get('item_actions', {})}
 
 
 @router.post("/matters/{matter_id}/sof-assessment/claims/{claim_index}/sufficient-evidence")
@@ -3703,6 +3931,21 @@ async def return_to_fee_earner(
     # lets the fee earner re-send the claim afterwards.
     for _, entry in referral_items:
         comp = entry.get('compliance') or {}
+        comp['state'] = 'returned'
+        comp['returned_by'] = who
+        comp['returned_at'] = now.isoformat()
+        comp['return_rationale'] = rationale
+        comp.setdefault('thread', []).append({
+            'actor': 'compliance', 'action': 'returned',
+            'message': rationale, 'by': who, 'at': now.isoformat(),
+        })
+        entry['compliance'] = comp
+    # Non-claim review items (e.g. Transaction Review) referred to
+    # compliance are returned on the same matter-level action.
+    for entry in (storage.get('item_actions') or {}).values():
+        comp = entry.get('compliance') or {}
+        if comp.get('state') != 'in_review':
+            continue
         comp['state'] = 'returned'
         comp['returned_by'] = who
         comp['returned_at'] = now.isoformat()

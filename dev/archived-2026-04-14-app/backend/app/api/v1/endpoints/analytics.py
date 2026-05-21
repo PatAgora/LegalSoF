@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import require_analyst
+from app.api.dependencies.auth import require_analyst, require_admin
 from app.db.session import get_sync_db
 from app.models import Matter, MatterStatus, RiskRating
 from app.models.document_verification import (
@@ -228,3 +228,183 @@ _SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 def _severity_rank(s: str) -> int:
     return _SEVERITY_RANK.get((s or "").lower(), 5)
+
+
+# Plain-English labels for the source-of-funds gap types recorded in
+# each matter's evidence-match differences.
+_GAP_LABELS: Dict[str, str] = {
+    "untraced_funds":   "Funds not traced to a declared source",
+    "funds_discrepancy": "Declared amount not fully evidenced",
+    "statement_gap":    "Missing statement period",
+    "missing":          "Required document field missing",
+}
+
+
+@router.get("/analytics/rca-dashboard", tags=["analytics"])
+def rca_dashboard(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_sync_db),
+) -> Dict[str, Any]:
+    """Root-cause analysis rollup across every matter — the recurring
+    issues, risk concentration, compliance loop and derived training
+    recommendations that support the firm's continuous learning."""
+    from app.models.assessment_storage import AssessmentStorage
+
+    all_matters = db.query(Matter).all()
+    total_matters = len(all_matters)
+
+    storage_rows = [row.data for row in db.query(AssessmentStorage).all() if row.data]
+    matters_assessed = sum(
+        1 for s in storage_rows
+        if (s.get("assessment_result") or {}).get("claims") is not None
+    )
+
+    # --- Recurring document-verification flags --------------------------
+    flag_rows = (
+        db.query(DocumentVerificationFlag.code, DocumentVerificationFlag.severity)
+        .filter(DocumentVerificationFlag.code.notin_(_NOISE_FLAG_CODES))
+        .filter(DocumentVerificationFlag.severity.notin_(["info", "low"]))
+        .all()
+    )
+    flag_counter: Counter = Counter()
+    flag_severity: Dict[str, str] = {}
+    for code, severity in flag_rows:
+        flag_counter[code] += 1
+        prev = flag_severity.get(code)
+        if prev is None or _severity_rank(severity) < _severity_rank(prev):
+            flag_severity[code] = severity
+    top_document_flags = [
+        {"code": c, "label": _label_for(c), "severity": flag_severity.get(c, "medium"), "count": n}
+        for c, n in flag_counter.most_common(8)
+    ]
+
+    # --- SoF gap types, source-type breakdown, referrals (from storage) -
+    gap_counter: Counter = Counter()
+    source_stats: Dict[str, Dict[str, int]] = {}
+    referral_reasons: Counter = Counter()
+    claims_referred = 0
+    for s in storage_rows:
+        ar = s.get("assessment_result") or {}
+        claims = ar.get("claims") or []
+        evidence = ar.get("evidence_matches") or []
+        actions = s.get("claim_actions") or {}
+        for idx, claim in enumerate(claims):
+            st = (str(claim.get("source_type") or "other").lower().strip()) or "other"
+            rec = source_stats.setdefault(st, {"total": 0, "verified": 0})
+            rec["total"] += 1
+            act = actions.get(str(idx)) or {}
+            if act.get("sufficient"):
+                rec["verified"] += 1
+            comp = act.get("compliance") or {}
+            if comp.get("state"):
+                claims_referred += 1
+                reason = (comp.get("reason") or "").strip()
+                if reason:
+                    referral_reasons[reason[:90]] += 1
+        for ev in evidence:
+            dv = (ev or {}).get("document_verification") or {}
+            for d in (dv.get("differences") or []):
+                field = str(d.get("field") or "").lower()
+                if d.get("severity") == "missing":
+                    gap_counter["missing"] += 1
+                elif field in _GAP_LABELS:
+                    gap_counter[field] += 1
+
+    sof_gap_types = [
+        {"key": k, "label": _GAP_LABELS.get(k, k), "count": n}
+        for k, n in gap_counter.most_common()
+    ]
+    source_types = sorted(
+        (
+            {
+                "source_type": st,
+                "label": st.replace("_", " ").title(),
+                "total": v["total"],
+                "verified": v["verified"],
+                "outstanding": v["total"] - v["verified"],
+            }
+            for st, v in source_stats.items()
+        ),
+        key=lambda x: x["total"],
+        reverse=True,
+    )
+
+    # --- Risk and matter-type concentration -----------------------------
+    matters_by_risk: Dict[str, int] = {r.value: 0 for r in RiskRating}
+    matters_by_type: Dict[str, int] = {}
+    for m in all_matters:
+        if m.risk_rating is not None:
+            rkey = m.risk_rating.value if hasattr(m.risk_rating, "value") else str(m.risk_rating)
+            matters_by_risk[rkey] = matters_by_risk.get(rkey, 0) + 1
+        tt = getattr(m, "transaction_type", None)
+        if tt is not None:
+            tkey = tt.value if hasattr(tt, "value") else str(tt)
+            matters_by_type[tkey] = matters_by_type.get(tkey, 0) + 1
+
+    # --- Compliance loop ------------------------------------------------
+    matters_referred = sum(
+        1 for m in all_matters
+        if (getattr(m, "compliance_status", None) or "none") != "none"
+    )
+    matters_returned = sum(
+        1 for m in all_matters
+        if (getattr(m, "compliance_status", None) or "none") == "returned"
+    )
+    top_reasons = [{"reason": r, "count": n} for r, n in referral_reasons.most_common(5)]
+
+    # --- Derived training recommendations -------------------------------
+    recs: List[Dict[str, str]] = []
+    if gap_counter.get("untraced_funds", 0) >= 3:
+        recs.append({
+            "title": "Tracing funds to source",
+            "detail": "Untraced credits recur across matters. Reinforce obtaining the full "
+                      "statement history and following each credit back to its origin.",
+            "basis": f"{gap_counter['untraced_funds']} untraced-funds findings",
+        })
+    if gap_counter.get("statement_gap", 0) >= 3:
+        recs.append({
+            "title": "Requesting complete statement coverage",
+            "detail": "Statement gaps recur. Train staff to request a continuous statement "
+                      "history at the outset of a matter.",
+            "basis": f"{gap_counter['statement_gap']} statement-gap findings",
+        })
+    for st in source_types:
+        if st["total"] >= 3 and st["verified"] / max(1, st["total"]) < 0.5:
+            recs.append({
+                "title": f"Evidencing {st['label'].lower()} claims",
+                "detail": f"{st['label']} claims are frequently left without sufficient "
+                          f"evidence. Review what is requested for this source type.",
+                "basis": f"{st['outstanding']} of {st['total']} {st['label'].lower()} claims outstanding",
+            })
+    crit_flags = sum(f["count"] for f in top_document_flags if f["severity"] == "critical")
+    if crit_flags:
+        recs.append({
+            "title": "Spotting document red flags",
+            "detail": "Critical document-verification flags are recurring. Train fee earners "
+                      "on the tampering indicators the pipeline detects.",
+            "basis": f"{crit_flags} critical document-verification flags",
+        })
+    if claims_referred >= 5:
+        recs.append({
+            "title": "Earlier source-of-funds escalation",
+            "detail": "A high volume of claims reach compliance. Consider whether issues can "
+                      "be resolved earlier in the fee earner's own review.",
+            "basis": f"{claims_referred} claims referred to compliance",
+        })
+
+    return {
+        "total_matters": total_matters,
+        "matters_assessed": matters_assessed,
+        "top_document_flags": top_document_flags,
+        "sof_gap_types": sof_gap_types,
+        "source_types": source_types,
+        "matters_by_risk": matters_by_risk,
+        "matters_by_type": matters_by_type,
+        "compliance": {
+            "matters_referred": matters_referred,
+            "matters_returned": matters_returned,
+            "claims_referred": claims_referred,
+            "top_reasons": top_reasons,
+        },
+        "training_recommendations": recs,
+    }
