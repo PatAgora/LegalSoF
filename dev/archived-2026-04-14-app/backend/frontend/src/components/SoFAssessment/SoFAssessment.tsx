@@ -669,155 +669,56 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
+  // Source of Funds Claims — one row per declared claim, with a
+  // Pass / Information Required status driven by the evidence the
+  // client has provided for that claim.
   const renderSoFSection = (_content: string, result: AssessmentResult) => {
-    // Helper: format a UK date out of any date-ish input.
-    const fmtIssueDate = (raw: any): string => {
-      if (!raw) return '';
-      const s = String(raw);
-      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-        const [y, m, d] = s.slice(0, 10).split('-');
-        return `${d}/${m}/${y}`;
-      }
-      return s;
-    };
-    const fmtMoney = (n: any): string => {
-      const v = Number(n);
-      if (!isFinite(v)) return '';
-      return `£${Math.round(v).toLocaleString()}`;
-    };
-
-    // Helper: translate one structured `differences[]` entry coming
-    // back from the verification pipeline into a single plain-English
-    // bullet a reviewer can read end to end. The pipeline emits a
-    // small set of field codes (amount / date / untraced_funds /
-    // statement_gap / statement_coverage / funds_discrepancy /
-    // funds_lineage_analysis) plus assorted ad-hoc field names; this
-    // function picks the most informative phrasing for each.
-    const prettyDifference = (d: any): string | null => {
-      if (!d || typeof d !== 'object') return null;
-      const field = String(d.field || '').toLowerCase();
-      const expected = d.expected ? String(d.expected).trim() : '';
-      const found    = d.found    ? String(d.found).trim()    : '';
-      const issue    = d.issue    ? String(d.issue).trim()    : '';
-      const desc     = d.description ? String(d.description).trim() : '';
-
-      if (field === 'amount') {
-        if (expected && found) return `Amount mismatch — claim states ${expected}, document shows ${found}.`;
-        return desc || issue || 'Amount on the document does not match the claim.';
-      }
-      if (field === 'date' || field === 'payment_date' || field === 'completion_date') {
-        if (expected && found) return `Date mismatch — claim states ${expected}, document shows ${found}.`;
-        return desc || issue || 'Document date does not match the claimed transaction date.';
-      }
-      if (field === 'counterparty' || field === 'payee' || field === 'payer') {
-        if (expected && found) return `Counterparty mismatch — expected ${expected}, document shows ${found}.`;
-        return desc || issue || 'Counterparty on the document does not match the claim.';
-      }
-      if (field === 'untraced_funds') {
-        const m = issue.match(/£([\d,]+(?:\.\d+)?)\s+on\s+(\S+)/);
-        const amt = m ? `£${m[1]}` : (d.amount ? fmtMoney(d.amount) : '');
-        const dt  = m ? fmtIssueDate(m[2]) : fmtIssueDate(d.date);
-        if (amt && dt) return `Untraced credit of ${amt} on ${dt} — origin cannot be confirmed from uploaded statements.`;
-        return issue || 'A credit on the statement could not be traced to a verified origin.';
-      }
-      if (field === 'statement_gap') {
-        const m = issue.match(/£([\d,]+(?:\.\d+)?)\s+on\s+(\S+)/);
-        const amt = m ? `£${m[1]}` : (d.amount ? fmtMoney(d.amount) : '');
-        const dt  = m ? fmtIssueDate(m[2]) : fmtIssueDate(d.date);
-        const acct = d.gap_account ? ` for account ${d.gap_account}` : '';
-        if (amt && dt) return `Earlier bank statements${acct} are needed to trace ${amt} received on ${dt}.`;
-        return expected || issue || 'Earlier bank statements are needed to trace this transfer.';
-      }
-      if (field === 'statement_coverage') {
-        return found || expected || 'Statement period does not fully cover the claimed accumulation window.';
-      }
-      if (field === 'funds_discrepancy') {
-        if (expected && found) return `Funds discrepancy — expected ${expected}, but found ${found}.`;
-        return desc || issue || 'Funds shown on supporting documents do not reconcile with the claim.';
-      }
-      if (field === 'funds_lineage_analysis') {
-        return desc || issue || 'Funds lineage analysis flagged this claim for review.';
-      }
-      // Generic fallback — prefer description, then issue. Only
-      // fall back to a humanised field name if neither is present,
-      // and never emit a bare single-word like "Amount".
-      if (desc) return desc;
-      if (issue) return issue;
-      if (expected && found) return `Mismatch — expected ${expected}, found ${found}.`;
-      if (field) {
-        const human = field.replace(/_/g, ' ');
-        return `Reviewer attention required on ${human}.`;
-      }
-      return null;
-    };
-
-    // Build a 1–3 line plain-English summary for a single evidence row.
-    // We surface the original issues even after a manual acceptance so a
-    // reviewer reading the page later still sees WHAT was accepted; the
-    // who/when/why disposition lives in the Action column.
-    const summariseEvidence = (evidence: any): string[] => {
-      const out: string[] = [];
-      if (!evidence) return out;
-      const dv = evidence.document_verification || {};
-      const diffs = Array.isArray(dv.differences) ? dv.differences : [];
-      diffs.slice(0, 3).forEach((d: any) => {
-        const line = prettyDifference(d);
-        if (line) out.push(line);
-      });
-      // Funds lineage summary, if any.
-      const lineage = evidence.lineage_summary || (evidence.funds_lineage && evidence.funds_lineage.summary);
-      if (lineage && typeof lineage.tracedAmount === 'number' && typeof lineage.totalAmount === 'number' && lineage.totalAmount > 0) {
-        const pct = Math.round((lineage.tracedAmount / lineage.totalAmount) * 100);
-        if (lineage.untracedAmount > 0) {
-          out.push(`${pct}% of the claimed funds are traced to an origin; ${fmtMoney(lineage.untracedAmount)} still needs supporting evidence.`);
-        } else {
-          out.push(`All claimed funds have been traced to an origin.`);
-        }
-      }
-      if (out.length === 0) {
-        if (dv.issues && dv.issues.length > 0) out.push(String(dv.issues[0]));
-        else out.push('Source documentation required to confirm this claim.');
-      }
-      return out;
-    };
-
-    // Trigger the accept-differences endpoint inline.
-    const acceptClaim = async (claimIndex: number) => {
-      const reason = window.prompt(
-        'Reason for accepting these differences:',
-        'Manual review completed — differences accepted.',
-      );
-      if (reason === null) return; // cancelled
-      try {
-        const r = await authFetch(
-          `${API_BASE_URL}/api/v1/matters/${result.matter_id}/sof-assessment/accept-differences`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              claim_index: claimIndex,
-              accepted_by: currentUser?.full_name || currentUser?.email || 'Reviewer',
-              reason: reason || 'Manual review completed — differences accepted',
-            }),
-          },
-        );
-        if (r.ok) {
-          window.location.reload();
-        } else {
-          const err = await r.json();
-          alert(`Could not accept: ${err.detail || 'Unknown error'}`);
-        }
-      } catch (e: any) {
-        alert(`Could not accept: ${e.message || 'Unknown error'}`);
-      }
-    };
-    
     const claimList = result.claims || [];
+
+    // A claim passes when the evidence provided adequately supports
+    // it: an analyst has accepted it on review, OR the supporting
+    // document verified at high confidence. Anything else means the
+    // client still needs to provide more information.
+    const claimPasses = (evidence: any): boolean => {
+      const dv = (evidence && evidence.document_verification) || {};
+      if (dv.manual_review_status === 'accepted') return true;
+      const confidence = dv.confidence ?? 0;
+      return evidence && evidence.document_verified === true && confidence >= 0.999;
+    };
+
+    // For a claim that needs action, work out WHICH results tile the
+    // reviewer should go to, and return a label + the target tile id.
+    const claimAction = (evidence: any, claim: any): { label: string; tile: string } => {
+      const dv = (evidence && evidence.document_verification) || {};
+      const verdict = dv.verdict;
+      const diffs = Array.isArray(dv.differences) ? dv.differences : [];
+      if (verdict === 'Suspicious' || verdict === 'LikelyTampered' || diffs.length > 0) {
+        return { label: 'See Document Verification', tile: 'tile-doc-verification' };
+      }
+      const st = String((claim && claim.source_type) || '').toLowerCase();
+      if (st.includes('saving') || st.includes('accumul')) {
+        return { label: 'See Funds Lineage', tile: 'tile-funds-lineage' };
+      }
+      const trAlerts = result.transaction_review_summary?.total_alerts || 0;
+      if (trAlerts > 0) {
+        return { label: 'See Transaction Review', tile: 'tile-transaction-review' };
+      }
+      return { label: 'See Documents Required', tile: 'tile-documents-required' };
+    };
+
+    // Scroll to (and open) a results tile elsewhere on the page.
+    const goToTile = (tileId: string) => {
+      const el = document.getElementById(tileId);
+      if (!el) return;
+      if (el.tagName === 'DETAILS') (el as HTMLDetailsElement).open = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
 
     return (
       <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group" open>
         {/* Header — clickable summary, chevron rotates when open */}
         <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
-          <h3 className="text-lg font-bold text-zinc-900">Source of Funds Analysis</h3>
+          <h3 className="text-lg font-bold text-zinc-900">Source of Funds Claims</h3>
           <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
@@ -839,99 +740,58 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         )}
 
         {claimList.length > 0 && (
-        <>
-        {/* Claims table — Claim / Status / Summary / Action.
-            One row per evidence_match. The action column triggers the
-            existing /sof-assessment/accept-differences endpoint with a
-            rationale prompt so the reviewer can mark a row as
-            manually-accepted without leaving the page. */}
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-zinc-200">
-            <thead className="bg-zinc-50">
-              <tr>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Claim</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Status</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Summary</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Action</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-zinc-100">
-              {(result.claims || []).map((claim, idx) => {
-                const evidence = result.evidence_matches[idx] || {};
-                const dv = evidence.document_verification || {};
-                const verified = evidence.verified === true;
-                const accepted = dv.manual_review_status === 'accepted';
-                const confidence = dv.confidence ?? 0;
-                const fullyVerified = (verified && evidence.document_verified === true && confidence >= 0.999) || accepted;
-                const summary = summariseEvidence(evidence);
-
-                const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
-                const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
-
-                let statusChip;
-                if (accepted) {
-                  statusChip = <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />ACCEPTED</span>;
-                } else if (fullyVerified) {
-                  statusChip = <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />VERIFIED</span>;
-                } else {
-                  statusChip = <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200/80"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />REVIEW</span>;
-                }
-
-                return (
-                  <tr key={idx} className="hover:bg-zinc-50/60 align-top">
-                    <td className="px-5 py-3 text-sm text-zinc-900 whitespace-nowrap">
-                      <div className="font-medium capitalize">{sourceLabel}</div>
-                      <div className="text-xs text-zinc-500 tabular-nums">{amountStr}</div>
-                    </td>
-                    <td className="px-5 py-3 text-sm whitespace-nowrap">
-                      {statusChip}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-zinc-700">
-                      <ul className="space-y-1">
-                        {summary.map((s, si) => (
-                          <li key={si} className="leading-snug">{s}</li>
-                        ))}
-                      </ul>
-                    </td>
-                    <td className="px-5 py-3 text-sm align-top">
-                      {accepted ? (() => {
-                        const acceptedBy = dv.accepted_by || dv.manually_accepted_by || 'Reviewer';
-                        const acceptedAtRaw = dv.accepted_at || dv.manually_accepted_at || null;
-                        let acceptedAtLabel = '';
-                        if (acceptedAtRaw) {
-                          const dObj = new Date(acceptedAtRaw);
-                          acceptedAtLabel = isNaN(dObj.getTime())
-                            ? String(acceptedAtRaw)
-                            : dObj.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-                        }
-                        const reason = dv.accepted_reason || dv.acceptance_reason || 'Differences accepted on review.';
-                        return (
-                          <div className="max-w-[26rem] text-xs leading-snug text-zinc-700">
-                            <div className="italic text-zinc-600">"{reason}"</div>
-                            <div className="mt-1.5 text-[11px] text-zinc-500">
-                              <span className="text-zinc-700">{acceptedBy}</span>
-                              {acceptedAtLabel && <span> · {acceptedAtLabel}</span>}
-                            </div>
-                          </div>
-                        );
-                      })() : !fullyVerified ? (
-                        <button
-                          onClick={() => acceptClaim(idx)}
-                          className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 transition-colors whitespace-nowrap"
-                        >
-                          Accept differences
-                        </button>
-                      ) : (
-                        <span className="text-xs text-zinc-400">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        </>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-zinc-200">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Claim</th>
+                  <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Status</th>
+                  <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Action Required</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-zinc-100">
+                {claimList.map((claim, idx) => {
+                  const evidence = result.evidence_matches[idx] || {};
+                  const passes = claimPasses(evidence);
+                  const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
+                  const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
+                  const action = passes ? null : claimAction(evidence, claim);
+                  return (
+                    <tr key={idx} className="hover:bg-zinc-50/60">
+                      <td className="px-5 py-3.5 text-sm text-zinc-900">
+                        <span className="font-medium capitalize">{sourceLabel}</span>
+                        <span className="ml-2 text-xs text-zinc-500 tabular-nums">{amountStr}</span>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm whitespace-nowrap">
+                        {passes ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80">
+                            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />Pass
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200/80">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Information Required
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-sm whitespace-nowrap">
+                        {action ? (
+                          <button
+                            type="button"
+                            onClick={() => goToTile(action.tile)}
+                            className="text-xs font-medium text-zinc-700 hover:text-zinc-900 underline underline-offset-2"
+                          >
+                            {action.label} →
+                          </button>
+                        ) : (
+                          <span className="text-xs text-zinc-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </details>
     );
@@ -944,7 +804,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     const hasCritical = overallStatus.includes('CRITICAL') || content.includes('CRITICAL');
 
     return (
-      <details key="tr" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+      <details key="tr" id="tile-transaction-review" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
         <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
           <h3 className="text-lg font-bold text-zinc-900">Transaction Review</h3>
           <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -1647,21 +1507,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {/* ============================================================ */}
           {/* FUNDS LINEAGE SECTION (collapsible by default)                */}
           {/* ============================================================ */}
-          <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+          <details id="tile-funds-lineage" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
             <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
               <h3 className="text-lg font-bold text-zinc-900">Funds Lineage</h3>
-              <div className="flex items-center gap-3">
-                <Link
-                  to={`/matters/${matterId}?tab=funds-lineage`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-xs text-zinc-700 hover:text-zinc-900 underline-offset-2 hover:underline"
-                >
-                  Open full lineage →
-                </Link>
-                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
+              <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
             </summary>
 
             {fundsLineageData?.exists && fundsLineageData.summary ? (
@@ -1841,7 +1692,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {/* DOCUMENT VERIFICATION SECTION (collapsible by default)        */}
           {/* ============================================================ */}
           {docVerificationSummary && docVerificationSummary.total_documents > 0 && (
-            <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+            <details id="tile-doc-verification" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
               <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
                 <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
                   Document Verification
@@ -2155,12 +2006,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           <div className="space-y-6">
 
             {/* Documents Required - INTELLIGENT DOCUMENT GENERATOR */}
-            {(result.next_actions.documents.length > 0 || 
+            {(result.next_actions.documents.length > 0 ||
               (fundsLineageData?.funds_lineage?.unresolved_items?.length > 0) ||
               result.evidence_matches?.some((e: any) => e?.document_verification?.differences?.length > 0)) && (
-              <div className="bg-white border border-zinc-200 rounded-md p-6">
+              <div id="tile-documents-required" className="bg-white border border-zinc-200 rounded-md p-6">
                 <h3 className="text-lg font-bold text-zinc-900 mb-4">
-                  📄 Documents Required
+                  Documents Required
                 </h3>
                 <ul className="list-disc list-inside space-y-2">
                   {/* INTELLIGENT DOCUMENT GENERATOR - Analyzes all differences */}
