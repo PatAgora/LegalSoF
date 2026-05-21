@@ -1269,7 +1269,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       </div>
 
       {/* Step Tabs */}
-      <div className="border-b border-zinc-200">
+      <div className="border-b border-zinc-200 flex items-center justify-between">
         <div className="flex space-x-8">
           <button
             onClick={() => setActiveStep('upload')}
@@ -1295,6 +1295,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             Assessment Results
           </button>
         </div>
+        {result && (
+          <button
+            onClick={downloadFileNote}
+            className="px-4 py-2 text-sm font-medium border border-zinc-300 text-zinc-700 rounded hover:bg-zinc-50 transition-colors"
+          >
+            Generate Audit Note
+          </button>
+        )}
       </div>
 
       {/* Upload Step */}
@@ -2625,21 +2633,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </details>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex justify-center gap-4">
-            <button
-              onClick={() => setActiveStep('upload')}
-              className="px-6 py-3 bg-zinc-50 text-zinc-900 border-2 border-zinc-400 rounded hover:bg-zinc-100 font-semibold"
-            >
-              📎 Add Further Documentation
-            </button>
-            <button
-              onClick={downloadFileNote}
-              className="px-6 py-3 bg-zinc-900 text-white rounded hover:bg-zinc-900 font-semibold"
-            >
-              📥 Download Audit File Note
-            </button>
-          </div>
         </div>
       )}
     </div>
