@@ -138,6 +138,14 @@ interface AssessmentResult {
     period_end: string;
     transaction_count: number;
   }[];
+  // Per claim index, the bank statement containing the credit that
+  // matches the claim amount - the specific statement that evidences it.
+  claim_statement_matches?: Record<string, {
+    filename: string;
+    credit_amount: number;
+    credit_date: string;
+    account_label: string;
+  }>;
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -2102,21 +2110,27 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
                       const provided = row.provided;
                       const suggested = row.suggested;
-                      // Bank-statement provided items expand into the
-                      // named statement list (account + period); other
+                      // A bank-statement evidence line resolves to the one
+                      // statement that contains the credit matching this
+                      // claim (e.g. the £400,000 sale proceeds); other
                       // documents render as before.
                       const isStmtFile = (fn: string) =>
                         uploaded.some((f) => f.filename === fn && f.category === 'bank_statement');
                       const stmtItems = provided.filter((it: any) => isStmtFile(it.file));
                       const docItems = provided.filter((it: any) => !isStmtFile(it.file));
-                      const statements = stmtItems.length > 0 ? (result.statements_provided || []) : [];
+                      const stmtMatch = (result.claim_statement_matches || {})[String(row.idx)];
+                      const statements = (stmtItems.length > 0 && !stmtMatch)
+                        ? (result.statements_provided || []) : [];
+                      const showProvided = provided.length > 0 || !!stmtMatch;
+                      const fmtCredit = (n: any) =>
+                        `£${Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
                       return (
                         <div key={row.idx} className="border border-zinc-100 rounded p-3">
                           <div className="text-sm font-medium text-zinc-900 capitalize">
                             {label} <span className="text-zinc-400 tabular-nums">· {amt}</span>
                           </div>
 
-                          {provided.length > 0 && (
+                          {showProvided && (
                             <div className="mt-2">
                               <div className="text-[10px] font-semibold uppercase tracking-wider text-green-600 mb-1">
                                 Provided
@@ -2131,7 +2145,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 ))}
-                                {statements.map((s: any, si: number) => (
+                                {stmtMatch && (
+                                  <li key="match" className="flex items-start gap-3 text-xs leading-snug">
+                                    {checkIcon}
+                                    <span className="flex-1 min-w-0 text-zinc-700">
+                                      {stmtMatch.account_label} showing a {fmtCredit(stmtMatch.credit_amount)} credit
+                                      {stmtMatch.credit_date ? ` on ${stmtMatch.credit_date}` : ''}
+                                    </span>
+                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={stmtMatch.filename}>
+                                      {stmtMatch.filename}
+                                    </span>
+                                  </li>
+                                )}
+                                {!stmtMatch && statements.map((s: any, si: number) => (
                                   <li key={`s${si}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">{stmtLine(s)}</span>
@@ -2140,7 +2166,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 ))}
-                                {statements.length === 0 && stmtItems.map((item: any, di: number) => (
+                                {!stmtMatch && statements.length === 0 && stmtItems.map((item: any, di: number) => (
                                   <li key={`b${di}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>

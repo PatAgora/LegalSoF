@@ -2546,6 +2546,65 @@ async def get_sof_assessment_results(
         })
     assessment['statements_provided'] = statements_provided
 
+    # Per claim, the single bank statement that evidences it - the
+    # statement file containing a credit that matches the claim amount
+    # (e.g. the property-sale claim links only to the statement showing
+    # the sale proceeds arriving, not to every statement on file).
+    _credits = []
+    for _txn in (storage.get('bank_statements') or []):
+        if str(_txn.get('direction', '')).lower() != 'credit':
+            continue
+        try:
+            _camt = float(_txn.get('amount') or 0)
+        except (TypeError, ValueError):
+            continue
+        if _camt <= 0:
+            continue
+        _catype = str(_txn.get('account_type') or '').strip().lower()
+        _credits.append({
+            'amount': _camt,
+            'date': _txn.get('date'),
+            'filename': str(_txn.get('source_filename') or _txn.get('account_id')
+                            or _txn.get('account') or 'bank_statement'),
+            'account_label': ('Savings account statement' if 'saving' in _catype
+                              else 'Current account statement' if 'current' in _catype
+                              else 'Bank statement'),
+        })
+    def _claim_amount(c):
+        try:
+            return float((c or {}).get('expected_amount') or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    _claim_list = assessment.get('claims') or []
+    claim_statement_matches: Dict[str, dict] = {}
+    _used_credits: set = set()
+    for _ci in sorted(
+        range(len(_claim_list)),
+        key=lambda i: -_claim_amount(_claim_list[i]),
+    ):
+        _ca = _claim_amount(_claim_list[_ci])
+        if _ca <= 0:
+            continue
+        _best, _best_diff = None, None
+        for _idx, _cr in enumerate(_credits):
+            if _idx in _used_credits:
+                continue
+            _diff = abs(_cr['amount'] - _ca)
+            if _diff <= max(_ca * 0.20, 5000) and (_best_diff is None or _diff < _best_diff):
+                _best, _best_diff = _idx, _diff
+        if _best is not None:
+            _used_credits.add(_best)
+            _cr = _credits[_best]
+            _cd = _parse_stmt_date(_cr['date'])
+            claim_statement_matches[str(_ci)] = {
+                'filename': _cr['filename'],
+                'credit_amount': _cr['amount'],
+                'credit_date': _cd.strftime('%d/%m/%Y') if _cd else str(_cr['date'] or ''),
+                'account_label': _cr['account_label'],
+            }
+    assessment['claim_statement_matches'] = claim_statement_matches
+
     # Funding-change and plausibility monitoring flags (SRA thematic
     # review, Nov 2025). A change or addition to the expected funding,
     # and accumulation that may not be plausible, are red flags.
