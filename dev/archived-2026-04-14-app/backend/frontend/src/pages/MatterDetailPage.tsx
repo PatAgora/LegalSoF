@@ -8,10 +8,10 @@ import DocumentVerificationPage from '../components/DocumentVerification/Documen
 import { API_BASE_URL, authFetch } from '../lib/api'
 import { useCurrentMatter } from '../stores/currentMatterStore'
 
-type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
+type TabType = 'risk-cdd' | 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
 const VALID_TABS: TabType[] = [
-  'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'audit-trail',
+  'risk-cdd', 'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'audit-trail',
 ]
 
 export default function MatterDetailPage() {
@@ -28,41 +28,36 @@ export default function MatterDetailPage() {
   const setCurrentMatter = useCurrentMatter((s) => s.setMatter)
   const clearCurrentMatter = useCurrentMatter((s) => s.clearMatter)
 
-  // Fetch matter data from API
+  // Fetch (or re-fetch) the matter from the API.
+  const refreshMatter = async (showSpinner = false) => {
+    try {
+      if (showSpinner) setLoading(true)
+      const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${id}`)
+      if (!response.ok) throw new Error('Failed to fetch matter')
+      const data = await response.json()
+      setMatter(data)
+      setCurrentMatter({
+        id: data.id,
+        reference_number: data.reference_number ?? null,
+        client_name: data.client_name ?? null,
+        transaction_type: data.transaction_type ?? null,
+      })
+    } catch (err) {
+      console.error('Error fetching matter:', err)
+      if (showSpinner) setError('Failed to load matter details. Please try again.')
+    } finally {
+      if (showSpinner) setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    const fetchMatter = async () => {
-      try {
-        setLoading(true)
-        const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${id}`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch matter')
-        }
-        const data = await response.json()
-        setMatter(data)
-        // Tell the Layout so it can put the sidebar in matter-context mode.
-        setCurrentMatter({
-          id: data.id,
-          reference_number: data.reference_number ?? null,
-          client_name: data.client_name ?? null,
-          transaction_type: data.transaction_type ?? null,
-        })
-      } catch (err) {
-        console.error('Error fetching matter:', err)
-        setError('Failed to load matter details. Please try again.')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    if (id) {
-      fetchMatter()
-    }
-
+    if (id) refreshMatter(true)
     // Clear the sidebar context when leaving the matter detail page.
     return () => {
       clearCurrentMatter()
     }
-  }, [id, setCurrentMatter, clearCurrentMatter])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   if (loading) {
     return (
@@ -136,11 +131,17 @@ export default function MatterDetailPage() {
             >
               Generate Report
             </button>
+            <SendToComplianceButton
+              matterId={matter.id}
+              submittedAt={matter.compliance_submitted_at}
+              submittedBy={matter.compliance_submitted_by}
+              onSent={() => refreshMatter()}
+            />
             <button
               onClick={() => setShowStatusModal(true)}
               className="px-4 py-2 text-sm font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors"
             >
-              🔄 Update Status
+              Update Status
             </button>
           </div>
         </div>
@@ -148,6 +149,7 @@ export default function MatterDetailPage() {
 
       {/* Tab Content — sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
+        {activeTab === 'risk-cdd' && <RiskAssessmentTab matter={matter} onSaved={() => refreshMatter()} />}
         {activeTab === 'sof-assessment' && <SoFAssessment matterId={matter.id} />}
         {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
         {activeTab === 'funds-lineage' && <FundsLineageTab matterId={matter.id} />}
@@ -637,6 +639,315 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────
+// Send to Compliance button
+// ──────────────────────────────────────────
+
+function SendToComplianceButton({
+  matterId, submittedAt, submittedBy, onSent,
+}: {
+  matterId: number
+  submittedAt?: string | null
+  submittedBy?: string | null
+  onSent: () => void
+}) {
+  const [sending, setSending] = useState(false)
+
+  if (submittedAt) {
+    const d = new Date(submittedAt)
+    const when = isNaN(d.getTime())
+      ? ''
+      : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return (
+      <span
+        className="px-4 py-2 text-sm font-medium border border-green-200 bg-green-50 text-green-700 rounded inline-flex items-center gap-1.5"
+        title={`Sent to compliance${submittedBy ? ` by ${submittedBy}` : ''}${when ? ` on ${when}` : ''}`}
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        Sent to Compliance
+      </span>
+    )
+  }
+
+  const send = async () => {
+    if (!confirm('Send this matter and its file to the compliance team for review?')) return
+    setSending(true)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/send-to-compliance`, {
+        method: 'POST',
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        alert(`Could not send: ${err.detail || r.statusText}`)
+        return
+      }
+      onSent()
+    } catch (e: any) {
+      alert(`Could not send: ${e?.message || 'Unknown error'}`)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={send}
+      disabled={sending}
+      className="px-4 py-2 text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 rounded transition-colors disabled:opacity-60"
+    >
+      {sending ? 'Sending…' : 'Send to Compliance'}
+    </button>
+  )
+}
+
+// ──────────────────────────────────────────
+// Risk & CDD tab — matter risk assessment + Source of Wealth
+// ──────────────────────────────────────────
+
+// MLR 2017 Reg 18 / LSAG §4.4 higher-risk indicator categories.
+const RISK_FACTOR_CATEGORIES: { key: string; label: string; factors: string[] }[] = [
+  { key: 'client', label: 'Client', factors: [
+    'Politically Exposed Person (PEP), family member or close associate',
+    'Client unwilling or slow to provide identification',
+    'Complex or opaque ownership / control structure',
+    'Cash-intensive business',
+    'Unexplained use of intermediaries',
+    'Adverse media or sanctions exposure',
+  ]},
+  { key: 'geographic', label: 'Geographic', factors: [
+    'High-risk third country (HM Treasury / FATF list)',
+    'Jurisdiction with weak AML/CTF controls or significant corruption',
+    'Active conflict zone',
+    'Sanctioned territory',
+  ]},
+  { key: 'service', label: 'Service / Product', factors: [
+    'Conveyancing (residential or commercial)',
+    'Company or trust formation',
+    'Tax advice',
+    'Large or unusual movements through client account',
+    'Pooled-funds arrangement',
+    'Use of escrow',
+  ]},
+  { key: 'transaction', label: 'Transaction', factors: [
+    'Unusually high value',
+    'Cash or third-party funding',
+    'Rapid movement of funds',
+    'Pre-payment later refunded',
+    'Unexplained change in instructions',
+    'Unusual urgency with no business rationale',
+  ]},
+  { key: 'delivery_channel', label: 'Delivery Channel', factors: [
+    'Non-face-to-face onboarding',
+    'Use of agents or introducers',
+    'Reliance on third-party verification',
+    'Client introduced by a party unknown to the firm',
+  ]},
+]
+
+function RiskAssessmentTab({ matter, onSaved }: { matter: any; onSaved: () => void }) {
+  const [rating, setRating] = useState<string>((matter.risk_rating || 'medium').toLowerCase())
+  const [factors, setFactors] = useState<Record<string, string[]>>(() => {
+    const f = matter.risk_factors || {}
+    const out: Record<string, string[]> = {}
+    for (const c of RISK_FACTOR_CATEGORIES) out[c.key] = Array.isArray(f[c.key]) ? f[c.key] : []
+    return out
+  })
+  const [notes, setNotes] = useState<string>(matter.risk_notes || '')
+  const [sow, setSow] = useState<string>(matter.source_of_wealth || '')
+  const [sowEvidence, setSowEvidence] = useState<string>(matter.source_of_wealth_evidence || '')
+  const [saving, setSaving] = useState(false)
+  const [savedNote, setSavedNote] = useState<string | null>(null)
+
+  const sowRequired = rating === 'high' || rating === 'critical'
+
+  const toggleFactor = (catKey: string, factor: string) => {
+    setFactors((prev) => {
+      const cur = prev[catKey] || []
+      const next = cur.includes(factor) ? cur.filter((x) => x !== factor) : [...cur, factor]
+      return { ...prev, [catKey]: next }
+    })
+  }
+
+  const totalSelected = Object.values(factors).reduce((n, arr) => n + arr.length, 0)
+
+  const save = async () => {
+    setSaving(true)
+    setSavedNote(null)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/risk-assessment`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          risk_rating: rating,
+          risk_factors: factors,
+          risk_notes: notes.trim() || null,
+          source_of_wealth: sow.trim() || null,
+          source_of_wealth_evidence: sowEvidence.trim() || null,
+        }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        alert(`Could not save: ${err.detail || r.statusText}`)
+        return
+      }
+      setSavedNote('Risk assessment saved.')
+      setTimeout(() => setSavedNote(null), 4000)
+      onSaved()
+    } catch (e: any) {
+      alert(`Could not save: ${e?.message || 'Unknown error'}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const ratingStyle: Record<string, string> = {
+    low: 'border-green-300 bg-green-50 text-green-700',
+    medium: 'border-amber-300 bg-amber-50 text-amber-700',
+    high: 'border-red-300 bg-red-50 text-red-700',
+    critical: 'border-red-400 bg-red-100 text-red-800',
+  }
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      {/* Header + save */}
+      <div className="flex items-start justify-between gap-6">
+        <div>
+          <h2 className="font-serif text-2xl text-zinc-900">Matter Risk Assessment &amp; CDD</h2>
+          <p className="mt-1 text-sm text-zinc-500 max-w-2xl">
+            The documented matter-level risk assessment (MLR 2017 Reg 18 / LSAG §4.3–4.4).
+            The rating set here drives the per-risk-tier rule configuration applied to every
+            assessment for this matter.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <button
+            onClick={save}
+            disabled={saving}
+            className={`px-4 py-2 text-sm font-medium rounded transition-colors whitespace-nowrap ${
+              saving ? 'bg-zinc-100 text-zinc-400' : 'bg-zinc-900 text-white hover:bg-zinc-800'
+            }`}
+          >
+            {saving ? 'Saving…' : 'Save risk assessment'}
+          </button>
+          {savedNote && <span className="text-xs text-green-700">{savedNote}</span>}
+        </div>
+      </div>
+
+      {/* Overall rating */}
+      <section className="bg-white border border-zinc-200 rounded-md p-6">
+        <h3 className="text-sm font-bold text-zinc-900 mb-1">Overall risk rating</h3>
+        <p className="text-xs text-zinc-500 mb-3">
+          Critical-rated matters use the High-tier rule settings.
+        </p>
+        <div className="flex gap-2">
+          {['low', 'medium', 'high', 'critical'].map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setRating(r)}
+              className={`px-4 py-2 text-sm font-semibold rounded border capitalize transition-colors ${
+                rating === r ? ratingStyle[r] : 'border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        {matter.risk_assessed_at && (
+          <p className="mt-3 text-xs text-zinc-400">
+            Last assessed by {matter.risk_assessed_by || 'unknown'} on{' '}
+            {formatDate(matter.risk_assessed_at)}.
+          </p>
+        )}
+      </section>
+
+      {/* Risk factors */}
+      <section className="bg-white border border-zinc-200 rounded-md p-6">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-bold text-zinc-900">Higher-risk indicators</h3>
+          <span className="text-xs text-zinc-400">{totalSelected} selected</span>
+        </div>
+        <p className="text-xs text-zinc-500 mt-1 mb-4">
+          Tick every indicator that applies. These document the basis for the rating above.
+        </p>
+        <div className="space-y-5">
+          {RISK_FACTOR_CATEGORIES.map((cat) => (
+            <div key={cat.key}>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+                {cat.label}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5">
+                {cat.factors.map((factor) => {
+                  const checked = (factors[cat.key] || []).includes(factor)
+                  return (
+                    <label key={factor} className="flex items-start gap-2 cursor-pointer text-sm text-zinc-700">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleFactor(cat.key, factor)}
+                        className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                      />
+                      <span className="leading-snug">{factor}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Risk reasoning */}
+      <section className="bg-white border border-zinc-200 rounded-md p-6">
+        <h3 className="text-sm font-bold text-zinc-900 mb-1">Risk reasoning</h3>
+        <p className="text-xs text-zinc-500 mb-3">
+          Record why this rating was chosen, in a way another reviewer could follow.
+        </p>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={4}
+          placeholder="e.g. Standard residential conveyancing, UK-resident client met in person, no PEP or adverse-media match, funds from a domestic property sale — assessed Medium."
+          className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
+        />
+      </section>
+
+      {/* Source of Wealth */}
+      <section className="bg-white border border-zinc-200 rounded-md p-6">
+        <h3 className="text-sm font-bold text-zinc-900 mb-1">Source of Wealth</h3>
+        <p className="text-xs text-zinc-500 mb-3">
+          The broader origin of the client's overall wealth — distinct from the source of
+          funds for this specific transaction. Required as Enhanced Due Diligence for
+          high-risk clients and PEPs (LSAG §6.8, §7.2).
+        </p>
+        {sowRequired && (
+          <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <strong>Source of Wealth is required for this matter</strong> — the risk rating is
+            {' '}{rating}. Record the client's overall wealth origin and the evidence seen.
+          </div>
+        )}
+        <label className="block text-xs font-medium text-zinc-600 mb-1">Wealth narrative</label>
+        <textarea
+          value={sow}
+          onChange={(e) => setSow(e.target.value)}
+          rows={4}
+          placeholder="e.g. Client is a recently-retired NHS consultant. Wealth accumulated over a 30-year salaried career plus a workplace pension; previous home owned outright since 2009."
+          className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
+        />
+        <label className="block text-xs font-medium text-zinc-600 mb-1 mt-3">Evidence reviewed</label>
+        <textarea
+          value={sowEvidence}
+          onChange={(e) => setSowEvidence(e.target.value)}
+          rows={3}
+          placeholder="e.g. Three years' P60s, pension statement, Land Registry title showing 2009 purchase."
+          className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
+        />
+      </section>
     </div>
   )
 }

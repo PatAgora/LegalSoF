@@ -1,16 +1,29 @@
 """
 Matters API Endpoints
 """
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
+
+
+def _parse_json(raw):
+    """Parse a JSON text column into a Python object; None/blank → None."""
+    if not raw:
+        return None
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
 
 from app.db.session import get_db, get_sync_db, get_sync_session
 from app.api.dependencies.auth import get_current_active_user, require_analyst, require_admin
 from app.models import Matter, MatterStatus, RiskRating, TransactionType
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.assessment_storage import AssessmentStorage
 from app.models.audit import AuditLog, AuditLogAction
 from app.models.status_history import MatterStatusHistory
@@ -263,14 +276,166 @@ async def get_matter(
             "status": matter.status.value if matter.status else "draft",
             "risk_rating": matter.risk_rating.value if matter.risk_rating else "medium",
             "risk_rating_auto": matter.risk_rating_auto.value if matter.risk_rating_auto else None,
-            "risk_rating_override": matter.risk_rating_override.value if matter.risk_rating_override else None,
+            "risk_rating_override": bool(matter.risk_rating_override),
             "risk_notes": matter.risk_notes,
+            "risk_factors": _parse_json(getattr(matter, 'risk_factors', None)),
+            "risk_assessed_at": (matter.risk_assessed_at.isoformat()
+                                 if getattr(matter, 'risk_assessed_at', None) else None),
+            "risk_assessed_by": getattr(matter, 'risk_assessed_by', None),
+            "source_of_wealth": getattr(matter, 'source_of_wealth', None),
+            "source_of_wealth_evidence": getattr(matter, 'source_of_wealth_evidence', None),
+            "compliance_submitted_at": (matter.compliance_submitted_at.isoformat()
+                                        if getattr(matter, 'compliance_submitted_at', None) else None),
+            "compliance_submitted_by": getattr(matter, 'compliance_submitted_by', None),
             "description": matter.description,
             "created_at": matter.created_at.isoformat() if matter.created_at else None,
             "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
             "completion_percentage": completion_percentage,
         }
-    
+
+    finally:
+        sync_db.close()
+
+
+# ── Request models for the risk assessment / compliance endpoints ──
+class RiskAssessmentRequest(BaseModel):
+    risk_rating: str                                  # low | medium | high | critical
+    risk_factors: Optional[Dict[str, Any]] = None     # {category: [indicators]}
+    risk_notes: Optional[str] = None
+    source_of_wealth: Optional[str] = None
+    source_of_wealth_evidence: Optional[str] = None
+
+
+@router.put("/matters/{matter_id}/risk-assessment")
+async def save_risk_assessment(
+    matter_id: int,
+    request: RiskAssessmentRequest,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_db),
+):
+    """
+    Record the matter-level risk assessment and Source of Wealth.
+
+    Captures the documented matter risk assessment required by MLR 2017
+    Reg 18 / LSAG §4.3-4.4 (rating + higher-risk indicators by
+    category), the reviewer's risk reasoning, and the client's Source
+    of Wealth narrative + supporting evidence. The saved rating drives
+    the per-risk-tier rule configuration used by every assessment.
+    """
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            raise HTTPException(status_code=404, detail="Matter not found")
+
+        risk_map = {
+            'low': RiskRating.LOW, 'medium': RiskRating.MEDIUM,
+            'high': RiskRating.HIGH, 'critical': RiskRating.CRITICAL,
+        }
+        new_rating = risk_map.get((request.risk_rating or 'medium').lower(), RiskRating.MEDIUM)
+
+        matter.risk_rating = new_rating
+        matter.risk_rating_override = True
+        matter.risk_notes = request.risk_notes
+        matter.risk_factors = json.dumps(request.risk_factors) if request.risk_factors else None
+        matter.risk_assessed_at = datetime.now(timezone.utc)
+        matter.risk_assessed_by = current_user.full_name or current_user.email
+        matter.source_of_wealth = request.source_of_wealth
+        matter.source_of_wealth_evidence = request.source_of_wealth_evidence
+
+        sync_db.add(AuditLog(
+            matter_id=matter.id,
+            user_id=current_user.id,
+            action=AuditLogAction.UPDATED,
+            entity_type="matter",
+            entity_id=matter.id,
+            description=(
+                f"Matter risk assessment saved by {matter.risk_assessed_by}: "
+                f"rating {new_rating.value}."
+            ),
+            details={
+                "risk_rating": new_rating.value,
+                "risk_factors": request.risk_factors or {},
+                "source_of_wealth_provided": bool(request.source_of_wealth),
+            },
+        ))
+        sync_db.commit()
+
+        return {
+            "success": True,
+            "matter_id": matter_id,
+            "risk_rating": new_rating.value,
+            "risk_assessed_at": matter.risk_assessed_at.isoformat(),
+            "risk_assessed_by": matter.risk_assessed_by,
+        }
+    finally:
+        sync_db.close()
+
+
+@router.post("/matters/{matter_id}/send-to-compliance")
+async def send_to_compliance(
+    matter_id: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_db),
+):
+    """
+    Submit the matter to the firm's compliance function for review.
+
+    Records the submission on the matter, writes an audit-trail entry,
+    and notifies every admin (compliance) user so the matter and its
+    file appear in their queue.
+    """
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            raise HTTPException(status_code=404, detail="Matter not found")
+
+        submitted_by = current_user.full_name or current_user.email
+        now = datetime.now(timezone.utc)
+        matter.compliance_submitted_at = now
+        matter.compliance_submitted_by = submitted_by
+
+        sync_db.add(AuditLog(
+            matter_id=matter.id,
+            user_id=current_user.id,
+            action=AuditLogAction.UPDATED,
+            entity_type="matter",
+            entity_id=matter.id,
+            description=(
+                f"Matter {matter.reference_number} sent to the compliance "
+                f"team for review by {submitted_by}."
+            ),
+            details={"reference": matter.reference_number, "submitted_by": submitted_by},
+        ))
+
+        # Notify every admin user — they act as the compliance function.
+        recipients = sync_db.query(User).filter(User.role == UserRole.ADMIN).all()
+        for admin in recipients:
+            try:
+                sync_db.add(Notification(
+                    user_id=admin.id,
+                    matter_id=matter.id,
+                    type="compliance_review",
+                    title="Matter sent for compliance review",
+                    message=(
+                        f"{submitted_by} has sent matter {matter.reference_number} "
+                        f"({matter.client_name}) to the compliance team for review."
+                    ),
+                ))
+            except Exception:
+                pass  # notification is best-effort
+
+        sync_db.commit()
+        return {
+            "success": True,
+            "matter_id": matter_id,
+            "compliance_submitted_at": now.isoformat(),
+            "compliance_submitted_by": submitted_by,
+            "notified": len(recipients),
+        }
     finally:
         sync_db.close()
 
@@ -597,19 +762,59 @@ async def generate_matter_report(
         doc.add_paragraph()
         doc.add_heading('4. Matter risk assessment', level=1)
         kv_table([
-            ('System-calculated risk',  (matter.risk_rating_auto.value if matter.risk_rating_auto else 'Not calculated').title()),
-            ('Reviewer-applied risk',   (matter.risk_rating_override.value if matter.risk_rating_override else 'No override').title()),
             ('Effective risk rating',   (matter.risk_rating.value if matter.risk_rating else 'Medium').title()),
-            ('Risk notes / rationale',  (matter.risk_notes or '').strip() or 'No additional notes recorded.'),
+            ('Reviewer override applied', 'Yes' if matter.risk_rating_override else 'No'),
+            ('Assessment recorded by',  getattr(matter, 'risk_assessed_by', None) or 'Not recorded'),
+            ('Assessment recorded on',  fmt_date(getattr(matter, 'risk_assessed_at', None))),
+            ('Risk reasoning',          (matter.risk_notes or '').strip() or 'No reasoning recorded.'),
         ])
+
+        # Selected higher-risk indicators (LSAG §4.4), by category.
+        _rf = _parse_json(getattr(matter, 'risk_factors', None)) or {}
+        _rf_rows = []
+        for _cat, _label in (
+            ('client', 'Client'), ('geographic', 'Geographic'),
+            ('service', 'Service / product'), ('transaction', 'Transaction'),
+            ('delivery_channel', 'Delivery channel'),
+        ):
+            items = _rf.get(_cat) or []
+            if items:
+                _rf_rows.append((_label, '; '.join(str(i) for i in items)))
+        if _rf_rows:
+            p('Higher-risk indicators identified', bold=True)
+            kv_table(_rf_rows)
+        else:
+            doc.add_paragraph(
+                'No specific higher-risk indicators were recorded against the LSAG risk-factor '
+                'categories for this matter.'
+            )
+
         doc.add_paragraph(
             'In line with Regulation 18 MLR 2017 the matter risk has been assessed against the firm-wide '
             'risk assessment and the specific characteristics of the client, the parties, the geography, '
             'the products/services involved, the channels through which the matter is being conducted, '
-            'and the transactions concerned. Enhanced Due Diligence (Regulation 33) has been applied '
-            'where the rating is High or where any factor in Schedule 3 / Schedule 4 to MLR 2017 was '
-            'identified.'
+            'and the transactions concerned. Enhanced Due Diligence (Regulation 33) is applied '
+            'where the rating is High or Critical or where any factor in Schedule 3 / Schedule 4 to '
+            'MLR 2017 was identified.'
         )
+
+        # Source of Wealth (EDD — LSAG §6.8, §7.2).
+        doc.add_paragraph()
+        p('Source of Wealth', bold=True)
+        _sow = (getattr(matter, 'source_of_wealth', None) or '').strip()
+        _sow_ev = (getattr(matter, 'source_of_wealth_evidence', None) or '').strip()
+        _rating_l = (matter.risk_rating.value if matter.risk_rating else 'medium').lower()
+        _sow_required = _rating_l in ('high', 'critical')
+        kv_table([
+            ('Source of Wealth required',
+             'Yes — Enhanced Due Diligence (high-risk matter)' if _sow_required
+             else 'Risk-based — not mandatory at this rating'),
+            ('Wealth narrative', _sow or 'Not recorded.'),
+            ('Evidence reviewed', _sow_ev or 'Not recorded.'),
+        ])
+        if _sow_required and not _sow:
+            p('RESERVATION: Source of Wealth is required for this high-risk matter but has '
+              'not been recorded. This must be completed before sign-off.', bold=True)
 
         # -----------------------------------------------------------------
         # 5. CDD MEASURES APPLIED

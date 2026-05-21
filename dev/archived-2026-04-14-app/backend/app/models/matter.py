@@ -59,6 +59,23 @@ class Matter(Base):
     risk_rating_auto = Column(SQLEnum(RiskRating))  # Auto-calculated risk
     risk_rating_override = Column(Boolean, default=False)  # Manual override flag
     risk_notes = Column(Text)
+    # Matter-level risk assessment (MLR 2017 Reg 18 / LSAG §4.3-4.4).
+    # JSON: {client: [...], geographic: [...], service: [...],
+    #        transaction: [...], delivery_channel: [...]} — selected
+    # higher-risk indicators per category.
+    risk_factors = Column(Text)
+    risk_assessed_at = Column(DateTime(timezone=True))
+    risk_assessed_by = Column(String(200))
+
+    # Source of Wealth (CDD / EDD — LSAG §6.8, §7.2). The broader
+    # origin of the client's overall wealth, distinct from the
+    # source of funds for this specific transaction.
+    source_of_wealth = Column(Text)
+    source_of_wealth_evidence = Column(Text)
+
+    # Compliance submission (the "Send to Compliance" action).
+    compliance_submitted_at = Column(DateTime(timezone=True))
+    compliance_submitted_by = Column(String(200))
     
     # Assignment
     assigned_analyst_id = Column(Integer, ForeignKey("users.id"))
