@@ -566,11 +566,29 @@ def serve_document(
     if safe_filename != filename or ".." in filename:
         raise HTTPException(400, "Invalid filename")
 
-    file_path = os.path.join(UPLOAD_ROOT, str(matter_id), safe_filename)
-    if not os.path.isfile(file_path):
-        raise HTTPException(404, "File not found")
-
     ext = os.path.splitext(safe_filename)[1].lower()
     media_type = _MIME_MAP.get(ext, "application/octet-stream")
 
-    return FileResponse(file_path, media_type=media_type, filename=safe_filename)
+    file_path = os.path.join(UPLOAD_ROOT, str(matter_id), safe_filename)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path, media_type=media_type, filename=safe_filename)
+
+    # Fall back to the copy held in the database. The upload directory
+    # on the host is ephemeral — files uploaded before a redeploy are
+    # no longer on disk, so the DB copy is the durable source.
+    dv = (
+        db.query(DocumentVerification)
+        .filter(
+            DocumentVerification.matter_id == matter_id,
+            DocumentVerification.disk_filename == safe_filename,
+        )
+        .first()
+    )
+    if dv is not None and dv.file_bytes:
+        return Response(
+            content=bytes(dv.file_bytes),
+            media_type=media_type,
+            headers={"Content-Disposition": f'inline; filename="{safe_filename}"'},
+        )
+
+    raise HTTPException(404, "File not found")

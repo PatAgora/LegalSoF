@@ -7,7 +7,7 @@ Tables:
 """
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, Text, Boolean,
-    Float, JSON, Enum as SQLEnum
+    Float, JSON, LargeBinary, Enum as SQLEnum
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -36,6 +36,11 @@ class DocumentVerification(Base):
     file_hash = Column(String(64), nullable=False)
     file_category = Column(String(100))  # bank_statement, supporting_doc, etc.
     disk_filename = Column(String(500), nullable=True)  # filename on disk in /app/uploads/{matter_id}/
+    # Raw file bytes — kept in the database so documents survive a
+    # container redeploy (the upload directory on the host is
+    # ephemeral). The serve endpoint falls back to this when the
+    # on-disk copy is missing.
+    file_bytes = Column(LargeBinary, nullable=True)
 
     # Pipeline results
     authenticity_score = Column(Float, nullable=False, default=0.0)

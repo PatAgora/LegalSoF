@@ -83,6 +83,7 @@ _SCHEMA_PATCHES: list[tuple[str, str, str]] = [
     ("document_verifications", "override_proposed_by",        "VARCHAR(200)"),
     ("document_verifications", "override_proposed_at",        "TIMESTAMP WITH TIME ZONE"),
     ("document_verifications", "override_proposed_rationale", "TEXT"),
+    ("document_verifications", "file_bytes",                  "BYTEA"),
     # Matter risk assessment, Source of Wealth, compliance submission
     ("matters", "risk_factors",              "TEXT"),
     ("matters", "risk_assessed_at",          "TIMESTAMP WITH TIME ZONE"),
