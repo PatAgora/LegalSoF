@@ -2583,7 +2583,12 @@ async def get_sof_assessment_results(
         range(len(_claim_list)),
         key=lambda i: -_claim_amount(_claim_list[i]),
     ):
-        _ca = _claim_amount(_claim_list[_ci])
+        _claim_obj = _claim_list[_ci] or {}
+        # A savings claim is evidenced by the savings account statement
+        # showing the build-up, not by a single matching credit.
+        if 'saving' in str(_claim_obj.get('source_type', '')).lower():
+            continue
+        _ca = _claim_amount(_claim_obj)
         if _ca <= 0:
             continue
         _best, _best_diff = None, None

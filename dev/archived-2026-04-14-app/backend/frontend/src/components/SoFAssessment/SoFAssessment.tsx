@@ -2110,18 +2110,25 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
                       const provided = row.provided;
                       const suggested = row.suggested;
-                      // A bank-statement evidence line resolves to the one
-                      // statement that contains the credit matching this
-                      // claim (e.g. the £400,000 sale proceeds); other
-                      // documents render as before.
+                      // How a claim links to a bank statement:
+                      //  - a savings claim shows the savings account
+                      //    statement(s) that show the build-up over time;
+                      //  - a lump-sum claim (property sale, gift) links to
+                      //    the one statement showing the matching credit;
+                      //  - otherwise fall back to listing the statements.
                       const isStmtFile = (fn: string) =>
                         uploaded.some((f) => f.filename === fn && f.category === 'bank_statement');
                       const stmtItems = provided.filter((it: any) => isStmtFile(it.file));
                       const docItems = provided.filter((it: any) => !isStmtFile(it.file));
                       const stmtMatch = (result.claim_statement_matches || {})[String(row.idx)];
-                      const statements = (stmtItems.length > 0 && !stmtMatch)
+                      const isSavingsClaim = /saving/.test(String(row.claim.source_type || '').toLowerCase());
+                      const savingsStatements = isSavingsClaim
+                        ? (result.statements_provided || []).filter((s: any) =>
+                            /saving/i.test(`${s.account_label || ''} ${s.account_number || ''} ${s.filename || ''}`))
+                        : [];
+                      const statements = (savingsStatements.length === 0 && !stmtMatch && stmtItems.length > 0)
                         ? (result.statements_provided || []) : [];
-                      const showProvided = provided.length > 0 || !!stmtMatch;
+                      const showProvided = provided.length > 0 || !!stmtMatch || savingsStatements.length > 0;
                       const fmtCredit = (n: any) =>
                         `£${Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
                       return (
@@ -2145,7 +2152,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 ))}
-                                {stmtMatch && (
+                                {savingsStatements.map((s: any, si: number) => (
+                                  <li key={`sv${si}`} className="flex items-start gap-3 text-xs leading-snug">
+                                    {checkIcon}
+                                    <span className="flex-1 min-w-0 text-zinc-700">
+                                      Savings account statement provided
+                                      {(s.period_start && s.period_end) ? `, covering ${s.period_start} to ${s.period_end}` : ''}
+                                    </span>
+                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={s.filename}>
+                                      {s.filename}
+                                    </span>
+                                  </li>
+                                ))}
+                                {savingsStatements.length === 0 && stmtMatch && (
                                   <li key="match" className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">
@@ -2157,7 +2176,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 )}
-                                {!stmtMatch && statements.map((s: any, si: number) => (
+                                {savingsStatements.length === 0 && !stmtMatch && statements.map((s: any, si: number) => (
                                   <li key={`s${si}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">{stmtLine(s)}</span>
@@ -2166,7 +2185,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 ))}
-                                {!stmtMatch && statements.length === 0 && stmtItems.map((item: any, di: number) => (
+                                {savingsStatements.length === 0 && !stmtMatch && statements.length === 0 && stmtItems.map((item: any, di: number) => (
                                   <li key={`b${di}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>
