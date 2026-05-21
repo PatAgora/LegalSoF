@@ -29,6 +29,9 @@ from app.models.document_verification import (
     VerificationVerdict,
 )
 from app.models.transaction import TransactionConfig
+from app.models.audit import AuditLog, AuditLogAction
+from app.models.notification import Notification
+from app.models.user import UserRole
 
 router = APIRouter()
 
@@ -2412,9 +2415,14 @@ async def get_sof_assessment_results(
             detail=f"Assessment not completed (status: {storage.get('status')})"
         )
     
+    # Per-claim reviewer/compliance actions travel with the assessment
+    # so the frontend can render claim status + the action buttons.
+    assessment = dict(storage['assessment_result'])
+    assessment['claim_actions'] = storage.get('claim_actions', {})
+
     return {
         "matter_id": matter_id,
-        "assessment": storage['assessment_result'],
+        "assessment": assessment,
         "document_verification_summary": storage.get('document_verification_summary', {}),
         "statement_validation_summary": storage.get('statement_validation_summary', {}),
         "metadata": {
@@ -2988,4 +2996,195 @@ async def delete_uploaded_file(
         "filename": filename,
         "category": category,
         "message": "File removed",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Per-claim reviewer / compliance actions
+# ---------------------------------------------------------------------------
+# Claims are objects inside the assessment_result JSON, not DB rows, so
+# the reviewer actions on them are stored in storage['claim_actions'],
+# a dict keyed by claim index:
+#   { "0": {"sufficient": {...}, "compliance": {...}}, ... }
+
+def _claim_action_entry(storage: dict, claim_index: int) -> dict:
+    actions = storage.setdefault('claim_actions', {})
+    return actions.setdefault(str(claim_index), {})
+
+
+def _any_claim_in_review(storage: dict) -> bool:
+    for entry in (storage.get('claim_actions') or {}).values():
+        comp = entry.get('compliance') or {}
+        if comp.get('state') == 'in_review':
+            return True
+    return False
+
+
+@router.post("/matters/{matter_id}/sof-assessment/claims/{claim_index}/sufficient-evidence")
+async def mark_claim_sufficient(
+    matter_id: int,
+    claim_index: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Mark a claim's evidence as sufficient — the reviewer confirms
+    nothing further is needed and the claim is treated as verified."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    when = datetime.now(timezone.utc).isoformat()
+    entry = _claim_action_entry(storage, claim_index)
+    entry['sufficient'] = {'by': who, 'at': when}
+    _db_save_storage(db, matter_id, storage)
+
+    claims = (storage.get('assessment_result') or {}).get('claims') or []
+    claim_label = ''
+    if 0 <= claim_index < len(claims):
+        claim_label = str(claims[claim_index].get('source_type', '')).replace('_', ' ')
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.APPROVED,
+        entity_type="sof_claim",
+        entity_id=matter_id,
+        description=(
+            f"Claim {claim_index + 1} ({claim_label}) marked as having sufficient "
+            f"evidence by {who}."
+        ),
+        details={"claim_index": claim_index, "reviewer": who},
+    ))
+    db.commit()
+    return {"success": True, "claim_actions": storage.get('claim_actions', {})}
+
+
+@router.post("/matters/{matter_id}/sof-assessment/claims/{claim_index}/send-to-compliance")
+async def send_claim_to_compliance(
+    matter_id: int,
+    claim_index: int,
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Send a single claim to the compliance team for review. Puts the
+    claim — and the matter — into 'in_review' and notifies admins."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    now = datetime.now(timezone.utc)
+    entry = _claim_action_entry(storage, claim_index)
+    entry['compliance'] = {
+        'state': 'in_review',
+        'sent_by': who,
+        'sent_at': now.isoformat(),
+    }
+    _db_save_storage(db, matter_id, storage)
+
+    matter.compliance_status = 'in_review'
+    matter.compliance_submitted_at = now
+    matter.compliance_submitted_by = who
+
+    claims = (storage.get('assessment_result') or {}).get('claims') or []
+    claim_label = ''
+    if 0 <= claim_index < len(claims):
+        claim_label = str(claims[claim_index].get('source_type', '')).replace('_', ' ')
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.UPDATED,
+        entity_type="sof_claim",
+        entity_id=matter_id,
+        description=(
+            f"Claim {claim_index + 1} ({claim_label}) on matter "
+            f"{matter.reference_number} sent to compliance review by {who}."
+        ),
+        details={"claim_index": claim_index, "sent_by": who},
+    ))
+    for admin in db.query(User).filter(User.role == UserRole.ADMIN).all():
+        try:
+            db.add(Notification(
+                user_id=admin.id,
+                matter_id=matter_id,
+                type="compliance_review",
+                title="Claim sent for compliance review",
+                message=(
+                    f"{who} sent a Source of Funds claim on matter "
+                    f"{matter.reference_number} ({matter.client_name}) for "
+                    f"compliance review."
+                ),
+            ))
+        except Exception:
+            pass
+    db.commit()
+    return {
+        "success": True,
+        "claim_actions": storage.get('claim_actions', {}),
+        "compliance_status": matter.compliance_status,
+    }
+
+
+@router.post("/matters/{matter_id}/sof-assessment/claims/{claim_index}/cancel-compliance")
+async def cancel_claim_compliance(
+    matter_id: int,
+    claim_index: int,
+    request: Dict[str, Any],
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Cancel a claim's compliance review — the reviewer has decided it
+    no longer needs compliance sign-off. A rationale is required."""
+    rationale = (request.get('rationale') or '').strip()
+    if len(rationale) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="A rationale (at least 10 characters) is required to cancel a compliance review.",
+        )
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    who = current_user.full_name or current_user.email
+    now = datetime.now(timezone.utc)
+    entry = _claim_action_entry(storage, claim_index)
+    comp = entry.setdefault('compliance', {})
+    comp['state'] = 'cancelled'
+    comp['cancelled_by'] = who
+    comp['cancelled_at'] = now.isoformat()
+    comp['cancel_rationale'] = rationale
+    _db_save_storage(db, matter_id, storage)
+
+    # If no claim is still under review, lift the matter's status.
+    if not _any_claim_in_review(storage):
+        matter.compliance_status = 'none'
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.UPDATED,
+        entity_type="sof_claim",
+        entity_id=matter_id,
+        description=(
+            f"Compliance review cancelled for claim {claim_index + 1} on matter "
+            f"{matter.reference_number} by {who}. Rationale: {rationale}"
+        ),
+        details={"claim_index": claim_index, "cancelled_by": who, "rationale": rationale},
+    ))
+    db.commit()
+    return {
+        "success": True,
+        "claim_actions": storage.get('claim_actions', {}),
+        "compliance_status": matter.compliance_status,
     }

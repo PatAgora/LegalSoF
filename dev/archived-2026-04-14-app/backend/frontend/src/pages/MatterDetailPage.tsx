@@ -7,6 +7,7 @@ import FundsLineage from '../components/FundsLineage/FundsLineage'
 import DocumentVerificationPage from '../components/DocumentVerification/DocumentVerificationPage'
 import { API_BASE_URL, authFetch } from '../lib/api'
 import { useCurrentMatter } from '../stores/currentMatterStore'
+import { useAuthStore } from '../stores/authStore'
 
 type TabType = 'risk-cdd' | 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
@@ -146,6 +147,9 @@ export default function MatterDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Compliance review banner / panel. */}
+      <ComplianceReviewPanel matter={matter} onReviewed={() => refreshMatter()} />
 
       {/* Tab Content — sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
@@ -910,6 +914,114 @@ function RiskAssessmentTab({ matter, onSaved }: { matter: any; onSaved: () => vo
           className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
         />
       </section>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────
+// Compliance review panel
+// ──────────────────────────────────────────
+
+function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed: () => void }) {
+  const user = useAuthStore((s) => s.user)
+  const [busy, setBusy] = useState(false)
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
+  const status = matter.compliance_status || 'none'
+
+  if (status === 'none') return null
+
+  const submit = async (outcome: 'cleared' | 'returned') => {
+    let notes = ''
+    if (outcome === 'returned') {
+      const n = window.prompt('Return this matter with queries — describe what is needed (recorded in the audit trail):', '')
+      if (n === null) return
+      notes = n.trim()
+    } else {
+      if (!confirm('Clear this matter — confirm you are satisfied with the source of funds review?')) return
+    }
+    setBusy(true)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/compliance-review`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome, notes }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        alert(`Could not submit: ${err.detail || r.statusText}`)
+        return
+      }
+      onReviewed()
+    } catch (e: any) {
+      alert(`Could not submit: ${e?.message || 'Unknown error'}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const fmt = (s: string | null) => {
+    if (!s) return ''
+    const d = new Date(s)
+    return isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  const tone =
+    status === 'cleared' ? 'border-green-200 bg-green-50'
+      : status === 'returned' ? 'border-red-200 bg-red-50'
+      : 'border-amber-200 bg-amber-50'
+
+  return (
+    <div className={`mb-6 rounded-md border px-5 py-4 ${tone}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="text-sm">
+          {status === 'in_review' && (
+            <>
+              <div className="font-semibold text-amber-800">Under compliance review</div>
+              <div className="mt-0.5 text-xs text-amber-700">
+                Sent by {matter.compliance_submitted_by || 'a reviewer'}
+                {matter.compliance_submitted_at ? ` on ${fmt(matter.compliance_submitted_at)}` : ''}.
+              </div>
+            </>
+          )}
+          {status === 'cleared' && (
+            <>
+              <div className="font-semibold text-green-800">Cleared by compliance</div>
+              <div className="mt-0.5 text-xs text-green-700">
+                {matter.compliance_reviewed_by || 'Compliance'}{matter.compliance_reviewed_at ? ` · ${fmt(matter.compliance_reviewed_at)}` : ''}
+              </div>
+            </>
+          )}
+          {status === 'returned' && (
+            <>
+              <div className="font-semibold text-red-800">Returned with queries by compliance</div>
+              <div className="mt-0.5 text-xs text-red-700">
+                {matter.compliance_reviewed_by || 'Compliance'}{matter.compliance_reviewed_at ? ` · ${fmt(matter.compliance_reviewed_at)}` : ''}
+              </div>
+            </>
+          )}
+          {matter.compliance_review_notes && (
+            <div className="mt-1.5 text-xs italic text-zinc-600">"{matter.compliance_review_notes}"</div>
+          )}
+        </div>
+
+        {isAdmin && status === 'in_review' && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => submit('returned')}
+              disabled={busy}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+            >
+              Return with queries
+            </button>
+            <button
+              onClick={() => submit('cleared')}
+              disabled={busy}
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+            >
+              Clear — satisfied
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

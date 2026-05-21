@@ -87,8 +87,13 @@ _SCHEMA_PATCHES: list[tuple[str, str, str]] = [
     ("matters", "risk_factors",              "TEXT"),
     ("matters", "risk_assessed_at",          "TIMESTAMP WITH TIME ZONE"),
     ("matters", "risk_assessed_by",          "VARCHAR(200)"),
+    ("matters", "compliance_status",         "VARCHAR(20)"),
     ("matters", "compliance_submitted_at",   "TIMESTAMP WITH TIME ZONE"),
     ("matters", "compliance_submitted_by",   "VARCHAR(200)"),
+    ("matters", "compliance_reviewed_at",    "TIMESTAMP WITH TIME ZONE"),
+    ("matters", "compliance_reviewed_by",    "VARCHAR(200)"),
+    ("matters", "compliance_review_outcome", "VARCHAR(20)"),
+    ("matters", "compliance_review_notes",   "TEXT"),
 ]
 
 

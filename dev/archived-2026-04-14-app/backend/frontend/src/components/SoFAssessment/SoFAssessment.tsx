@@ -95,6 +95,8 @@ interface AssessmentResult {
   evidence_matches: any[];
   funding_paths: any[];
   red_flags: any[];
+  // Per-claim reviewer / compliance actions, keyed by claim index.
+  claim_actions?: Record<string, any>;
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -552,6 +554,78 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
+  // ── Per-claim reviewer / compliance actions ────────────────────
+  // Each updates result.claim_actions in place from the endpoint's
+  // response so the Evidence Checklist re-renders without a refetch.
+  const applyClaimActions = (claimActions: any) => {
+    setResult((prev) => (prev ? ({ ...prev, claim_actions: claimActions } as any) : prev));
+  };
+
+  const markClaimSufficient = async (claimIndex: number) => {
+    if (!confirm('Mark this claim as having sufficient evidence? It will be treated as verified.')) return;
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/sufficient-evidence`,
+        { method: 'POST' },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not update: ${err.detail || r.statusText}`);
+        return;
+      }
+      const data = await r.json();
+      applyClaimActions(data.claim_actions);
+    } catch (e: any) {
+      alert(`Could not update: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  const sendClaimToCompliance = async (claimIndex: number) => {
+    if (!confirm('Send this claim to the compliance team for review?')) return;
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/send-to-compliance`,
+        { method: 'POST' },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not send: ${err.detail || r.statusText}`);
+        return;
+      }
+      const data = await r.json();
+      applyClaimActions(data.claim_actions);
+    } catch (e: any) {
+      alert(`Could not send: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  const cancelClaimCompliance = async (claimIndex: number) => {
+    const rationale = window.prompt(
+      'This claim no longer needs compliance review. Give a rationale (required) — it is recorded in the audit trail.',
+      '',
+    );
+    if (rationale === null) return;
+    if (rationale.trim().length < 10) {
+      alert('A rationale of at least 10 characters is required.');
+      return;
+    }
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/cancel-compliance`,
+        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not cancel: ${err.detail || r.statusText}`);
+        return;
+      }
+      const data = await r.json();
+      applyClaimActions(data.claim_actions);
+    } catch (e: any) {
+      alert(`Could not cancel: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
   // Remove one uploaded file from this matter. Cleans up storage,
   // DocumentVerification rows, and the file on disk. Triggers a
   // status refresh on success so the uploaded-files list re-renders.
@@ -675,11 +749,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const renderSoFSection = (_content: string, result: AssessmentResult) => {
     const claimList = result.claims || [];
 
-    // A claim passes when the evidence provided adequately supports
-    // it: an analyst has accepted it on review, OR the supporting
-    // document verified at high confidence. Anything else means the
-    // client still needs to provide more information.
-    const claimPasses = (evidence: any): boolean => {
+    // A claim passes when the evidence adequately supports it: the
+    // reviewer has marked it as having sufficient evidence, an analyst
+    // accepted it on review, OR the supporting document verified at
+    // high confidence. Anything else needs more information.
+    const claimPasses = (evidence: any, idx: number): boolean => {
+      const action = (result.claim_actions || {})[String(idx)] || {};
+      if (action.sufficient) return true;
       const dv = (evidence && evidence.document_verification) || {};
       if (dv.manual_review_status === 'accepted') return true;
       const confidence = dv.confidence ?? 0;
@@ -752,7 +828,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <tbody className="bg-white divide-y divide-zinc-100">
                 {claimList.map((claim, idx) => {
                   const evidence = result.evidence_matches[idx] || {};
-                  const passes = claimPasses(evidence);
+                  const passes = claimPasses(evidence, idx);
                   const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
                   const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
                   const action = passes ? null : claimAction(evidence, claim);
@@ -1497,7 +1573,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               return null;
             };
 
-            const claimVerified = (ev: any): boolean => {
+            const claimVerified = (ev: any, idx: number): boolean => {
+              const action = (result.claim_actions || {})[String(idx)] || {};
+              if (action.sufficient) return true;
               const dv = (ev && ev.document_verification) || {};
               if (dv.manual_review_status === 'accepted') return true;
               return ev && ev.document_verified === true && (dv.confidence ?? 0) >= 0.999;
@@ -1510,7 +1588,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             const rows = (result.claims || []).map((claim: any, idx: number) => {
               const docs: string[] = claim.expected_evidence || [];
               const ev = result.evidence_matches[idx] || {};
-              return { claim, idx, docs, verified: claimVerified(ev) };
+              const action = (result.claim_actions || {})[String(idx)] || {};
+              return { claim, idx, docs, verified: claimVerified(ev, idx), action };
             }).filter((r: any) => r.docs.length > 0);
 
             if (rows.length === 0) return null;
@@ -1587,6 +1666,50 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               </ul>
                             </div>
                           )}
+
+                          {/* Per-claim actions — bottom-right. */}
+                          {(() => {
+                            const compState = (row.action.compliance || {}).state;
+                            const inReview = compState === 'in_review';
+                            const sufficient = !!row.action.sufficient;
+                            return (
+                              <div className="mt-3 pt-3 border-t border-zinc-100 flex items-center justify-end gap-2">
+                                {inReview ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => cancelClaimCompliance(row.idx)}
+                                    className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors"
+                                  >
+                                    Compliance Review Cancelled
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => sendClaimToCompliance(row.idx)}
+                                    className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors"
+                                  >
+                                    Send to Compliance
+                                  </button>
+                                )}
+                                {sufficient ? (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-green-50 text-green-700 ring-1 ring-inset ring-green-200">
+                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Sufficient Evidence Provided
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => markClaimSufficient(row.idx)}
+                                    className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 transition-colors"
+                                  >
+                                    Sufficient Evidence Provided
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}

@@ -282,9 +282,15 @@ async def get_matter(
             "risk_assessed_at": (matter.risk_assessed_at.isoformat()
                                  if getattr(matter, 'risk_assessed_at', None) else None),
             "risk_assessed_by": getattr(matter, 'risk_assessed_by', None),
+            "compliance_status": getattr(matter, 'compliance_status', None) or 'none',
             "compliance_submitted_at": (matter.compliance_submitted_at.isoformat()
                                         if getattr(matter, 'compliance_submitted_at', None) else None),
             "compliance_submitted_by": getattr(matter, 'compliance_submitted_by', None),
+            "compliance_reviewed_at": (matter.compliance_reviewed_at.isoformat()
+                                       if getattr(matter, 'compliance_reviewed_at', None) else None),
+            "compliance_reviewed_by": getattr(matter, 'compliance_reviewed_by', None),
+            "compliance_review_outcome": getattr(matter, 'compliance_review_outcome', None),
+            "compliance_review_notes": getattr(matter, 'compliance_review_notes', None),
             "description": matter.description,
             "created_at": matter.created_at.isoformat() if matter.created_at else None,
             "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
@@ -388,6 +394,7 @@ async def send_to_compliance(
 
         submitted_by = current_user.full_name or current_user.email
         now = datetime.now(timezone.utc)
+        matter.compliance_status = 'in_review'
         matter.compliance_submitted_at = now
         matter.compliance_submitted_by = submitted_by
 
@@ -429,6 +436,168 @@ async def send_to_compliance(
             "compliance_submitted_by": submitted_by,
             "notified": len(recipients),
         }
+    finally:
+        sync_db.close()
+
+
+class ComplianceReviewRequest(BaseModel):
+    outcome: str                       # cleared | returned
+    notes: Optional[str] = None
+
+
+@router.post("/matters/{matter_id}/compliance-review")
+async def submit_compliance_review(
+    matter_id: int,
+    request: ComplianceReviewRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Compliance officer (admin) decision on a matter under review.
+
+    'cleared'  — the officer is satisfied and sends the matter back.
+    'returned' — the officer has queries and returns it for more work.
+    """
+    outcome = (request.outcome or '').strip().lower()
+    if outcome not in ('cleared', 'returned'):
+        raise HTTPException(status_code=400, detail="outcome must be 'cleared' or 'returned'")
+
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            raise HTTPException(status_code=404, detail="Matter not found")
+
+        reviewer = current_user.full_name or current_user.email
+        now = datetime.now(timezone.utc)
+        matter.compliance_status = outcome          # 'cleared' | 'returned'
+        matter.compliance_reviewed_at = now
+        matter.compliance_reviewed_by = reviewer
+        matter.compliance_review_outcome = outcome
+        matter.compliance_review_notes = (request.notes or '').strip() or None
+
+        verb = 'cleared by compliance' if outcome == 'cleared' else 'returned with queries by compliance'
+        sync_db.add(AuditLog(
+            matter_id=matter.id,
+            user_id=current_user.id,
+            action=AuditLogAction.APPROVED if outcome == 'cleared' else AuditLogAction.UPDATED,
+            entity_type="matter",
+            entity_id=matter.id,
+            description=(
+                f"Matter {matter.reference_number} {verb} by {reviewer}."
+                + (f" Notes: {matter.compliance_review_notes}" if matter.compliance_review_notes else "")
+            ),
+            details={
+                "reference": matter.reference_number,
+                "outcome": outcome,
+                "reviewer": reviewer,
+                "notes": matter.compliance_review_notes,
+            },
+        ))
+        # Notify whoever submitted it.
+        if matter.compliance_submitted_by:
+            submitter = sync_db.query(User).filter(
+                (User.full_name == matter.compliance_submitted_by)
+                | (User.email == matter.compliance_submitted_by)
+            ).first()
+            if submitter:
+                sync_db.add(Notification(
+                    user_id=submitter.id,
+                    matter_id=matter.id,
+                    type="compliance_review",
+                    title=f"Compliance review {outcome}",
+                    message=(
+                        f"Matter {matter.reference_number} has been {verb} "
+                        f"by {reviewer}."
+                    ),
+                ))
+        sync_db.commit()
+        return {
+            "success": True,
+            "matter_id": matter_id,
+            "compliance_status": matter.compliance_status,
+            "reviewed_by": reviewer,
+            "reviewed_at": now.isoformat(),
+        }
+    finally:
+        sync_db.close()
+
+
+@router.get("/compliance/dashboard")
+async def compliance_dashboard(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Summary counts for the Compliance Dashboard (admin only)."""
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        def _count(status):
+            return sync_db.query(Matter).filter(Matter.compliance_status == status).count()
+
+        awaiting = _count('in_review')
+        cleared = _count('cleared')
+        returned = _count('returned')
+
+        recent = (
+            sync_db.query(Matter)
+            .filter(Matter.compliance_status.in_(['in_review', 'cleared', 'returned']))
+            .order_by(Matter.compliance_submitted_at.desc().nullslast())
+            .limit(8)
+            .all()
+        )
+        return {
+            "awaiting_review": awaiting,
+            "cleared": cleared,
+            "returned": returned,
+            "recent": [
+                {
+                    "id": m.id,
+                    "reference_number": m.reference_number,
+                    "client_name": m.client_name,
+                    "compliance_status": m.compliance_status or 'none',
+                    "compliance_submitted_at": (m.compliance_submitted_at.isoformat()
+                                                if m.compliance_submitted_at else None),
+                    "compliance_submitted_by": m.compliance_submitted_by,
+                }
+                for m in recent
+            ],
+        }
+    finally:
+        sync_db.close()
+
+
+@router.get("/compliance/matters")
+async def compliance_matters(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Every matter that has been sent to compliance (admin only)."""
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matters = (
+            sync_db.query(Matter)
+            .filter(Matter.compliance_status.in_(['in_review', 'cleared', 'returned']))
+            .order_by(Matter.compliance_submitted_at.desc().nullslast())
+            .all()
+        )
+        return [
+            {
+                "id": m.id,
+                "reference_number": m.reference_number,
+                "client_name": m.client_name,
+                "compliance_status": m.compliance_status or 'none',
+                "compliance_submitted_at": (m.compliance_submitted_at.isoformat()
+                                            if m.compliance_submitted_at else None),
+                "compliance_submitted_by": m.compliance_submitted_by,
+                "compliance_reviewed_at": (m.compliance_reviewed_at.isoformat()
+                                           if m.compliance_reviewed_at else None),
+                "compliance_reviewed_by": m.compliance_reviewed_by,
+                "risk_rating": m.risk_rating.value if m.risk_rating else 'medium',
+            }
+            for m in matters
+        ]
     finally:
         sync_db.close()
 

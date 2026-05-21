@@ -246,6 +246,19 @@ export default function Layout() {
               />
             ))}
           </div>
+
+          {/* Compliance section — admin (compliance officer) only */}
+          {String(user?.role || '').toLowerCase() === 'admin' && (
+            <>
+              <div className="px-6 pt-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+                Compliance
+              </div>
+              <div className="flex flex-col">
+                <SidebarLink href="/compliance" label="Compliance Dashboard" currentPath={location.pathname} onClick={() => setSidebarOpen(false)} />
+                <SidebarLink href="/compliance/matters" label="Compliance Matters" currentPath={location.pathname} onClick={() => setSidebarOpen(false)} />
+              </div>
+            </>
+          )}
         </>
       )}
 

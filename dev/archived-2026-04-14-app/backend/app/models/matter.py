@@ -67,9 +67,15 @@ class Matter(Base):
     risk_assessed_at = Column(DateTime(timezone=True))
     risk_assessed_by = Column(String(200))
 
-    # Compliance submission (the "Send to Compliance" action).
+    # Compliance review workflow.
+    #   compliance_status: none | in_review | cleared | returned
+    compliance_status = Column(String(20), default="none")
     compliance_submitted_at = Column(DateTime(timezone=True))
     compliance_submitted_by = Column(String(200))
+    compliance_reviewed_at = Column(DateTime(timezone=True))
+    compliance_reviewed_by = Column(String(200))
+    compliance_review_outcome = Column(String(20))   # cleared | returned
+    compliance_review_notes = Column(Text)
     
     # Assignment
     assigned_analyst_id = Column(Integer, ForeignKey("users.id"))
