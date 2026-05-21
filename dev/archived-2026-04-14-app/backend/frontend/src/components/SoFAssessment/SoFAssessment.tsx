@@ -2438,13 +2438,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     const total = s.totalAmount || 0;
                     const traced = s.tracedAmount || 0;
                     const untraced = s.untracedAmount || 0;
-                    const tracedPct = total > 0 ? Math.round((traced / total) * 100) : 0;
-                    const untracedPct = Math.max(0, 100 - tracedPct);
+                    const tracedPct = total > 0 ? (traced / total) * 100 : 0;
+                    const untracedPct = total > 0 ? Math.max(0, 100 - tracedPct) : 0;
                     const fmt = (n: any) => `£${Math.round(Number(n) || 0).toLocaleString()}`;
                     const items: { label: string; value: string }[] = [
                       { label: 'Total amount', value: fmt(total) },
-                      { label: `Traced (${tracedPct}%)`, value: fmt(traced) },
-                      { label: `Untraced (${untracedPct}%)`, value: fmt(untraced) },
+                      { label: `Traced (${tracedPct.toFixed(2)}%)`, value: fmt(traced) },
+                      { label: `Untraced (${untracedPct.toFixed(2)}%)`, value: fmt(untraced) },
                       { label: 'Matched transfers', value: String(s.matchedTransfers || 0) },
                     ];
                     if ((s.accumulationPeriodDays || 0) > 0) {
@@ -2486,8 +2486,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         {total > 0 && (
                           <div>
                             <div className="h-2 w-full rounded-full overflow-hidden bg-zinc-100 flex">
-                              {traced > 0 && <div className="bg-green-500" style={{ width: `${tracedPct}%` }} />}
-                              {untraced > 0 && <div className="bg-amber-500" style={{ width: `${untracedPct}%` }} />}
+                              {traced > 0 && <div className="bg-green-500" style={{ width: `${tracedPct.toFixed(2)}%` }} />}
+                              {untraced > 0 && <div className="bg-amber-500" style={{ width: `${untracedPct.toFixed(2)}%` }} />}
                             </div>
                             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-500">
                               <span className="inline-flex items-center gap-2">
