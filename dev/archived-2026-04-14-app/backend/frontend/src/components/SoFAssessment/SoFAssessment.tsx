@@ -1466,19 +1466,21 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {(() => {
             const uploaded: any[] = status?.uploaded_files || [];
 
-            // Heuristic: is this expected-evidence line satisfied by an
-            // uploaded file? Bank-statement lines are met by any bank
-            // statement; document lines are keyword-matched against
-            // supporting-doc / client-info filenames.
-            const isProvided = (text: string): boolean => {
+            // Heuristic: which uploaded file (if any) satisfies this
+            // expected-evidence line? Bank-statement lines are met by
+            // any bank statement; document lines are keyword-matched
+            // against supporting-doc / client-info filenames. Returns
+            // the matching filename, or null when nothing matches.
+            const matchedFile = (text: string): string | null => {
               const t = text.toLowerCase();
               if (t.includes('bank statement')) {
-                return uploaded.some((f) => f.category === 'bank_statement');
+                const f = uploaded.find((f) => f.category === 'bank_statement');
+                return f ? (f.filename || null) : null;
               }
               const docFiles = uploaded.filter(
                 (f) => f.category === 'supporting_doc' || f.category === 'client_info',
               );
-              if (docFiles.length === 0) return false;
+              if (docFiles.length === 0) return null;
               const TERMS = [
                 'completion', 'contract', 'memorandum', 'probate', 'administration',
                 'will', 'executor', 'estate', 'death certificate', 'payslip', 'p60',
@@ -1489,11 +1491,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               for (const term of TERMS) {
                 if (!t.includes(term)) continue;
                 const first = term.split(' ')[0];
-                if (docFiles.some((f) => String(f.filename || '').toLowerCase().includes(first))) {
-                  return true;
-                }
+                const f = docFiles.find((f) => String(f.filename || '').toLowerCase().includes(first));
+                if (f) return f.filename || null;
               }
-              return false;
+              return null;
             };
 
             const claimVerified = (ev: any): boolean => {
@@ -1532,8 +1533,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     {rows.map((row: any) => {
                       const label = String(row.claim.source_type || 'Source').replace(/_/g, ' ');
                       const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
-                      const provided = row.docs.filter((d: string) => isProvided(d));
-                      const suggested = row.docs.filter((d: string) => !isProvided(d));
+                      const provided = row.docs
+                        .map((d: string) => ({ doc: d, file: matchedFile(d) }))
+                        .filter((x: any) => x.file);
+                      const suggested = row.docs.filter((d: string) => !matchedFile(d));
                       return (
                         <div key={row.idx} className="border border-zinc-100 rounded p-3">
                           <div className="text-sm font-medium text-zinc-900 capitalize">
@@ -1545,13 +1548,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               <div className="text-[10px] font-semibold uppercase tracking-wider text-green-600 mb-1">
                                 Provided
                               </div>
-                              <ul className="space-y-1">
-                                {provided.map((doc: string, di: number) => (
-                                  <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                              <ul className="space-y-1.5">
+                                {provided.map((item: any, di: number) => (
+                                  <li key={di} className="flex items-start gap-3 text-xs leading-snug">
                                     <svg className="mt-0.5 h-3.5 w-3.5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                     </svg>
-                                    {doc}
+                                    <span className="flex-1 min-w-0 text-zinc-700">{item.doc}</span>
+                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
+                                      {item.file}
+                                    </span>
                                   </li>
                                 ))}
                               </ul>
