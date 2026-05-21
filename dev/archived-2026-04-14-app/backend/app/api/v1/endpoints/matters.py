@@ -882,6 +882,12 @@ async def generate_matter_report(
                     ('Bank transactions matched', len(ev.get('transactions', []) or [])),
                 ])
 
+                expected_evidence = claim.get('expected_evidence') or []
+                if expected_evidence:
+                    p('Expected corroborating evidence (risk-tiered)', bold=True)
+                    for _doc in expected_evidence:
+                        doc.add_paragraph(str(_doc), style='List Bullet')
+
                 diffs = dv.get('differences') or []
                 if diffs:
                     p('Discrepancies identified', bold=True)

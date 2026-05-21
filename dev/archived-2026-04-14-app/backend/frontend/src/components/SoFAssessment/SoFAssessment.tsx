@@ -1597,6 +1597,50 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               tile whenever the rationale was header-less. */}
           {renderSoFSection('', result)}
 
+          {/* Source of Funds evidence checklist — the documents that
+              should be obtained to corroborate each declared source,
+              tiered to the matter's risk rating (LSAG §6.8). */}
+          {(result.claims || []).some((c: any) => ((c.expected_evidence || []).length > 0)) && (
+            <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+              <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
+                <h3 className="text-lg font-bold text-zinc-900">Evidence Checklist</h3>
+                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div className="px-6 py-4">
+                <p className="text-xs text-zinc-500 mb-4">
+                  The corroborating documents expected for each declared source of funds,
+                  set to this matter's risk rating. High-risk matters require the additional
+                  Enhanced Due Diligence documents.
+                </p>
+                <div className="space-y-4">
+                  {(result.claims || []).map((claim: any, idx: number) => {
+                    const docs: string[] = claim.expected_evidence || [];
+                    if (docs.length === 0) return null;
+                    const label = String(claim.source_type || 'Source').replace(/_/g, ' ');
+                    const amt = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
+                    return (
+                      <div key={idx} className="border border-zinc-100 rounded p-3">
+                        <div className="text-sm font-medium text-zinc-900 capitalize">
+                          {label} <span className="text-zinc-400 tabular-nums">· {amt}</span>
+                        </div>
+                        <ul className="mt-2 space-y-1">
+                          {docs.map((doc, di) => (
+                            <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                              <span className="mt-[5px] h-1.5 w-1.5 rounded-full bg-zinc-300 flex-shrink-0" />
+                              {doc}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </details>
+          )}
+
           {/* Remaining rationale sections (Transaction Review). */}
           {renderStructuredRationale(result)}
 

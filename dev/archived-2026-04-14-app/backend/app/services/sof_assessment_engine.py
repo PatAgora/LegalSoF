@@ -149,6 +149,19 @@ class SoFAssessmentEngine:
 
         print(f"✅ Parsed {len(claims)} claims")
 
+        # Attach the risk-tiered Source of Funds evidence checklist to
+        # each claim — the documents the firm should obtain for that
+        # source type, stricter for high-risk matters (LSAG §6.8).
+        try:
+            from app.services.sof_evidence_checklist import required_evidence
+            _tier = getattr(self, 'risk_tier', 'medium')
+            for _c in claims:
+                _c['expected_evidence'] = required_evidence(
+                    _c.get('source_type', ''), _tier
+                )
+        except Exception as _exc:
+            print(f"[evidence-checklist] skipped: {_exc}")
+
         # Step 2: Find evidence in bank statements
         evidence_matches = self.match_evidence(claims, bank_statements)
 
