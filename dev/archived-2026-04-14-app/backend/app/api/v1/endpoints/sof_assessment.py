@@ -2501,6 +2501,51 @@ async def get_sof_assessment_results(
             'shortfall': round(_txn_value - _claims_total, 2),
         }
 
+    # Statements provided — a per-file summary of the bank statements on
+    # file (account, type, period), so the Evidence Checklist can
+    # confirm exactly which statements were supplied for a claim.
+    def _parse_stmt_date(s):
+        s = str(s or '').strip()[:10]
+        for _fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+            try:
+                return datetime.strptime(s, _fmt)
+            except ValueError:
+                continue
+        return None
+
+    _stmt_groups: Dict[str, List[dict]] = {}
+    for _txn in (storage.get('bank_statements') or []):
+        _key = str(_txn.get('source_filename') or _txn.get('account_id')
+                   or _txn.get('account') or 'bank_statement')
+        _stmt_groups.setdefault(_key, []).append(_txn)
+
+    statements_provided = []
+    for _fname, _txns in _stmt_groups.items():
+        _atype, _anum, _bank, _dates = '', '', '', []
+        for _t in _txns:
+            if not _atype:
+                _atype = str(_t.get('account_type') or '').strip().lower()
+            if not _anum:
+                _anum = str(_t.get('account_id') or _t.get('account') or '').strip()
+            if not _bank:
+                _bank = str(_t.get('bank_name') or '').strip()
+            _d = _parse_stmt_date(_t.get('date'))
+            if _d:
+                _dates.append(_d)
+        _label = ('Savings account statement' if 'saving' in _atype
+                  else 'Current account statement' if 'current' in _atype
+                  else 'Bank statement')
+        statements_provided.append({
+            'filename': _fname,
+            'account_label': _label,
+            'account_number': _anum,
+            'bank_name': _bank,
+            'period_start': min(_dates).strftime('%d/%m/%Y') if _dates else '',
+            'period_end': max(_dates).strftime('%d/%m/%Y') if _dates else '',
+            'transaction_count': len(_txns),
+        })
+    assessment['statements_provided'] = statements_provided
+
     # Funding-change and plausibility monitoring flags (SRA thematic
     # review, Nov 2025). A change or addition to the expected funding,
     # and accumulation that may not be plausible, are red flags.

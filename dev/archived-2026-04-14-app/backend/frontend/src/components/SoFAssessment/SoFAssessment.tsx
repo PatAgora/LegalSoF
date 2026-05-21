@@ -127,6 +127,17 @@ interface AssessmentResult {
   };
   // Funding-change and plausibility flags from ongoing-monitoring checks.
   monitoring_flags?: string[];
+  // A per-file summary of the bank statements on file, so the Evidence
+  // Checklist can confirm exactly which statements were supplied.
+  statements_provided?: {
+    filename: string;
+    account_label: string;
+    account_number: string;
+    bank_name: string;
+    period_start: string;
+    period_end: string;
+    transaction_count: number;
+  }[];
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -1034,8 +1045,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       return 'review';
     };
 
-    const verifiedCount = claimList.filter((_c: any, idx: number) => claimStatus(idx) === 'verified').length;
-
     const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
       verified: { label: 'Verified', cls: 'bg-green-50 text-green-700 ring-green-200/80', dot: 'bg-green-500' },
       sent:     { label: 'Sent to Compliance', cls: 'bg-blue-50 text-blue-700 ring-blue-200/80', dot: 'bg-blue-500' },
@@ -1059,15 +1068,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-bold text-zinc-900">Source of Funds Claims</h3>
-            {claimList.length > 0 && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
-                verifiedCount === claimList.length
-                  ? 'bg-green-50 text-green-700 ring-1 ring-inset ring-green-200'
-                  : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200'
-              }`}>
-                {verifiedCount}/{claimList.length} verified
-              </span>
-            )}
           </div>
           <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -1838,7 +1838,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             // the matching filename, or null when nothing matches.
             const matchedFile = (text: string): string | null => {
               const t = text.toLowerCase();
-              if (t.includes('bank statement')) {
+              // A bank-statement evidence line - matches "bank statement",
+              // "savings/current account statement" etc, but not an
+              // unrelated "completion statement" / "solicitor's statement".
+              const isBankStatementLine =
+                t.includes('statement') &&
+                /bank|savings|current|account/.test(t) &&
+                !t.includes('completion') &&
+                !t.includes('solicitor');
+              if (isBankStatementLine) {
                 const f = uploaded.find((f) => f.category === 'bank_statement');
                 return f ? (f.filename || null) : null;
               }
@@ -1881,6 +1889,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               }
               return `${doc} (confirming ${money})`;
             };
+            // A provided bank statement, named in full for the audit
+            // record, e.g. "Current account statement for account
+            // 12345678 for the period 01/01/2025 to 30/06/2025".
+            const stmtLine = (s: any): string => {
+              let t = String(s.account_label || 'Bank statement');
+              if (s.account_number) t += ` for account ${s.account_number}`;
+              if (s.bank_name) t += ` (${s.bank_name})`;
+              if (s.period_start && s.period_end) {
+                t += ` for the period ${s.period_start} to ${s.period_end}`;
+              }
+              return t;
+            };
+            const checkIcon = (
+              <svg className="mt-0.5 h-3.5 w-3.5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            );
             const fmtGapDate = (s: any): string => {
               if (!s) return 'an unknown date';
               const str = String(s);
@@ -2077,6 +2102,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
                       const provided = row.provided;
                       const suggested = row.suggested;
+                      // Bank-statement provided items expand into the
+                      // named statement list (account + period); other
+                      // documents render as before.
+                      const isStmtFile = (fn: string) =>
+                        uploaded.some((f) => f.filename === fn && f.category === 'bank_statement');
+                      const stmtItems = provided.filter((it: any) => isStmtFile(it.file));
+                      const docItems = provided.filter((it: any) => !isStmtFile(it.file));
+                      const statements = stmtItems.length > 0 ? (result.statements_provided || []) : [];
                       return (
                         <div key={row.idx} className="border border-zinc-100 rounded p-3">
                           <div className="text-sm font-medium text-zinc-900 capitalize">
@@ -2089,11 +2122,27 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 Provided
                               </div>
                               <ul className="space-y-1.5">
-                                {provided.map((item: any, di: number) => (
-                                  <li key={di} className="flex items-start gap-3 text-xs leading-snug">
-                                    <svg className="mt-0.5 h-3.5 w-3.5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                    </svg>
+                                {docItems.map((item: any, di: number) => (
+                                  <li key={`d${di}`} className="flex items-start gap-3 text-xs leading-snug">
+                                    {checkIcon}
+                                    <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>
+                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
+                                      {item.file}
+                                    </span>
+                                  </li>
+                                ))}
+                                {statements.map((s: any, si: number) => (
+                                  <li key={`s${si}`} className="flex items-start gap-3 text-xs leading-snug">
+                                    {checkIcon}
+                                    <span className="flex-1 min-w-0 text-zinc-700">{stmtLine(s)}</span>
+                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={s.filename}>
+                                      {s.filename}
+                                    </span>
+                                  </li>
+                                ))}
+                                {statements.length === 0 && stmtItems.map((item: any, di: number) => (
+                                  <li key={`b${di}`} className="flex items-start gap-3 text-xs leading-snug">
+                                    {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>
                                     <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
                                       {item.file}

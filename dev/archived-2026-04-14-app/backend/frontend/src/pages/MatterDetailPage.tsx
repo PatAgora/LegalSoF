@@ -108,14 +108,6 @@ export default function MatterDetailPage() {
               {matter.client_name} - {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
             </p>
           </div>
-          <div className="flex space-x-3">
-            <SendToComplianceButton
-              matterId={matter.id}
-              submittedAt={matter.compliance_submitted_at}
-              submittedBy={matter.compliance_submitted_by}
-              onSent={() => refreshMatter()}
-            />
-          </div>
         </div>
       </div>
 
@@ -597,69 +589,6 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
         </div>
       )}
     </div>
-  )
-}
-
-// ──────────────────────────────────────────
-// Send to Compliance button
-// ──────────────────────────────────────────
-
-function SendToComplianceButton({
-  matterId, submittedAt, submittedBy, onSent,
-}: {
-  matterId: number
-  submittedAt?: string | null
-  submittedBy?: string | null
-  onSent: () => void
-}) {
-  const [sending, setSending] = useState(false)
-
-  if (submittedAt) {
-    const d = new Date(submittedAt)
-    const when = isNaN(d.getTime())
-      ? ''
-      : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-    return (
-      <span
-        className="px-4 py-2 text-sm font-medium border border-green-200 bg-green-50 text-green-700 rounded inline-flex items-center gap-1.5"
-        title={`Sent to compliance${submittedBy ? ` by ${submittedBy}` : ''}${when ? ` on ${when}` : ''}`}
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        Sent to Compliance
-      </span>
-    )
-  }
-
-  const send = async () => {
-    if (!confirm('Send this matter and its file to the compliance team for review?')) return
-    setSending(true)
-    try {
-      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/send-to-compliance`, {
-        method: 'POST',
-      })
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}))
-        alert(`Could not send: ${err.detail || r.statusText}`)
-        return
-      }
-      onSent()
-    } catch (e: any) {
-      alert(`Could not send: ${e?.message || 'Unknown error'}`)
-    } finally {
-      setSending(false)
-    }
-  }
-
-  return (
-    <button
-      onClick={send}
-      disabled={sending}
-      className="px-4 py-2 text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 rounded transition-colors disabled:opacity-60"
-    >
-      {sending ? 'Sending…' : 'Send to Compliance'}
-    </button>
   )
 }
 
