@@ -2705,8 +2705,9 @@ async def download_file_note(
     from reportlab.lib.units import cm
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.colors import HexColor
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    from app.api.v1.endpoints.matters import derive_matter_status
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+    )
 
     assessment = storage.get('assessment_result') or {}
     claims = assessment.get('claims') or []
@@ -2716,20 +2717,6 @@ async def download_file_note(
     client_info = storage.get('client_info') or {}
     lineage_summary = (storage.get('funds_lineage') or {}).get('summary') or {}
     sof_confirmed = storage.get('sof_confirmed') or {}
-    overall_status = derive_matter_status(matter, storage)
-
-    dv_rows = (
-        db.query(DocumentVerification)
-        .filter(DocumentVerification.matter_id == matter_id)
-        .order_by(DocumentVerification.created_at.asc())
-        .all()
-    )
-    audit_rows = (
-        db.query(AuditLog)
-        .filter(AuditLog.matter_id == matter_id)
-        .order_by(AuditLog.created_at.asc())
-        .all()
-    )
 
     def esc(v):
         return _html.escape(str(v)) if v not in (None, '') else ''
@@ -2749,17 +2736,50 @@ async def download_file_note(
         except Exception:
             return esc(v)
 
+    def fmt_date(v):
+        try:
+            return datetime.strptime(str(v)[:10], '%Y-%m-%d').strftime('%d/%m/%Y')
+        except (ValueError, TypeError):
+            return str(v or '')
+
+    def describe_source(s):
+        """A plain-English sentence for one declared source - no brackets."""
+        amt = s.get('amount')
+        desc = str(s.get('description')
+                   or str(s.get('source_type') or 'a source').replace('_', ' ')).strip()
+        line = f"{money(amt)} from {desc}" if amt else desc
+        detail = []
+        if s.get('completion_date'):
+            detail.append(f"completed on {fmt_date(s.get('completion_date'))}")
+        if s.get('title_number'):
+            detail.append(f"title number {s.get('title_number')}")
+        if s.get('bank'):
+            detail.append(f"held with {s.get('bank')}")
+        if s.get('account_number'):
+            detail.append(f"account number {s.get('account_number')}")
+        if s.get('solicitor_firm'):
+            detail.append(f"solicitor {s.get('solicitor_firm')}")
+        if detail:
+            line += ', ' + ', '.join(str(d) for d in detail)
+        return line.rstrip('.') + '.'
+
     body = ParagraphStyle('sof_body', fontName='Helvetica', fontSize=10,
                           leading=14, spaceAfter=6)
-    heading = ParagraphStyle('sof_heading', fontName='Helvetica-Bold', fontSize=12,
-                             leading=15, spaceBefore=15, spaceAfter=5,
-                             textColor=HexColor('#1a1a1a'))
-    title_style = ParagraphStyle('sof_title', fontName='Helvetica-Bold', fontSize=18,
-                                 leading=22, spaceAfter=3)
+    heading = ParagraphStyle('sof_heading', fontName='Helvetica-Bold', fontSize=11,
+                             leading=14, spaceBefore=16, spaceAfter=9,
+                             textColor=HexColor('#1a1a1a'),
+                             backColor=HexColor('#f1f1f2'), borderPadding=6)
+    title_style = ParagraphStyle('sof_title', fontName='Helvetica-Bold', fontSize=20,
+                                 leading=24, spaceAfter=3, textColor=HexColor('#1a1a1a'))
+    eyebrow = ParagraphStyle('sof_eyebrow', fontName='Helvetica-Bold', fontSize=8.5,
+                             leading=12, textColor=HexColor('#E8922D'), spaceAfter=3)
     sub_style = ParagraphStyle('sof_sub', fontName='Helvetica', fontSize=9.5,
                                leading=13, textColor=HexColor('#555555'), spaceAfter=1)
     bullet_style = ParagraphStyle('sof_bullet', fontName='Helvetica', fontSize=10,
                                   leading=14, leftIndent=16, bulletIndent=4, spaceAfter=3)
+    cell_style = ParagraphStyle('sof_cell', fontName='Helvetica', fontSize=9, leading=12)
+    cell_head = ParagraphStyle('sof_cellhead', fontName='Helvetica-Bold', fontSize=9,
+                               leading=12, textColor=HexColor('#1a1a1a'))
 
     story = []
 
@@ -2776,20 +2796,26 @@ async def download_file_note(
     def bullet(text):
         story.append(Paragraph(text, bullet_style, bulletText='-'))
 
-    # --- Title ---------------------------------------------------------
+    _ref = matter.reference_number or f'MAT-{matter.id}'
+    _client = matter.client_name or ''
+    gen_dt = datetime.now().strftime('%d/%m/%Y %H:%M')
+    _by = current_user.full_name or current_user.email
+
+    # --- Title block --------------------------------------------------
+    story.append(Paragraph('AGORA CONSULTING', eyebrow))
     story.append(Paragraph('Source of Funds Audit Report', title_style))
-    story.append(Paragraph(
-        f"{esc(matter.reference_number or f'MAT-{matter.id}')} - {esc(matter.client_name)}",
-        sub_style))
-    story.append(Paragraph(
-        f"Generated {datetime.now().strftime('%d/%m/%Y %H:%M')} by "
-        f"{esc(current_user.full_name or current_user.email)}", sub_style))
-    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"{esc(_ref)}  ·  {esc(_client)}", sub_style))
+    story.append(Paragraph(f"Generated {gen_dt} by {esc(_by)}", sub_style))
+    story.append(Spacer(1, 6))
+    story.append(HRFlowable(width='100%', thickness=1.2, color=HexColor('#1a1a1a'),
+                            spaceBefore=0, spaceAfter=2))
+    story.append(HRFlowable(width='100%', thickness=0.5, color=HexColor('#cccccc'),
+                            spaceBefore=2, spaceAfter=4))
 
     # --- 1. Matter and transaction ------------------------------------
     H('1. Matter and transaction')
     _tt = getattr(matter.transaction_type, 'value', None) or str(matter.transaction_type or '')
-    KV('Matter reference', matter.reference_number or f'MAT-{matter.id}')
+    KV('Matter reference', _ref)
     KV('Client', matter.client_name)
     KV('Transaction type', _tt.replace('_', ' ').title())
     KV('Transaction value', money(matter.target_amount))
@@ -2799,31 +2825,35 @@ async def download_file_note(
     H('2. Matter risk assessment')
     _rr = getattr(matter.risk_rating, 'value', None) or str(matter.risk_rating or 'medium')
     KV('Risk rating', _rr.title())
-    P('The risk rating sets how much enquiry into the source of funds is required. A '
-      'higher rating calls for more evidence and closer scrutiny, in proportion to the '
-      'risk (MLR 2017 regulation 28(11)).')
     if getattr(matter, 'risk_notes', None):
         P('The basis recorded for this rating:')
         P(esc(matter.risk_notes))
-    else:
-        P('The basis for this rating has not been recorded on the file.')
 
     # --- 3. Declared source of funds ----------------------------------
     H('3. Declared source of funds')
     _expl = client_info.get('sof_explanation') or client_info.get('explanation') or ''
-    if _expl:
-        P('The client explained the source of the funds as follows:')
-        P(f"<i>{esc(_expl)}</i>")
+    _expl_sources = []
+    if isinstance(_expl, dict):
+        _expl_sources = [s for s in (_expl.get('sources') or []) if isinstance(s, dict)]
+    P('The client has declared the following sources for the funds used in this transaction:')
+    if _expl_sources:
+        for s in _expl_sources:
+            bullet(esc(describe_source(s)))
+    elif claims:
+        for c in claims:
+            bullet(f"{esc(str(c.get('source_type', 'source')).replace('_', ' ').title())} - "
+                   f"{money(c.get('expected_amount') or 0)}")
+    else:
+        P('No declared sources were recorded for this matter.')
+    if isinstance(_expl, str) and _expl.strip():
+        P("In the client's own words:")
+        P(f"<i>{esc(_expl.strip())}</i>")
     claims_total = 0.0
     for c in claims:
         try:
             claims_total += float(c.get('expected_amount') or 0)
         except (TypeError, ValueError):
             pass
-        bullet(f"{esc(str(c.get('source_type', 'source')).replace('_', ' ').title())} - "
-               f"{money(c.get('expected_amount') or 0)}")
-    if not claims:
-        P('No declared sources were recorded for this matter.')
     try:
         _txn_val = float(matter.target_amount or 0)
     except (TypeError, ValueError):
@@ -2839,25 +2869,29 @@ async def download_file_note(
 
     # --- 4. Evidence obtained and assessed ----------------------------
     H('4. Evidence obtained and assessed')
-    P("For each declared source, this section records the evidence expected, the "
-      "reviewer's recorded conclusion, and the result of document verification.")
+    _files = storage.get('uploaded_files') or []
+    if _files:
+        P('The following evidence has been obtained and is held on the matter file:')
+        for f in _files:
+            bullet(f"{esc(f.get('filename', 'document'))} - "
+                   f"{esc(str(f.get('category', '')).replace('_', ' '))}")
+    else:
+        P('No supporting evidence has been uploaded to the matter file.')
     for i, c in enumerate(claims):
         act = claim_actions.get(str(i)) or {}
         suff = act.get('sufficient') or {}
-        P(f"<b>Claim {i + 1}: "
-          f"{esc(str(c.get('source_type', 'source')).replace('_', ' ').title())} "
-          f"({money(c.get('expected_amount') or 0)})</b>")
-        for ev in (c.get('expected_evidence') or []):
-            bullet(esc(ev))
+        _src = str(c.get('source_type', 'source')).replace('_', ' ').title()
+        P(f"<b>Claim {i + 1}: {esc(_src)} - {money(c.get('expected_amount') or 0)}</b>")
         if suff.get('rationale'):
-            KV('Reviewer conclusion', suff.get('rationale'))
-            KV('Recorded by', f"{esc(suff.get('by', 'unknown'))} on {fmt_dt(suff.get('at'))}")
+            P(f"The evidence for this source has been assessed and confirmed as "
+              f"sufficient. {esc(suff.get('rationale'))}")
+            P(f"Recorded by {esc(suff.get('by', 'unknown'))} on {fmt_dt(suff.get('at'))}.")
         else:
-            P('This source has not yet been marked as having sufficient evidence.')
+            P('The evidence for this source has not yet been confirmed as sufficient.')
         dv = (evidence_matches[i] if i < len(evidence_matches) else {}) or {}
         verdict = (dv.get('document_verification') or {}).get('verdict')
         if verdict:
-            KV('Document verification', verdict)
+            P(f"Document verification result: {esc(verdict)}.")
 
     # --- 5. Funds tracing and lineage ---------------------------------
     H('5. Funds tracing and lineage')
@@ -2876,9 +2910,9 @@ async def download_file_note(
     H('6. Transaction review')
     trs = assessment.get('transaction_review_summary') or {}
     KV('Total alerts raised', trs.get('total_alerts', 0))
-    KV('Critical, high and medium alerts',
-       f"{trs.get('critical_alerts', 0)}, {trs.get('high_alerts', 0)} "
-       f"and {trs.get('medium_alerts', 0)}")
+    bullet(f"Critical alerts: {esc(trs.get('critical_alerts', 0))}")
+    bullet(f"High alerts: {esc(trs.get('high_alerts', 0))}")
+    bullet(f"Medium alerts: {esc(trs.get('medium_alerts', 0))}")
     _alert_actions = ((item_actions.get('transaction-review') or {}).get('alerts')) or {}
     if _alert_actions:
         P('The following alerts were reviewed and recorded as satisfied:')
@@ -2888,21 +2922,48 @@ async def download_file_note(
             except (TypeError, ValueError):
                 _n = k
             bullet(f"Alert {esc(_n)}: {esc(a.get('rationale', ''))} "
-                   f"(recorded by {esc(a.get('by', 'unknown'))})")
+                   f"recorded by {esc(a.get('by', 'unknown'))}")
     else:
         P('No transaction-review alerts were individually cleared.')
 
     # --- 7. Red flags and how they were resolved ----------------------
     H('7. Red flags and how they were resolved')
-    _flag_count = 0
+    _flag_rows = []
     for i, ev in enumerate(evidence_matches):
         diffs = ((ev or {}).get('document_verification') or {}).get('differences') or []
         for d in diffs:
-            _flag_count += 1
             field = str(d.get('field', '')).replace('_', ' ').strip()
-            bullet(f"Claim {i + 1}: {esc(field or 'issue flagged for review')}")
-    if _flag_count == 0:
-        P('No outstanding red flags were recorded against the declared sources.')
+            flag_txt = f"Claim {i + 1}: {field or 'Issue flagged for review'}"
+            act = claim_actions.get(str(i)) or {}
+            suff = act.get('sufficient') or {}
+            comp = act.get('compliance') or {}
+            if suff.get('rationale'):
+                res = str(suff.get('rationale'))
+            elif comp.get('state') == 'in_review':
+                res = 'Referred to the compliance team and currently under review.'
+            elif comp.get('state') == 'returned':
+                res = 'Returned by the compliance team to the fee earner for further work.'
+            else:
+                res = 'Outstanding - not yet resolved.'
+            _flag_rows.append((flag_txt, res))
+    if _flag_rows:
+        _tbl = [[Paragraph('Red flag', cell_head),
+                 Paragraph('How it was resolved', cell_head)]]
+        for _f, _r in _flag_rows:
+            _tbl.append([Paragraph(esc(_f), cell_style), Paragraph(esc(_r), cell_style)])
+        _t = Table(_tbl, colWidths=[6.5 * cm, 10.5 * cm], repeatRows=1)
+        _t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#f1f1f2')),
+            ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#dddddd')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(_t)
+    else:
+        P('No red flags were recorded against the declared sources.')
 
     # --- 8. Third-party funding ---------------------------------------
     H('8. Third-party funding')
@@ -2916,10 +2977,10 @@ async def download_file_note(
             bullet(f"Claim {i + 1}: {esc(str(c.get('source_type')).title())} of "
                    f"{money(c.get('expected_amount') or 0)}")
     else:
-        P('No third-party funding (a gift or a loan) was declared on this matter.')
+        P('No third-party funding, such as a gift or a loan, was declared on this matter.')
 
-    # --- 9. Compliance review -----------------------------------------
-    H('9. Compliance review')
+    # --- 9. Compliance touch points -----------------------------------
+    H('9. Compliance touch points')
     _had_compliance = False
     for key, entry in list(claim_actions.items()) + list(item_actions.items()):
         comp = (entry or {}).get('compliance') or {}
@@ -2932,7 +2993,7 @@ async def download_file_note(
         P(f"<b>{esc(label)} - {esc(comp.get('state', 'referred'))}</b>")
         for m in thread:
             who = 'Compliance' if m.get('actor') == 'compliance' else 'Fee earner'
-            bullet(f"{who} ({esc(m.get('by', 'unknown'))}, {fmt_dt(m.get('at'))}): "
+            bullet(f"{who}, {esc(m.get('by', 'unknown'))}, {fmt_dt(m.get('at'))}: "
                    f"{esc(m.get('message', ''))}")
     if not _had_compliance:
         P('No claims or review sections were referred to the compliance team.')
@@ -2946,76 +3007,41 @@ async def download_file_note(
         P('The source of funds for this matter has not yet been confirmed as adequate. '
           'The matter must not proceed to completion until a fee earner records that '
           'sign-off.')
-    if getattr(matter, 'compliance_reviewed_by', None):
-        P(f"The compliance team reviewed this matter "
-          f"({esc(matter.compliance_review_outcome or 'reviewed')}), recorded by "
-          f"{esc(matter.compliance_reviewed_by)}.")
-    if not sof_confirmed:
-        P("Where the source of funds cannot be established, the firm must not carry out "
-          "the transaction, and should consider whether a report to the firm's MLRO or "
-          "the National Crime Agency is required (regulation 31, MLR 2017).")
 
-    # --- 11. Audit trail and record-keeping ---------------------------
-    H('11. Audit trail and record-keeping')
-    if audit_rows:
-        P('The following events were recorded against this matter:')
-        for a in audit_rows:
-            desc = a.description or (getattr(a.action, 'value', None) or str(a.action or ''))
-            bullet(f"{fmt_dt(a.created_at)} - {esc(desc)}")
-    else:
-        P('No audit-log events were recorded against this matter.')
-    _files = storage.get('uploaded_files') or []
-    if _files:
-        P('Documents held on the file:')
-        for f in _files:
-            bullet(f"{esc(f.get('filename', 'document'))} "
-                   f"({esc(str(f.get('category', '')).replace('_', ' '))})")
-    if dv_rows:
-        P('Document verification results:')
-        for dv in dv_rows:
-            bullet(f"{esc(dv.filename)} - "
-                   f"{esc(getattr(dv.verdict, 'value', None) or dv.verdict)}")
-    P('This report and its supporting documents must be retained for five years from the '
-      'end of the business relationship or completion of the transaction, then deleted '
-      'unless a specific legal exception applies (regulation 40, MLR 2017).')
-
-    # --- 12. Standards applied ----------------------------------------
-    H('12. Standards applied')
-    P('This assessment was carried out against the following standards:')
-    bullet('The Money Laundering, Terrorist Financing and Transfer of Funds (Information '
-           'on the Payer) Regulations 2017 - regulations 28(11), 33, 35 and 40.')
-    bullet('The LSAG Anti-Money Laundering Guidance for the Legal Sector - section 6.8, '
-           'Source of Funds.')
-    bullet('The SRA Thematic Review of Source of Funds and Wealth Compliance, '
-           '5 November 2025.')
-
-    story.append(Spacer(1, 16))
-    story.append(Paragraph(
-        f"<i>Generated by the Agora Source of Funds platform on "
-        f"{datetime.now().strftime('%d/%m/%Y at %H:%M')}.</i>", sub_style))
+    # --- Footer: Agora wordmark + matter metadata on every page -------
+    _foot_meta = f"{_ref}  ·  {_client}  ·  SoF Assessment"
 
     def _footer(canvas, _doc):
         canvas.saveState()
+        _y = 1.5 * cm
+        canvas.setStrokeColor(HexColor('#dddddd'))
+        canvas.setLineWidth(0.5)
+        canvas.line(2 * cm, _y, A4[0] - 2 * cm, _y)
+        canvas.setFillColor(HexColor('#1a1a1a'))
+        canvas.setFont('Helvetica-Bold', 9)
+        canvas.drawString(2 * cm, _y - 0.52 * cm, 'AGORA')
+        _w = canvas.stringWidth('AGORA', 'Helvetica-Bold', 9)
+        canvas.setFillColor(HexColor('#E8922D'))
+        canvas.setFont('Helvetica-Bold', 9)
+        canvas.drawString(2 * cm + _w + 4, _y - 0.52 * cm, 'CONSULTING')
         canvas.setFont('Helvetica', 7)
-        canvas.setFillColor(HexColor('#999999'))
-        canvas.drawString(2 * cm, 1.1 * cm,
-                          f"Source of Funds Audit Report - "
-                          f"{matter.reference_number or matter.id}")
-        canvas.drawRightString(A4[0] - 2 * cm, 1.1 * cm, f"Page {_doc.page}")
+        canvas.setFillColor(HexColor('#888888'))
+        canvas.drawRightString(A4[0] - 2 * cm, _y - 0.40 * cm, _foot_meta)
+        canvas.drawRightString(A4[0] - 2 * cm, _y - 0.74 * cm,
+                               f"Generated {gen_dt}  ·  Page {_doc.page}")
         canvas.restoreState()
 
     pdf_buffer = BytesIO()
     pdf = SimpleDocTemplate(
         pdf_buffer, pagesize=A4,
-        topMargin=2 * cm, bottomMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2.2 * cm,
         leftMargin=2 * cm, rightMargin=2 * cm,
-        title=f"SoF Audit Report {matter.reference_number or matter.id}",
+        title=f"SoF Audit Report {_ref}",
     )
     pdf.build(story, onFirstPage=_footer, onLaterPages=_footer)
     pdf_buffer.seek(0)
 
-    _fname = (f"SoF_Audit_Report_{matter.reference_number or matter.id}.pdf"
-              .replace(' ', '_'))
+    _fname = f"SoF_Audit_Report_{_ref}.pdf".replace(' ', '_')
     return StreamingResponse(
         pdf_buffer,
         media_type="application/pdf",
