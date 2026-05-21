@@ -769,38 +769,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       const action = (result.claim_actions || {})[String(idx)] || {};
       if (action.sufficient) return 'verified';
       const comp = action.compliance || {};
-      if (comp.state === 'in_review') {
-        return result.matter_compliance_status === 'returned' ? 'returned' : 'sent';
-      }
+      if (comp.state === 'in_review') return 'sent';
+      if (comp.state === 'returned') return 'returned';
       return 'review';
-    };
-
-    // For a claim that needs action, work out WHICH results tile the
-    // reviewer should go to, and return a label + the target tile id.
-    const claimAction = (evidence: any, claim: any): { label: string; tile: string } => {
-      const dv = (evidence && evidence.document_verification) || {};
-      const verdict = dv.verdict;
-      const diffs = Array.isArray(dv.differences) ? dv.differences : [];
-      if (verdict === 'Suspicious' || verdict === 'LikelyTampered' || diffs.length > 0) {
-        return { label: 'See Document Verification', tile: 'tile-doc-verification' };
-      }
-      const st = String((claim && claim.source_type) || '').toLowerCase();
-      if (st.includes('saving') || st.includes('accumul')) {
-        return { label: 'See Funds Lineage', tile: 'tile-funds-lineage' };
-      }
-      const trAlerts = result.transaction_review_summary?.total_alerts || 0;
-      if (trAlerts > 0) {
-        return { label: 'See Transaction Review', tile: 'tile-transaction-review' };
-      }
-      return { label: 'See Documents Required', tile: 'tile-documents-required' };
-    };
-
-    // Scroll to (and open) a results tile elsewhere on the page.
-    const goToTile = (tileId: string) => {
-      const el = document.getElementById(tileId);
-      if (!el) return;
-      if (el.tagName === 'DETAILS') (el as HTMLDetailsElement).open = true;
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     return (
@@ -835,19 +806,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 <tr>
                   <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Claim</th>
                   <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Status</th>
-                  <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Action Required</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-zinc-100">
                 {claimList.map((claim, idx) => {
-                  const evidence = result.evidence_matches[idx] || {};
                   const status = claimStatus(idx);
                   const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
                   const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
-                  // An action link is shown for claims still with the
-                  // reviewer (Under Review or Returned from Compliance).
-                  const action = (status === 'review' || status === 'returned')
-                    ? claimAction(evidence, claim) : null;
                   const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
                     verified: { label: 'Verified', cls: 'bg-green-50 text-green-700 ring-green-200/80', dot: 'bg-green-500' },
                     sent:     { label: 'Sent to Compliance', cls: 'bg-blue-50 text-blue-700 ring-blue-200/80', dot: 'bg-blue-500' },
@@ -865,19 +830,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset ${chip.cls}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />{chip.label}
                         </span>
-                      </td>
-                      <td className="px-5 py-3.5 text-sm whitespace-nowrap">
-                        {action ? (
-                          <button
-                            type="button"
-                            onClick={() => goToTile(action.tile)}
-                            className="text-xs font-medium text-zinc-700 hover:text-zinc-900 underline underline-offset-2"
-                          >
-                            {action.label} →
-                          </button>
-                        ) : (
-                          <span className="text-xs text-zinc-400">—</span>
-                        )}
                       </td>
                     </tr>
                   );
@@ -1682,6 +1634,50 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               </ul>
                             </div>
                           )}
+
+                          {/* Compliance conversation — the audit trail of
+                              messages between the fee earner and compliance. */}
+                          {(() => {
+                            const thread: any[] = (row.action.compliance || {}).thread || [];
+                            if (thread.length === 0) return null;
+                            const fmtTs = (s: string) => {
+                              const d = new Date(s);
+                              return isNaN(d.getTime())
+                                ? ''
+                                : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                            };
+                            return (
+                              <div className="mt-3 pt-3 border-t border-zinc-100">
+                                <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
+                                  Compliance conversation
+                                </div>
+                                <ul className="space-y-2">
+                                  {thread.map((m: any, ti: number) => {
+                                    const isCompliance = m.actor === 'compliance';
+                                    const who = isCompliance ? 'Compliance' : 'Fee earner';
+                                    const verb = m.action === 'returned'
+                                      ? 'returned to fee earner'
+                                      : m.action === 'cancelled'
+                                        ? 'cancelled referral'
+                                        : 'sent to compliance';
+                                    return (
+                                      <li key={ti} className="text-xs leading-snug">
+                                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                          isCompliance ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
+                                        }`}>
+                                          {who}
+                                        </span>
+                                        <span className="ml-1.5 text-zinc-400">
+                                          {verb} · {m.by || 'unknown'}{m.at ? ` · ${fmtTs(m.at)}` : ''}
+                                        </span>
+                                        <div className="mt-0.5 italic text-zinc-700">"{m.message}"</div>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              </div>
+                            );
+                          })()}
 
                           {/* Per-claim actions — bottom-right. */}
                           {(() => {

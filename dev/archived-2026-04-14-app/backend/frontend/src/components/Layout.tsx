@@ -55,11 +55,12 @@ function SidebarLink({ href, label, currentPath, onClick }: {
 
 // Sidebar tab link for the in-matter view. Activity tracked by ?tab=
 // search param; falls back to "sof-assessment" if no tab in URL.
-function MatterTabLink({ tabId, label, activeTab, matterId, onClick }: {
+function MatterTabLink({ tabId, label, activeTab, matterId, fromCompliance, onClick }: {
   tabId: string;
   label: string;
   activeTab: string;
   matterId: number;
+  fromCompliance?: boolean;
   onClick?: () => void;
 }) {
   const isActive = activeTab === tabId
@@ -67,8 +68,11 @@ function MatterTabLink({ tabId, label, activeTab, matterId, onClick }: {
   const stateCls = isActive
     ? 'bg-zinc-100 text-zinc-900 font-medium border-l-2 border-zinc-900 -ml-px'
     : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 font-normal border-l-2 border-transparent -ml-px'
+  // Carry ?from=compliance across tab switches so the compliance review
+  // panel stays visible while a compliance officer moves between tabs.
+  const href = `/matters/${matterId}?tab=${tabId}${fromCompliance ? '&from=compliance' : ''}`
   return (
-    <Link to={`/matters/${matterId}?tab=${tabId}`} onClick={onClick} className={`${baseCls} ${stateCls}`}>
+    <Link to={href} onClick={onClick} className={`${baseCls} ${stateCls}`}>
       {label}
     </Link>
   )
@@ -86,6 +90,7 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false) // mobile drawer
   const dropdownRef = useRef<HTMLDivElement>(null)
   const activeTab = searchParams.get('tab') || 'sof-assessment'
+  const fromCompliance = searchParams.get('from') === 'compliance'
 
   const handleLogout = () => {
     logout()
@@ -224,6 +229,7 @@ export default function Layout() {
                 label={tab.label}
                 activeTab={activeTab}
                 matterId={currentMatter.id}
+                fromCompliance={fromCompliance}
                 onClick={() => setSidebarOpen(false)}
               />
             ))}

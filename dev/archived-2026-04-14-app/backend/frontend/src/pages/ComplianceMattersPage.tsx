@@ -115,7 +115,7 @@ export default function ComplianceMattersPage() {
               {shown.map((m) => (
                 <tr key={m.id} className="hover:bg-zinc-50/60">
                   <td className="px-5 py-3">
-                    <Link to={`/matters/${m.id}`} className="font-semibold text-zinc-900 hover:underline">
+                    <Link to={`/matters/${m.id}?from=compliance`} className="font-semibold text-zinc-900 hover:underline">
                       {m.reference_number}
                     </Link>
                   </td>
@@ -143,7 +143,7 @@ export default function ComplianceMattersPage() {
                   </td>
                   <td className="px-5 py-3 text-right">
                     <Link
-                      to={`/matters/${m.id}`}
+                      to={`/matters/${m.id}?from=compliance`}
                       className="text-xs font-medium text-zinc-700 hover:text-zinc-900 underline"
                     >
                       Review →

@@ -20,6 +20,10 @@ export default function MatterDetailPage() {
   const [searchParams] = useSearchParams()
   const tabParam = searchParams.get('tab') as TabType | null
   const activeTab: TabType = (tabParam && VALID_TABS.includes(tabParam)) ? tabParam : 'sof-assessment'
+  // The compliance review panel is the compliance team's surface, so it
+  // only shows when the matter is opened from a Compliance route
+  // (?from=compliance), not from the normal Workspace route.
+  const fromCompliance = searchParams.get('from') === 'compliance'
 
   const [matter, setMatter] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -144,8 +148,10 @@ export default function MatterDetailPage() {
         </div>
       </div>
 
-      {/* Compliance review banner / panel. */}
-      <ComplianceReviewPanel matter={matter} onReviewed={() => refreshMatter()} />
+      {/* Compliance review panel — shown only on the Compliance route. */}
+      {fromCompliance && (
+        <ComplianceReviewPanel matter={matter} onReviewed={() => refreshMatter()} />
+      )}
 
       {/* Tab Content — sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
@@ -944,10 +950,22 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
   }
 
   const returnToFeeEarner = async () => {
-    if (!confirm('Return this matter to the fee earner? All referrals have been reviewed.')) return
+    const rationale = window.prompt(
+      'Return this matter to the fee earner. Give the rationale for the return (required) — '
+      + 'the fee earner sees this so they know what compliance found.',
+      '',
+    )
+    if (rationale === null) return
+    if (rationale.trim().length < 10) {
+      alert('A rationale of at least 10 characters is required.')
+      return
+    }
     setBusy(true)
     try {
-      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/return-to-fee-earner`, { method: 'POST' })
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/return-to-fee-earner`, {
+        method: 'POST',
+        body: JSON.stringify({ rationale: rationale.trim() }),
+      })
       if (!r.ok) {
         const err = await r.json().catch(() => ({}))
         alert(`Could not return: ${err.detail || r.statusText}`)

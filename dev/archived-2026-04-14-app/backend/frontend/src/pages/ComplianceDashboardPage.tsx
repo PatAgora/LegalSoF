@@ -131,7 +131,7 @@ export default function ComplianceDashboardPage() {
               {data.recent.map((m) => (
                 <tr key={m.id} className="hover:bg-zinc-50/60">
                   <td className="px-5 py-3">
-                    <Link to={`/matters/${m.id}`} className="font-semibold text-zinc-900 hover:underline">
+                    <Link to={`/matters/${m.id}?from=compliance`} className="font-semibold text-zinc-900 hover:underline">
                       {m.reference_number}
                     </Link>
                   </td>

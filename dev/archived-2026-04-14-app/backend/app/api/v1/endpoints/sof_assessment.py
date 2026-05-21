@@ -3093,11 +3093,20 @@ async def send_claim_to_compliance(
     who = current_user.full_name or current_user.email
     now = datetime.now(timezone.utc)
     entry = _claim_action_entry(storage, claim_index)
+    # Preserve any prior conversation thread so a claim re-sent after a
+    # compliance return keeps the full fee-earner / compliance history.
+    prior = entry.get('compliance') or {}
+    thread = list(prior.get('thread') or [])
+    thread.append({
+        'actor': 'fee_earner', 'action': 'sent',
+        'message': reason, 'by': who, 'at': now.isoformat(),
+    })
     entry['compliance'] = {
         'state': 'in_review',
         'sent_by': who,
         'sent_at': now.isoformat(),
         'reason': reason,
+        'thread': thread,
     }
     _db_save_storage(db, matter_id, storage)
 
@@ -3178,6 +3187,10 @@ async def cancel_claim_compliance(
     comp['cancelled_by'] = who
     comp['cancelled_at'] = now.isoformat()
     comp['cancel_rationale'] = rationale
+    comp.setdefault('thread', []).append({
+        'actor': 'fee_earner', 'action': 'cancelled',
+        'message': rationale, 'by': who, 'at': now.isoformat(),
+    })
     _db_save_storage(db, matter_id, storage)
 
     # If no claim is still under review, lift the matter's status.
@@ -3298,40 +3311,69 @@ async def mark_referral_reviewed(
 @router.post("/matters/{matter_id}/return-to-fee-earner")
 async def return_to_fee_earner(
     matter_id: int,
+    request: Dict[str, Any],
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_sync_db),
 ):
     """Compliance officer returns the matter to the fee earner. Only
-    permitted once every referral on the matter has been reviewed; sets
-    the matter's compliance status to 'returned'."""
+    permitted once every referral on the matter has been reviewed. A
+    rationale is required so the fee earner knows what compliance found;
+    it is recorded against each referred claim's conversation thread."""
+    rationale = (request.get('rationale') or '').strip()
+    if len(rationale) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A rationale (at least 10 characters) is required so the fee "
+                "earner knows why the matter is being returned."
+            ),
+        )
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
     storage = _db_load_storage(db, matter_id) or {}
     actions = storage.get('claim_actions') or {}
 
-    referrals = [
-        entry for entry in actions.values()
+    referral_items = [
+        (key, entry) for key, entry in actions.items()
         if (entry.get('compliance') or {}).get('state') == 'in_review'
     ]
-    if not referrals:
+    if not referral_items:
         raise HTTPException(status_code=409, detail="This matter has no open compliance referrals")
-    unreviewed = [r for r in referrals if not (r.get('compliance') or {}).get('reviewed')]
+    unreviewed = [e for _, e in referral_items if not (e.get('compliance') or {}).get('reviewed')]
     if unreviewed:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"{len(unreviewed)} of {len(referrals)} referral(s) have not been "
+                f"{len(unreviewed)} of {len(referral_items)} referral(s) have not been "
                 f"reviewed. Review every referral before returning the matter."
             ),
         )
 
     who = current_user.full_name or current_user.email
     now = datetime.now(timezone.utc)
+
+    # Flip every referred claim to 'returned' and log the compliance
+    # officer's rationale into each claim's conversation thread. This
+    # lets the fee earner re-send the claim afterwards.
+    for _, entry in referral_items:
+        comp = entry.get('compliance') or {}
+        comp['state'] = 'returned'
+        comp['returned_by'] = who
+        comp['returned_at'] = now.isoformat()
+        comp['return_rationale'] = rationale
+        comp.setdefault('thread', []).append({
+            'actor': 'compliance', 'action': 'returned',
+            'message': rationale, 'by': who, 'at': now.isoformat(),
+        })
+        entry['compliance'] = comp
+    _db_save_storage(db, matter_id, storage)
+
     matter.compliance_status = 'returned'
     matter.compliance_reviewed_at = now
     matter.compliance_reviewed_by = who
     matter.compliance_review_outcome = 'returned'
+    matter.compliance_review_notes = rationale
 
     db.add(AuditLog(
         matter_id=matter_id,
@@ -3341,9 +3383,10 @@ async def return_to_fee_earner(
         entity_id=matter_id,
         description=(
             f"Matter {matter.reference_number} returned to the fee earner by "
-            f"compliance ({who}) — all {len(referrals)} referral(s) reviewed."
+            f"compliance ({who}) — all {len(referral_items)} referral(s) reviewed. "
+            f"Rationale: {rationale}"
         ),
-        details={"reviewer": who, "referrals": len(referrals)},
+        details={"reviewer": who, "referrals": len(referral_items), "rationale": rationale},
     ))
     if matter.compliance_submitted_by:
         submitter = db.query(User).filter(
@@ -3358,7 +3401,7 @@ async def return_to_fee_earner(
                 title="Returned from compliance",
                 message=(
                     f"Matter {matter.reference_number} has been reviewed and "
-                    f"returned to you by compliance ({who})."
+                    f"returned to you by compliance ({who}). Rationale: {rationale}"
                 ),
             ))
     db.commit()
