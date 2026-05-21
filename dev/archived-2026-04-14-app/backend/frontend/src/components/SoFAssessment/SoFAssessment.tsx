@@ -592,11 +592,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     }
   };
 
-  const downloadFileNote = () => {
-    window.open(
-      `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/file-note`,
-      '_blank'
-    );
+  // window.open() opens a fresh tab with no auth header, so the
+  // endpoint (require_analyst) returns 401. Fetch through authFetch
+  // and trigger a browser download of the PDF instead.
+  const downloadFileNote = async () => {
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/file-note`,
+      );
+      if (!r.ok) {
+        alert(`Audit report failed (HTTP ${r.status}). Check you're still logged in.`);
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cd = r.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+      a.download = m ? decodeURIComponent(m[1]) : `SoF_Audit_Report_${matterId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Audit report failed: ${err.message || 'Unknown error'}`);
+    }
   };
 
   // ── Per-claim reviewer / compliance actions ────────────────────

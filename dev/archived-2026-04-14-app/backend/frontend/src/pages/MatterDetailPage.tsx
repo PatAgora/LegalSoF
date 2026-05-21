@@ -109,39 +109,6 @@ export default function MatterDetailPage() {
             </p>
           </div>
           <div className="flex space-x-3">
-            <button
-              onClick={async () => {
-                // window.open() launches a fresh tab with no auth headers,
-                // so the server (require_analyst) returned 401. Fetch
-                // through authFetch instead and trigger a browser download.
-                try {
-                  const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${id}/report`)
-                  if (!r.ok) {
-                    alert(`Report failed (HTTP ${r.status}). Check you're still logged in.`)
-                    return
-                  }
-                  const blob = await r.blob()
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  // Try to preserve any filename the server suggested
-                  // via Content-Disposition; otherwise fall back to a
-                  // matter-scoped name.
-                  const cd = r.headers.get('Content-Disposition') || ''
-                  const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
-                  a.download = m ? decodeURIComponent(m[1]) : `matter-${id}-report.docx`
-                  document.body.appendChild(a)
-                  a.click()
-                  a.remove()
-                  URL.revokeObjectURL(url)
-                } catch (err: any) {
-                  alert(`Report failed: ${err.message || 'Unknown error'}`)
-                }
-              }}
-              className="px-4 py-2 text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 rounded transition-colors"
-            >
-              Generate Report
-            </button>
             <SendToComplianceButton
               matterId={matter.id}
               submittedAt={matter.compliance_submitted_at}
