@@ -15,32 +15,32 @@ class TransactionMonitoringService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.config = self._load_config()
+        # Raw config rows: {key: (value, value_type)}. Resolved into a
+        # concrete `self.config` per-matter (tiered settings depend on
+        # the matter's risk rating) at the start of run_checks_for_matter.
+        self._raw_config = self._load_raw_config()
+        self.config = self._resolve_config('medium')
         self.country_risks = self._load_country_risks()
-    
-    def _load_config(self) -> Dict[str, any]:
-        """Load configuration from database"""
-        config_items = self.db.query(TransactionConfig).all()
-        config = {}
-        
-        for item in config_items:
-            key = item.key
-            value = item.value
-            value_type = item.value_type
-            
-            # Convert value to appropriate type
-            if value_type == 'int':
-                config[key] = int(value)
-            elif value_type == 'float':
-                config[key] = float(value)
-            elif value_type == 'bool':
-                config[key] = value.lower() in ('true', '1', 'yes')
-            elif value_type == 'json':
-                config[key] = json.loads(value)
-            else:
-                config[key] = value
-        
-        return config
+
+    def _load_raw_config(self) -> Dict[str, tuple]:
+        """Load raw configuration rows from the database."""
+        return {
+            item.key: (item.value, item.value_type)
+            for item in self.db.query(TransactionConfig).all()
+        }
+
+    def _resolve_config(self, tier: str) -> Dict[str, any]:
+        """Resolve every config row to the concrete value for `tier`
+        ('low' | 'medium' | 'high'). Tiered settings pick their
+        per-risk-tier value; scalar settings are coerced as before."""
+        from app.services.config_resolver import resolve_value
+        out: Dict[str, any] = {}
+        for key, (value, value_type) in self._raw_config.items():
+            try:
+                out[key] = resolve_value(value, value_type, tier)
+            except Exception:
+                out[key] = value
+        return out
     
     def _load_country_risks(self) -> Dict[str, dict]:
         """Load country risk data from database"""
@@ -56,6 +56,15 @@ class TransactionMonitoringService:
     
     def run_checks_for_matter(self, matter_id: int) -> List[TransactionAlert]:
         """Run all AML checks for a matter's transactions"""
+        # Resolve the per-risk-tier configuration for THIS matter — a
+        # high-risk client gets the High-tier thresholds and rule
+        # toggles, etc.
+        from app.models import Matter
+        from app.services.config_resolver import map_risk_tier
+        matter = self.db.query(Matter).filter(Matter.id == matter_id).first()
+        rating = (matter.risk_rating.value if matter and matter.risk_rating else 'medium')
+        self.config = self._resolve_config(map_risk_tier(rating))
+
         # Module master switch — operator can disable the whole
         # Transaction Review section from the Configuration page.
         if not self.config.get('tr_enabled', True):

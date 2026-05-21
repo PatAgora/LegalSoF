@@ -2,6 +2,7 @@
 Initialize Transaction Review tables in the database.
 This creates the necessary schema for transaction monitoring and AML checks.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -147,16 +148,20 @@ def seed_transaction_config(engine):
     saved values are preserved across deploys.
     """
     with engine.connect() as conn:
+        # Helper for a per-risk-tier ("tiered") setting value. A tiered
+        # setting stores JSON {low, medium, high}; the value the engine
+        # uses is picked from the matter's risk rating at run time.
+        def _t(low, medium, high):
+            return json.dumps({"low": low, "medium": medium, "high": high})
+
         # The full catalogue. Each row: (key, default_value, type,
         # description). value_type is "string" | "int" | "float" |
-        # "bool" | "json". Description is shown to the operator in the
+        # "bool" | "json", or the per-risk-tier forms "tiered_float" |
+        # "tiered_int" | "tiered_bool" whose value is JSON {low,medium,
+        # high}. Description is shown to the operator in the
         # Configuration page so write it as user-facing copy.
         configs = [
-            # ── Module master switches ────────────────────────────────
-            # Each toggle controls whether the corresponding module
-            # runs at all. When OFF, the module is skipped and its
-            # outputs come back empty so the operator can disable a
-            # whole section of the platform if it isn't applicable.
+            # ── Module master switches (firm-wide, not tiered) ────────
             # NOTE: there is deliberately no sof_enabled switch — Source
             # of Funds Analysis is the core of the platform and is
             # always on; the dv/tr/fl modules below are optional.
@@ -170,92 +175,88 @@ def seed_transaction_config(engine):
             # ── Source of Funds Analysis ──────────────────────────────
             ('sof_ai_extraction', 'true', 'bool',
              'When enabled, free-text Source of Funds explanations are read by an AI model to identify the claimed sources and amounts — this understands paraphrasing and unusual wording, so claims are far less likely to be missed. When disabled (or when no AI provider API key is configured on the server) the platform falls back to a built-in keyword parser. Note: enabling this sends the client explanation text to the configured AI provider for processing.'),
-            ('sof_amount_tolerance_pct', '5.0', 'float',
-             'How much the amount on a supporting document is allowed to differ from the amount the client declared, before the claim is flagged for manual review. Worked as a percentage. Example: 5% on a £10,000 claim allows for ±£500. Lower the percentage to be stricter, raise it to be more forgiving.'),
-            ('sof_date_tolerance_days', '7', 'int',
-             'The number of days of slack allowed between the date a transaction happened in the bank statement and the date the client (or their supporting document) said it happened. Anything outside this window is flagged. Default 7 days.'),
-            ('sof_confidence_threshold', '0.999', 'float',
-             'How confident the platform must be that a document matches the client\'s claim before it auto-passes without manual review. A number between 0.0 (no confidence) and 1.0 (certainty). Default 0.999 = effectively only auto-pass on a near-perfect match.'),
-            ('sof_partial_confidence_threshold', '0.99', 'float',
+            ('sof_amount_tolerance_pct', _t(10.0, 5.0, 2.5), 'tiered_float',
+             'How much the amount on a supporting document is allowed to differ from the amount the client declared, before the claim is flagged for manual review (percentage). Set tighter for higher-risk clients — e.g. 2.5% high / 5% medium / 10% low.'),
+            ('sof_date_tolerance_days', _t(14, 7, 3), 'tiered_int',
+             'The number of days of slack allowed between the date a transaction happened in the bank statement and the date the client (or their supporting document) said it happened. Anything outside this window is flagged.'),
+            ('sof_confidence_threshold', _t(0.99, 0.999, 0.999), 'tiered_float',
+             'How confident the platform must be that a document matches the client\'s claim before it auto-passes without manual review (0.0–1.0). Higher = stricter; high-risk clients should sit near 1.0.'),
+            ('sof_partial_confidence_threshold', _t(0.95, 0.99, 0.999), 'tiered_float',
              'A lower confidence bar used in borderline situations — when a document partially supports a claim but not perfectly. Match confidence at or above this value still earns a partial pass; below it the claim goes to manual review.'),
-            ('sof_min_claims_required', '1', 'int',
-             'The minimum number of source-of-funds claims the client must declare and successfully evidence before the matter can reach a Sufficient verdict. Most matters need 1 — raise this if you require multiple independent sources for high-risk transactions.'),
+            ('sof_min_claims_required', _t(1, 1, 1), 'tiered_int',
+             'The minimum number of source-of-funds claims the client must declare and successfully evidence before the matter can reach a Sufficient verdict. Raise it for higher-risk clients if you require multiple independent sources.'),
 
             # ── Document Verification ─────────────────────────────────
-            ('dv_score_verified_min', '75', 'int',
-             'Every uploaded document is given an authenticity score from 0 (almost certainly tampered) to 100 (looks genuine). Documents scoring at or above this number are automatically marked Verified. Default 75 — raise it to be stricter, lower it to accept more documents automatically.'),
-            ('dv_score_suspicious_min', '45', 'int',
-             'The cut-off between Suspicious and Likely Tampered. Documents scoring between this number and the Verified threshold are marked Suspicious — Needs Review. Anything below this number is marked Likely Tampered (treated as a probable forgery). Default 45.'),
+            ('dv_score_verified_min', _t(65, 75, 85), 'tiered_int',
+             'Every uploaded document is given an authenticity score from 0 (almost certainly tampered) to 100 (looks genuine). Documents scoring at or above this number are automatically marked Verified. Higher = stricter for higher-risk clients.'),
+            ('dv_score_suspicious_min', _t(40, 45, 55), 'tiered_int',
+             'The cut-off between Suspicious and Likely Tampered. Documents scoring between this number and the Verified threshold are marked Suspicious — Needs Review. Anything below this number is marked Likely Tampered.'),
             ('dv_weight_authenticity', '0.5', 'float',
-             'How much weight the platform puts on the document\'s structural make-up (its PDF objects, metadata, fonts, digital signatures) when calculating the overall authenticity score. Higher = structural fingerprint matters more. The three weights should add up to roughly 1.0.'),
+             'How much weight the platform puts on the document\'s structural make-up (its PDF objects, metadata, fonts, digital signatures) when calculating the overall authenticity score. The three weights should add up to roughly 1.0.'),
             ('dv_weight_forensic_flags', '0.3', 'float',
-             'How much weight the platform puts on forensic warning flags raised by the pipeline — signs of image editing, OCR text not matching the visible text, font substitution, etc. Higher = these red flags hurt the score more. The three weights should add up to roughly 1.0.'),
+             'How much weight the platform puts on forensic warning flags raised by the pipeline — signs of image editing, OCR text not matching the visible text, font substitution, etc. The three weights should add up to roughly 1.0.'),
             ('dv_weight_template_match', '0.2', 'float',
-             'How much weight the platform puts on whether the document visually matches a known bank statement template (e.g. a genuine HSBC layout). Higher = bigger penalty for unrecognised layouts. The three weights should add up to roughly 1.0.'),
-            ('dv_block_on_tampered', 'true', 'bool',
-             'When ON, any document marked Likely Tampered will BLOCK the matter from being signed off until a reviewer manually accepts the document with a written rationale. When OFF, the warning is still recorded but the matter can proceed without an explicit override.'),
+             'How much weight the platform puts on whether the document visually matches a known bank statement template (e.g. a genuine HSBC layout). The three weights should add up to roughly 1.0.'),
+            ('dv_block_on_tampered', _t('true', 'true', 'true'), 'tiered_bool',
+             'When ON, any document marked Likely Tampered will BLOCK the matter from being signed off until a reviewer manually accepts the document with a written rationale. When OFF, the warning is still recorded but the matter can proceed.'),
             ('dv_allow_self_accept', 'true', 'bool',
-             'When ON, any analyst can mark a Suspicious document as accepted by themselves, with a written rationale. When OFF, accepting a document requires the four-eyes flow — one analyst proposes acceptance, then a different admin approves it. Use OFF for higher-risk firms that want a second pair of eyes on every sign-off.'),
+             'When ON, any analyst can mark a Suspicious document as accepted by themselves, with a written rationale. When OFF, accepting a document requires the four-eyes flow — one analyst proposes acceptance, then a different admin approves it.'),
 
             # ── Transaction Review ─────────────────────────────────────
-            # Pre-existing thresholds — preserved exactly so the
-            # transaction-monitoring service keeps working unchanged.
-            ('cfg_high_risk_min_amount', '10000.00', 'float',
-             'A transaction touching a high-risk country triggers an alert only if its value is at or above this GBP amount. Lower the number to alert on smaller cross-border movements. Default £10,000.'),
-            ('cfg_outlier_vs_median', '5.0', 'float',
-             'A transaction is flagged as an outlier when its amount is at least this many times the median amount across all the client\'s transactions. Example: 5 means a £25,000 credit when the typical credit is £5,000.'),
-            ('cfg_outlier_min_amount', '1000.00', 'float',
-             'Outlier detection ignores transactions below this GBP amount — so day-to-day spending doesn\'t generate noise. Only transactions at or above this floor are eligible to be flagged as outliers. Default £1,000.'),
-            ('cfg_cash_threshold_deposit', '7500.00', 'float',
-             'Cash deposits at or above this GBP amount automatically raise a "Large Cash Deposit" alert. UK regulators expect attention to cash above £10k; firms often set this lower for an early warning. Default £7,500.'),
-            ('cfg_cash_threshold_withdrawal', '7500.00', 'float',
-             'Cash withdrawals at or above this GBP amount automatically raise a "Large Cash Withdrawal" alert. Default £7,500.'),
-            ('cfg_velocity_days', '7', 'int',
-             'The size of the rolling window (in days) the velocity rule looks at when counting how many transactions a client has made. Default 7 — i.e. a week.'),
-            ('cfg_velocity_count', '5', 'int',
-             'A velocity alert fires when more than this many transactions happen inside the velocity window. Example: 5 transactions in 7 days. Lower the number to catch faster-moving funds.'),
-            ('rule_high_risk_country', 'true', 'bool',
-             'Master switch for the high-risk-country alert. When ON, transactions touching countries flagged High Risk in the platform\'s country list will raise an alert (subject to the high-risk minimum amount above).'),
-            ('rule_prohibited_country', 'true', 'bool',
-             'Master switch for the prohibited-country alert. When ON, any transaction touching a country on the sanctions / prohibited list raises an alert, regardless of amount.'),
-            ('rule_cash_deposit', 'true', 'bool',
-             'Master switch for the large-cash-deposit alert. When ON, cash credits at or above the deposit threshold raise an alert.'),
-            ('rule_cash_withdrawal', 'true', 'bool',
-             'Master switch for the large-cash-withdrawal alert. When ON, cash debits at or above the withdrawal threshold raise an alert.'),
-            ('rule_outlier', 'true', 'bool',
-             'Master switch for outlier detection. When ON, transactions that are unusually large compared to the client\'s normal activity are flagged.'),
-            ('rule_velocity', 'true', 'bool',
-             'Master switch for velocity (frequency) alerts. When ON, too many transactions in a short period trigger an alert.'),
-            ('rule_unusual_narrative', 'true', 'bool',
-             'Master switch for the unusual-narrative alert. When ON, transactions whose description matches a flagged keyword (e.g. "cash", "crypto", "bearer") will be alerted.'),
+            ('cfg_high_risk_min_amount', _t(15000.0, 10000.0, 5000.0), 'tiered_float',
+             'A transaction touching a high-risk country triggers an alert only if its value is at or above this GBP amount. Lower it for higher-risk clients to catch smaller cross-border movements.'),
+            ('cfg_outlier_vs_median', _t(7.0, 5.0, 3.0), 'tiered_float',
+             'A transaction is flagged as an outlier when its amount is at least this many times the median amount across all the client\'s transactions. Lower = more sensitive.'),
+            ('cfg_outlier_min_amount', _t(2000.0, 1000.0, 500.0), 'tiered_float',
+             'Outlier detection ignores transactions below this GBP amount — so day-to-day spending doesn\'t generate noise. Only transactions at or above this floor are eligible to be flagged as outliers.'),
+            ('cfg_cash_threshold_deposit', _t(10000.0, 7500.0, 3000.0), 'tiered_float',
+             'Cash deposits at or above this GBP amount automatically raise a "Large Cash Deposit" alert. Set lower for higher-risk clients for an earlier warning.'),
+            ('cfg_cash_threshold_withdrawal', _t(10000.0, 7500.0, 3000.0), 'tiered_float',
+             'Cash withdrawals at or above this GBP amount automatically raise a "Large Cash Withdrawal" alert. Set lower for higher-risk clients.'),
+            ('cfg_velocity_days', _t(7, 7, 7), 'tiered_int',
+             'The size of the rolling window (in days) the velocity rule looks at when counting how many transactions a client has made.'),
+            ('cfg_velocity_count', _t(8, 5, 3), 'tiered_int',
+             'A velocity alert fires when more than this many transactions happen inside the velocity window. Lower = catches faster-moving funds; tighten for higher-risk clients.'),
+            ('rule_high_risk_country', _t('true', 'true', 'true'), 'tiered_bool',
+             'The high-risk-country alert. When ON, transactions touching countries flagged High Risk raise an alert (subject to the high-risk minimum amount).'),
+            ('rule_prohibited_country', _t('true', 'true', 'true'), 'tiered_bool',
+             'The prohibited-country alert. When ON, any transaction touching a country on the sanctions / prohibited list raises an alert, regardless of amount.'),
+            ('rule_cash_deposit', _t('true', 'true', 'true'), 'tiered_bool',
+             'The large-cash-deposit alert. When ON, cash credits at or above the deposit threshold raise an alert.'),
+            ('rule_cash_withdrawal', _t('true', 'true', 'true'), 'tiered_bool',
+             'The large-cash-withdrawal alert. When ON, cash debits at or above the withdrawal threshold raise an alert.'),
+            ('rule_outlier', _t('true', 'true', 'true'), 'tiered_bool',
+             'Outlier detection. When ON, transactions that are unusually large compared to the client\'s normal activity are flagged.'),
+            ('rule_velocity', _t('true', 'true', 'true'), 'tiered_bool',
+             'Velocity (frequency) alerts. When ON, too many transactions in a short period trigger an alert.'),
+            ('rule_unusual_narrative', _t('true', 'true', 'true'), 'tiered_bool',
+             'The unusual-narrative alert. When ON, transactions whose description matches a flagged keyword (e.g. "cash", "crypto", "bearer") raise an alert.'),
             ('unusual_narrative_keywords',
              '["cash", "bearer", "nominee", "offshore", "shell", "sanctioned", "embargo", "frozen", "cryptocurrency", "crypto", "bitcoin", "dark web", "darkweb", "ransom", "extortion"]',
              'json',
              'The list of keywords that trigger the unusual-narrative alert. Edit as a JSON array of lowercase strings. Any transaction whose description contains one of these words will raise the alert.'),
-
-            # New transaction-review settings exposed via the Configuration page
-            ('tr_round_number_alert_amount', '5000.00', 'float',
-             'Round-number credits at or above this GBP amount (multiples of £1,000) are flagged for review — round figures can be a sign of staged or structured payments. Default £5,000.'),
-            ('tr_structuring_window_days', '3', 'int',
-             'When looking for "structuring" (multiple deposits split deliberately to stay under the cash reporting threshold), this is the window in days. Multiple deposits inside this window that sit just below the cash threshold are grouped and flagged.'),
-            ('tr_structuring_band_pct', '20.0', 'float',
-             'How close to the cash threshold a deposit has to be before it counts as a structuring candidate, as a percentage. Default 20% — i.e. on a £7,500 threshold, deposits between £6,000 and £7,499 are considered "just under" and looked at together.'),
-            ('tr_critical_alerts_block', 'true', 'bool',
-             'When ON, any Critical-severity transaction-review alert will block the matter from being marked Sufficient until the alert is resolved or accepted with a rationale. When OFF, critical alerts are recorded but do not block sign-off.'),
+            ('tr_round_number_alert_amount', _t(10000.0, 5000.0, 2500.0), 'tiered_float',
+             'Round-number credits at or above this GBP amount (multiples of £1,000) are flagged for review — round figures can be a sign of staged or structured payments.'),
+            ('tr_structuring_window_days', _t(3, 3, 5), 'tiered_int',
+             'When looking for "structuring" (multiple deposits split deliberately to stay under the cash reporting threshold), this is the window in days.'),
+            ('tr_structuring_band_pct', _t(15.0, 20.0, 25.0), 'tiered_float',
+             'How close to the cash threshold a deposit has to be before it counts as a structuring candidate, as a percentage.'),
+            ('tr_critical_alerts_block', _t('true', 'true', 'true'), 'tiered_bool',
+             'When ON, any Critical-severity transaction-review alert will block the matter from being marked Sufficient until the alert is resolved or accepted with a rationale.'),
 
             # ── Funds Lineage ─────────────────────────────────────────
-            ('fl_traced_pct_required', '80.0', 'float',
-             'For savings / accumulation claims, the minimum percentage of the claimed amount that the platform must trace back to a verified origin (e.g. salary, investment income, sale proceeds) before the claim is automatically accepted. Anything below this percentage is flagged for manual review with the untraced amount highlighted. Default 80%.'),
-            ('fl_amount_match_tolerance', '0.005', 'float',
-             'When matching a debit from one bank account to the matching credit in another account, this is the allowed % difference between the two amounts. Stored as a fraction — 0.005 means 0.5%. So a £10,000 debit and a £10,050 credit (£50 difference = 0.5%) are still treated as the same transfer. Lower to be stricter, raise to allow for FX or rounding noise.'),
-            ('fl_min_amount_match_gbp', '1.00', 'float',
-             'A floor (in GBP) on the amount-match tolerance above, so even small transfers can be matched. The actual tolerance used is the larger of this fixed amount or the percentage tolerance. Default £1 — meaning transfers within £1 of each other will always be treated as a match.'),
-            ('fl_max_lookback_days', '730', 'int',
-             'How far back in time (in days) the tracer will walk when looking for the origin of the credit. Default 730 days (~2 years). Increase if your firm regularly handles clients whose funds accumulated over a longer period — e.g. inheritance held for 5+ years.'),
+            ('fl_traced_pct_required', _t(70.0, 80.0, 90.0), 'tiered_float',
+             'For savings / accumulation claims, the minimum percentage of the claimed amount that must be traced back to a verified origin before the claim is automatically accepted. Higher = stricter for higher-risk clients.'),
+            ('fl_amount_match_tolerance', _t(0.01, 0.005, 0.0025), 'tiered_float',
+             'When matching a debit from one bank account to the matching credit in another, this is the allowed fractional difference (0.005 = 0.5%). Tighten for higher-risk clients.'),
+            ('fl_min_amount_match_gbp', _t(1.0, 1.0, 1.0), 'tiered_float',
+             'A floor (in GBP) on the amount-match tolerance, so even small transfers can be matched. The actual tolerance is the larger of this fixed amount or the percentage tolerance.'),
+            ('fl_max_lookback_days', _t(730, 730, 1095), 'tiered_int',
+             'How far back in time (in days) the tracer will walk when looking for the origin of the credit. Increase for higher-risk clients whose funds accumulated over longer periods.'),
             ('fl_circular_reference_severity', 'high', 'string',
-             'If the tracer detects money moving in a loop (Account A → Account B → Account A) it flags this as a possible attempt to obscure the origin. This setting controls how severely the loop is flagged: "low" = informational only, "medium" = noted on the report, "high" = needs reviewer attention, "critical" = blocks sign-off. Default "high".'),
-            ('fl_statement_gap_warn_days', '30', 'int',
-             'When the tracer hits an incoming transfer from an account whose bank statements are missing (or don\'t cover the relevant date), a "statement gap" review item is raised after this many days of missing coverage. Default 30 days — i.e. if more than a month of statements is missing from the source account, ask the client for them.'),
+             'If the tracer detects money moving in a loop (Account A → Account B → Account A) it flags this as a possible attempt to obscure the origin. Severity: "low" = informational, "medium" = noted, "high" = needs review, "critical" = blocks sign-off.'),
+            ('fl_statement_gap_warn_days', _t(45, 30, 14), 'tiered_int',
+             'When the tracer hits an incoming transfer from an account whose bank statements are missing, a "statement gap" review item is raised after this many days of missing coverage. Tighten for higher-risk clients.'),
         ]
 
         # Keys removed from the catalogue in a later release. Delete
@@ -269,19 +270,57 @@ def seed_transaction_config(engine):
                 {"key": rk},
             )
 
-        existing_keys = {
-            row[0] for row in conn.execute(text("SELECT key FROM transaction_config")).all()
+        # Map of existing rows: key -> (value, value_type).
+        existing = {
+            row[0]: (row[1], row[2])
+            for row in conn.execute(
+                text("SELECT key, value, value_type FROM transaction_config")
+            ).all()
         }
 
         inserted = 0
+        migrated = 0
         for key, value, value_type, description in configs:
-            if key in existing_keys:
-                # Preserve operator-set values across deploys; only refresh
-                # the description so help text can be tweaked centrally.
-                conn.execute(
-                    text("UPDATE transaction_config SET description = :description WHERE key = :key"),
-                    {"key": key, "description": description},
-                )
+            if key in existing:
+                old_value, old_type = existing[key]
+                # Migration: a key that is now tiered but is stored as a
+                # plain scalar (from an earlier release) gets converted —
+                # the operator's single value is applied to ALL three
+                # tiers so nothing changes behaviourally until they
+                # deliberately differentiate the tiers.
+                if value_type.startswith('tiered_') and not (old_type or '').startswith('tiered_'):
+                    base = value_type[len('tiered_'):]
+                    if base == 'bool':
+                        v = str(old_value).strip().lower() in ('true', '1', 'yes')
+                    elif base == 'int':
+                        try:
+                            v = int(float(old_value))
+                        except (TypeError, ValueError):
+                            v = 0
+                    else:
+                        try:
+                            v = float(old_value)
+                        except (TypeError, ValueError):
+                            v = 0.0
+                    tiered_value = json.dumps({"low": v, "medium": v, "high": v})
+                    conn.execute(
+                        text(
+                            "UPDATE transaction_config SET value = :value, "
+                            "value_type = :value_type, description = :description "
+                            "WHERE key = :key"
+                        ),
+                        {"key": key, "value": tiered_value,
+                         "value_type": value_type, "description": description},
+                    )
+                    migrated += 1
+                else:
+                    # Preserve operator-set values across deploys; only
+                    # refresh the description so help text can be tweaked
+                    # centrally.
+                    conn.execute(
+                        text("UPDATE transaction_config SET description = :description WHERE key = :key"),
+                        {"key": key, "description": description},
+                    )
                 continue
             conn.execute(
                 text(
@@ -293,10 +332,10 @@ def seed_transaction_config(engine):
             inserted += 1
 
         conn.commit()
-        if inserted:
-            print(f"✅ Seeded {inserted} new config settings ({len(configs)} total in catalogue).")
-        else:
-            print(f"ℹ️  All {len(configs)} catalogue config keys already present; descriptions refreshed.")
+        print(
+            f"✅ Config catalogue: {len(configs)} settings "
+            f"({inserted} inserted, {migrated} migrated to per-risk-tier)."
+        )
 
 
 if __name__ == "__main__":

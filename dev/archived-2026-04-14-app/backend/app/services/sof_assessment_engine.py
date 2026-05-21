@@ -30,9 +30,12 @@ class SoFAssessmentEngine:
 
     def _load_settings(self) -> Dict[str, Any]:
         """Load the operator-tunable risk-appetite settings from the
-        transaction_config table. Falls back to sensible defaults if
-        the table hasn't been seeded yet — keeps the engine usable in
-        unit tests that don't run the boot path."""
+        transaction_config table, resolved for THIS matter's risk tier.
+
+        Tiered settings (per-risk-tier values) are resolved against the
+        matter's risk rating — critical/high matters get the High tier,
+        etc. Falls back to sensible defaults if the table hasn't been
+        seeded yet so the engine stays usable in unit tests."""
         defaults = {
             'sof_ai_extraction':             True,
             'sof_amount_tolerance_pct':       5.0,
@@ -42,24 +45,34 @@ class SoFAssessmentEngine:
         }
         try:
             from app.models.transaction import TransactionConfig
+            from app.models import Matter
+            from app.services.config_resolver import map_risk_tier, resolve_value
+
+            # Determine which risk tier's values apply to this matter.
+            tier = 'medium'
+            try:
+                matter = self.db.query(Matter).filter(
+                    Matter.id == self.matter_id
+                ).first()
+                if matter is not None:
+                    rating = matter.risk_rating.value if matter.risk_rating else 'medium'
+                    tier = map_risk_tier(rating)
+            except Exception:
+                tier = 'medium'
+            self.risk_tier = tier
+
             rows = self.db.query(TransactionConfig).filter(
                 TransactionConfig.key.in_(defaults.keys())
             ).all()
             out = dict(defaults)
             for row in rows:
                 try:
-                    if row.value_type == 'float':
-                        out[row.key] = float(row.value)
-                    elif row.value_type == 'int':
-                        out[row.key] = int(row.value)
-                    elif row.value_type == 'bool':
-                        out[row.key] = str(row.value).lower() in ('true', '1', 'yes')
-                    else:
-                        out[row.key] = row.value
+                    out[row.key] = resolve_value(row.value, row.value_type, tier)
                 except Exception:
                     pass  # keep default on a parse miss
             return out
         except Exception:
+            self.risk_tier = 'medium'
             return defaults
 
 

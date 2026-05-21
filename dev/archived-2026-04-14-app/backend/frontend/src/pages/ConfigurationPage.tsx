@@ -130,6 +130,15 @@ export default function ConfigurationPage() {
         throw new Error(`Could not load settings (${r.status})`);
       }
       const data = await r.json();
+      // Normalise tiered values to a canonical JSON string so the
+      // dirty-check (string compare) isn't tripped by Python-vs-JS
+      // whitespace differences in the stored JSON.
+      for (const k of Object.keys(data)) {
+        const t = data[k]?.type || '';
+        if (t.startsWith('tiered_')) {
+          try { data[k].value = JSON.stringify(JSON.parse(data[k].value)); } catch { /* leave as-is */ }
+        }
+      }
       setConfig(data);
       const d: Record<string, string> = {};
       for (const k of Object.keys(data)) d[k] = data[k].value;
@@ -390,8 +399,8 @@ export default function ConfigurationPage() {
                     <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                       Description
                     </th>
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400 w-64">
-                      Value
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400 w-[24rem]">
+                      Value <span className="normal-case font-normal text-zinc-300">(per risk tier where shown)</span>
                     </th>
                   </tr>
                 </thead>
@@ -400,7 +409,28 @@ export default function ConfigurationPage() {
                     const item = config[key];
                     const value = draft[key] ?? '';
                     const isBool = item.type === 'bool';
+                    const isTiered = (item.type || '').startsWith('tiered_');
+                    const tieredBase = isTiered ? item.type.slice('tiered_'.length) : '';
                     const dirty = value !== item.value;
+
+                    // Update one tier of a tiered setting and re-serialise
+                    // the JSON in a fixed low/medium/high key order so the
+                    // dirty-check stays consistent.
+                    const setTier = (tierName: 'low' | 'medium' | 'high', raw: any) => {
+                      let parsed: any = {};
+                      try { parsed = JSON.parse(value || '{}'); } catch { parsed = {}; }
+                      let v: any = raw;
+                      if (tieredBase === 'int') { v = parseInt(raw, 10); if (isNaN(v)) v = 0; }
+                      else if (tieredBase === 'float') { v = parseFloat(raw); if (isNaN(v)) v = 0; }
+                      const next = {
+                        low: parsed.low, medium: parsed.medium, high: parsed.high,
+                        [tierName]: v,
+                      };
+                      setDraft((prev) => ({ ...prev, [key]: JSON.stringify(next) }));
+                    };
+                    let tieredVals: any = {};
+                    if (isTiered) { try { tieredVals = JSON.parse(value || '{}'); } catch { tieredVals = {}; } }
+
                     return (
                       <tr key={key} className="align-top hover:bg-zinc-50/40">
                         <td className="px-5 py-4">
@@ -415,7 +445,43 @@ export default function ConfigurationPage() {
                           {item.description || <span className="text-zinc-300">No description.</span>}
                         </td>
                         <td className="px-5 py-4">
-                          {isBool ? (
+                          {isTiered ? (
+                            <div className="flex gap-2">
+                              {(['low', 'medium', 'high'] as const).map((tierName) => (
+                                <div key={tierName} className="flex-1 min-w-0">
+                                  <div className={`text-[9px] font-semibold uppercase tracking-wider mb-1 ${
+                                    tierName === 'high' ? 'text-red-600'
+                                      : tierName === 'medium' ? 'text-amber-600' : 'text-green-600'
+                                  }`}>
+                                    {tierName} risk
+                                  </div>
+                                  {tieredBase === 'bool' ? (
+                                    <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={tieredVals[tierName] === true || tieredVals[tierName] === 'true'}
+                                        onChange={(e) => setTier(tierName, e.target.checked)}
+                                        className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                                      />
+                                      <span className="text-xs text-zinc-700">
+                                        {(tieredVals[tierName] === true || tieredVals[tierName] === 'true') ? 'On' : 'Off'}
+                                      </span>
+                                    </label>
+                                  ) : (
+                                    <input
+                                      type="number"
+                                      step={tieredBase === 'float' ? 'any' : '1'}
+                                      value={tieredVals[tierName] ?? ''}
+                                      onChange={(e) => setTier(tierName, e.target.value)}
+                                      className={`w-full px-2 py-1.5 text-sm border rounded tabular-nums ${
+                                        dirty ? 'border-amber-400 bg-amber-50/40' : 'border-zinc-200 bg-white'
+                                      } focus:outline-none focus:ring-2 focus:ring-zinc-300`}
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : isBool ? (
                             <label className="inline-flex items-center gap-2 cursor-pointer">
                               <input
                                 type="checkbox"
@@ -450,7 +516,9 @@ export default function ConfigurationPage() {
                           )}
                           {dirty && (
                             <div className="mt-1 text-[10px] text-amber-700">
-                              Current: <span className="tabular-nums">{item.value}</span> · unsaved
+                              {isTiered
+                                ? 'Unsaved changes'
+                                : <>Current: <span className="tabular-nums">{item.value}</span> · unsaved</>}
                             </div>
                           )}
                         </td>
