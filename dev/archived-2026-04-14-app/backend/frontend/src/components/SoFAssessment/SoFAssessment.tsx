@@ -2274,6 +2274,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         value: `${s.accumulationPeriodDays} day${s.accumulationPeriodDays !== 1 ? 's' : ''}`,
                       });
                     }
+                    // Infer the salary from the statements - sum the
+                    // recurring salary credits the lineage identified.
+                    const salaryCredits = ((fundsLineageData.external_origins || []) as any[])
+                      .filter((o) => /salary|employment income/i.test(String(o?.source_type || '')))
+                      .map((o) => Math.abs(Number(o?.amount) || 0))
+                      .filter((a) => a > 0);
+                    if (salaryCredits.length > 0) {
+                      const totalSalary = salaryCredits.reduce((a, b) => a + b, 0);
+                      const avgSalary = Math.round(totalSalary / salaryCredits.length);
+                      items.push({
+                        label: `inferred salary (${salaryCredits.length} salary credit${salaryCredits.length !== 1 ? 's' : ''} totalling ${fmt(totalSalary)})`,
+                        value: `≈${fmt(avgSalary)} / month`,
+                      });
+                    }
                     return (
                       <div className="mt-6 pt-4 border-t border-zinc-200">
                         <div className="text-sm font-semibold text-zinc-900">Funds Lineage</div>
