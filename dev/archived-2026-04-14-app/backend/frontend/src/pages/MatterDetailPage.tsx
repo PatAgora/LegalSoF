@@ -719,7 +719,10 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
   }
   useEffect(() => { loadReferrals() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [matter.id, status])
 
-  if (status === 'none') return null
+  // No standing panel once the matter has been returned — the matter
+  // status badge already conveys "Returned from Compliance", and the
+  // compliance conversation lives on each claim.
+  if (status === 'none' || status === 'returned') return null
 
   const fmt = (s: string | null) => {
     if (!s) return ''
@@ -801,14 +804,6 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
                   <span className="italic">"{matter.compliance_reason}"</span>
                 </div>
               )}
-            </>
-          )}
-          {status === 'returned' && (
-            <>
-              <div className="font-semibold text-red-800">Returned from compliance</div>
-              <div className="mt-0.5 text-xs text-red-700">
-                {matter.compliance_reviewed_by || 'Compliance'}{matter.compliance_reviewed_at ? ` · ${fmt(matter.compliance_reviewed_at)}` : ''}
-              </div>
             </>
           )}
           {status === 'cleared' && (

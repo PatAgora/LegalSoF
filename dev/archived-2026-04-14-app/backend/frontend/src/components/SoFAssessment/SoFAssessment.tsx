@@ -1013,11 +1013,24 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       return 'review';
     };
 
+    const verifiedCount = claimList.filter((_c: any, idx: number) => claimStatus(idx) === 'verified').length;
+
     return (
       <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group" open>
         {/* Header - clickable summary, chevron rotates when open */}
         <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
-          <h3 className="text-lg font-bold text-zinc-900">Source of Funds Claims</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-bold text-zinc-900">Source of Funds Claims</h3>
+            {claimList.length > 0 && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                verifiedCount === claimList.length
+                  ? 'bg-green-50 text-green-700 ring-1 ring-inset ring-green-200'
+                  : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200'
+              }`}>
+                {verifiedCount}/{claimList.length} verified
+              </span>
+            )}
+          </div>
           <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
