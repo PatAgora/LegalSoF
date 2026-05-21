@@ -1502,12 +1502,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               return ev && ev.document_verified === true && (dv.confidence ?? 0) >= 0.999;
             };
 
-            // Build the rows — only for unverified claims with a checklist.
+            // Build the rows — every claim with a checklist. The
+            // checklist always shows (it is the quick reference for
+            // what evidence has been provided); the "Suggested to
+            // Obtain" framing only applies to unverified claims.
             const rows = (result.claims || []).map((claim: any, idx: number) => {
               const docs: string[] = claim.expected_evidence || [];
               const ev = result.evidence_matches[idx] || {};
               return { claim, idx, docs, verified: claimVerified(ev) };
-            }).filter((r: any) => r.docs.length > 0 && !r.verified);
+            }).filter((r: any) => r.docs.length > 0);
 
             if (rows.length === 0) return null;
 
@@ -1521,9 +1524,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </summary>
                 <div className="px-6 py-4">
                   <p className="text-xs text-zinc-500 mb-4">
-                    For each claim that is not yet verified: the corroborating evidence
-                    already provided, and what is suggested to obtain to complete it.
-                    Tiered to the matter's risk rating (LSAG §6.8).
+                    The corroborating evidence already provided for each claim, and —
+                    where a claim is not yet verified — what is suggested to obtain to
+                    complete it. Tiered to the matter's risk rating (LSAG §6.8).
                   </p>
                   <div className="space-y-4">
                     {rows.map((row: any) => {
@@ -1557,13 +1560,21 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
                           {suggested.length > 0 && (
                             <div className="mt-2.5">
-                              <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 mb-1">
-                                Suggested Evidence to Obtain
+                              {/* For an unverified claim the unmatched
+                                  items are an action gap; for a verified
+                                  claim they are just the rest of the
+                                  expected list, shown neutrally. */}
+                              <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${
+                                row.verified ? 'text-zinc-400' : 'text-amber-600'
+                              }`}>
+                                {row.verified ? 'Other expected evidence' : 'Suggested Evidence to Obtain'}
                               </div>
                               <ul className="space-y-1">
                                 {suggested.map((doc: string, di: number) => (
                                   <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
-                                    <span className="mt-[5px] h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                                    <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                                      row.verified ? 'bg-zinc-300' : 'bg-amber-400'
+                                    }`} />
                                     {doc}
                                   </li>
                                 ))}
