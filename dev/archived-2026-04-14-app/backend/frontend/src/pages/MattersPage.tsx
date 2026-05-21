@@ -15,7 +15,8 @@ export default function MattersPage() {
   const [newMatter, setNewMatter] = useState({
     client_name: '',
     reference: '',
-    description: ''
+    description: '',
+    risk_level: 'medium',
   })
 
   // Fetch matters from API
@@ -54,6 +55,7 @@ export default function MattersPage() {
           client_name: newMatter.client_name.trim(),
           reference: newMatter.reference.trim() || undefined,
           description: newMatter.description.trim() || undefined,
+          risk_level: newMatter.risk_level,
           status: 'draft'
         }),
       })
@@ -61,7 +63,7 @@ export default function MattersPage() {
       if (response.ok) {
         const created = await response.json()
         setShowCreateModal(false)
-        setNewMatter({ client_name: '', reference: '', description: '' })
+        setNewMatter({ client_name: '', reference: '', description: '', risk_level: 'medium' })
         // Navigate to the new matter
         navigate(`/matters/${created.id}`)
       } else {
@@ -465,6 +467,36 @@ export default function MattersPage() {
                     rows={3}
                     className="w-full rounded border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
                   />
+                </div>
+                {/* Initial risk rating — carried through to the matter
+                    and used as the per-risk-tier rule configuration
+                    until a full assessment is recorded on the Risk &
+                    CDD tab. */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-600 mb-1.5">
+                    Initial risk rating
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={newMatter.risk_level}
+                      onChange={(e) => setNewMatter({...newMatter, risk_level: e.target.value})}
+                      className="block w-full appearance-none rounded border border-zinc-200 bg-white px-4 py-2.5 pr-10 text-sm text-zinc-900 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                      <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-xs text-zinc-400">
+                    Sets the risk tier from the outset. Refine it later with a full
+                    assessment on the matter's Risk &amp; CDD tab.
+                  </p>
                 </div>
               </div>
               {/* Footer */}

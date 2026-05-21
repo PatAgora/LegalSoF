@@ -1948,8 +1948,6 @@ class SoFAssessmentEngine:
         if risk_rating == 'high':
             if 'Beneficial ownership details' not in documents:
                 documents.append("Beneficial ownership details and structure chart")
-            if 'Source of wealth statement' not in documents:
-                documents.append("Source of wealth statement covering last 5 years")
         
         # 5. Standard documents if not already provided
         # BUT: Skip if all evidence is fully verified (100% confidence)

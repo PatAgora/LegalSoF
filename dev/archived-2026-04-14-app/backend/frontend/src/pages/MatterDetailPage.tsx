@@ -707,7 +707,7 @@ function SendToComplianceButton({
 }
 
 // ──────────────────────────────────────────
-// Risk & CDD tab — matter risk assessment + Source of Wealth
+// Risk & CDD tab — matter risk assessment
 // ──────────────────────────────────────────
 
 // MLR 2017 Reg 18 / LSAG §4.4 higher-risk indicator categories.
@@ -759,12 +759,8 @@ function RiskAssessmentTab({ matter, onSaved }: { matter: any; onSaved: () => vo
     return out
   })
   const [notes, setNotes] = useState<string>(matter.risk_notes || '')
-  const [sow, setSow] = useState<string>(matter.source_of_wealth || '')
-  const [sowEvidence, setSowEvidence] = useState<string>(matter.source_of_wealth_evidence || '')
   const [saving, setSaving] = useState(false)
   const [savedNote, setSavedNote] = useState<string | null>(null)
-
-  const sowRequired = rating === 'high' || rating === 'critical'
 
   const toggleFactor = (catKey: string, factor: string) => {
     setFactors((prev) => {
@@ -786,8 +782,6 @@ function RiskAssessmentTab({ matter, onSaved }: { matter: any; onSaved: () => vo
           risk_rating: rating,
           risk_factors: factors,
           risk_notes: notes.trim() || null,
-          source_of_wealth: sow.trim() || null,
-          source_of_wealth_evidence: sowEvidence.trim() || null,
         }),
       })
       if (!r.ok) {
@@ -913,38 +907,6 @@ function RiskAssessmentTab({ matter, onSaved }: { matter: any; onSaved: () => vo
           onChange={(e) => setNotes(e.target.value)}
           rows={4}
           placeholder="e.g. Standard residential conveyancing, UK-resident client met in person, no PEP or adverse-media match, funds from a domestic property sale — assessed Medium."
-          className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
-        />
-      </section>
-
-      {/* Source of Wealth */}
-      <section className="bg-white border border-zinc-200 rounded-md p-6">
-        <h3 className="text-sm font-bold text-zinc-900 mb-1">Source of Wealth</h3>
-        <p className="text-xs text-zinc-500 mb-3">
-          The broader origin of the client's overall wealth — distinct from the source of
-          funds for this specific transaction. Required as Enhanced Due Diligence for
-          high-risk clients and PEPs (LSAG §6.8, §7.2).
-        </p>
-        {sowRequired && (
-          <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <strong>Source of Wealth is required for this matter</strong> — the risk rating is
-            {' '}{rating}. Record the client's overall wealth origin and the evidence seen.
-          </div>
-        )}
-        <label className="block text-xs font-medium text-zinc-600 mb-1">Wealth narrative</label>
-        <textarea
-          value={sow}
-          onChange={(e) => setSow(e.target.value)}
-          rows={4}
-          placeholder="e.g. Client is a recently-retired NHS consultant. Wealth accumulated over a 30-year salaried career plus a workplace pension; previous home owned outright since 2009."
-          className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
-        />
-        <label className="block text-xs font-medium text-zinc-600 mb-1 mt-3">Evidence reviewed</label>
-        <textarea
-          value={sowEvidence}
-          onChange={(e) => setSowEvidence(e.target.value)}
-          rows={3}
-          placeholder="e.g. Three years' P60s, pension statement, Land Registry title showing 2009 purchase."
           className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
         />
       </section>

@@ -282,8 +282,6 @@ async def get_matter(
             "risk_assessed_at": (matter.risk_assessed_at.isoformat()
                                  if getattr(matter, 'risk_assessed_at', None) else None),
             "risk_assessed_by": getattr(matter, 'risk_assessed_by', None),
-            "source_of_wealth": getattr(matter, 'source_of_wealth', None),
-            "source_of_wealth_evidence": getattr(matter, 'source_of_wealth_evidence', None),
             "compliance_submitted_at": (matter.compliance_submitted_at.isoformat()
                                         if getattr(matter, 'compliance_submitted_at', None) else None),
             "compliance_submitted_by": getattr(matter, 'compliance_submitted_by', None),
@@ -302,8 +300,6 @@ class RiskAssessmentRequest(BaseModel):
     risk_rating: str                                  # low | medium | high | critical
     risk_factors: Optional[Dict[str, Any]] = None     # {category: [indicators]}
     risk_notes: Optional[str] = None
-    source_of_wealth: Optional[str] = None
-    source_of_wealth_evidence: Optional[str] = None
 
 
 @router.put("/matters/{matter_id}/risk-assessment")
@@ -314,13 +310,13 @@ async def save_risk_assessment(
     db: Session = Depends(get_db),
 ):
     """
-    Record the matter-level risk assessment and Source of Wealth.
+    Record the matter-level risk assessment.
 
     Captures the documented matter risk assessment required by MLR 2017
     Reg 18 / LSAG §4.3-4.4 (rating + higher-risk indicators by
-    category), the reviewer's risk reasoning, and the client's Source
-    of Wealth narrative + supporting evidence. The saved rating drives
-    the per-risk-tier rule configuration used by every assessment.
+    category) and the reviewer's risk reasoning. The saved rating
+    drives the per-risk-tier rule configuration used by every
+    assessment.
     """
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
@@ -341,8 +337,6 @@ async def save_risk_assessment(
         matter.risk_factors = json.dumps(request.risk_factors) if request.risk_factors else None
         matter.risk_assessed_at = datetime.now(timezone.utc)
         matter.risk_assessed_by = current_user.full_name or current_user.email
-        matter.source_of_wealth = request.source_of_wealth
-        matter.source_of_wealth_evidence = request.source_of_wealth_evidence
 
         sync_db.add(AuditLog(
             matter_id=matter.id,
@@ -357,7 +351,6 @@ async def save_risk_assessment(
             details={
                 "risk_rating": new_rating.value,
                 "risk_factors": request.risk_factors or {},
-                "source_of_wealth_provided": bool(request.source_of_wealth),
             },
         ))
         sync_db.commit()
@@ -507,10 +500,9 @@ async def generate_matter_report(
     Terrorist Financing and Transfer of Funds (Information on the Payer)
     Regulations 2017 ("MLR 2017") and the SRA's AML Sectoral Guidance
     for the Legal Sector. Sections cover: regulatory framework, risk
-    assessment, CDD measures, source of funds and source of wealth
-    analysis, document forensics, bank statement validation, funds
-    lineage, outstanding matters, audit trail, reviewer attestation,
-    and retention notice.
+    assessment, CDD measures, source of funds analysis, document
+    forensics, bank statement validation, funds lineage, outstanding
+    matters, audit trail, reviewer attestation, and retention notice.
     """
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor, Cm
@@ -797,24 +789,6 @@ async def generate_matter_report(
             'where the rating is High or Critical or where any factor in Schedule 3 / Schedule 4 to '
             'MLR 2017 was identified.'
         )
-
-        # Source of Wealth (EDD — LSAG §6.8, §7.2).
-        doc.add_paragraph()
-        p('Source of Wealth', bold=True)
-        _sow = (getattr(matter, 'source_of_wealth', None) or '').strip()
-        _sow_ev = (getattr(matter, 'source_of_wealth_evidence', None) or '').strip()
-        _rating_l = (matter.risk_rating.value if matter.risk_rating else 'medium').lower()
-        _sow_required = _rating_l in ('high', 'critical')
-        kv_table([
-            ('Source of Wealth required',
-             'Yes — Enhanced Due Diligence (high-risk matter)' if _sow_required
-             else 'Risk-based — not mandatory at this rating'),
-            ('Wealth narrative', _sow or 'Not recorded.'),
-            ('Evidence reviewed', _sow_ev or 'Not recorded.'),
-        ])
-        if _sow_required and not _sow:
-            p('RESERVATION: Source of Wealth is required for this high-risk matter but has '
-              'not been recorded. This must be completed before sign-off.', bold=True)
 
         # -----------------------------------------------------------------
         # 5. CDD MEASURES APPLIED

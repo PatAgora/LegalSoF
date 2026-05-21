@@ -67,12 +67,6 @@ class Matter(Base):
     risk_assessed_at = Column(DateTime(timezone=True))
     risk_assessed_by = Column(String(200))
 
-    # Source of Wealth (CDD / EDD — LSAG §6.8, §7.2). The broader
-    # origin of the client's overall wealth, distinct from the
-    # source of funds for this specific transaction.
-    source_of_wealth = Column(Text)
-    source_of_wealth_evidence = Column(Text)
-
     # Compliance submission (the "Send to Compliance" action).
     compliance_submitted_at = Column(DateTime(timezone=True))
     compliance_submitted_by = Column(String(200))
