@@ -5,16 +5,15 @@ import { API_BASE_URL, authFetch } from '../lib/api';
 // issues, risk concentration and compliance loop across every matter,
 // with derived training recommendations to support continuous learning.
 
-interface Flag { code: string; label: string; severity: string; count: number }
 interface Gap { key: string; label: string; count: number }
 interface SourceType { source_type: string; label: string; total: number; verified: number; outstanding: number }
 interface Reason { reason: string; count: number }
 interface Rec { title: string; detail: string; basis: string }
+interface UserMetric { user: string; referrals: number; verified: number }
 
 interface RCAData {
   total_matters: number;
   matters_assessed: number;
-  top_document_flags: Flag[];
   sof_gap_types: Gap[];
   source_types: SourceType[];
   matters_by_risk: Record<string, number>;
@@ -25,14 +24,9 @@ interface RCAData {
     claims_referred: number;
     top_reasons: Reason[];
   };
+  user_metrics: UserMetric[];
   training_recommendations: Rec[];
 }
-
-const SEV_CLS: Record<string, string> = {
-  critical: 'bg-red-100 text-red-700',
-  high: 'bg-amber-100 text-amber-700',
-  medium: 'bg-zinc-100 text-zinc-700',
-};
 
 function titleCase(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -100,7 +94,6 @@ export default function RCADashboardPage() {
   }
 
   const gapMax = Math.max(1, ...data.sof_gap_types.map((g) => g.count));
-  const flagMax = Math.max(1, ...data.top_document_flags.map((f) => f.count));
   const riskEntries = Object.entries(data.matters_by_risk).filter(([, n]) => n > 0);
   const typeEntries = Object.entries(data.matters_by_type)
     .filter(([, n]) => n > 0)
@@ -132,10 +125,10 @@ export default function RCADashboardPage() {
         ))}
       </div>
 
-      {/* Training recommendations - lead with the actionable output */}
+      {/* Proposed training areas - lead with the actionable output */}
       <Panel
-        title="Training and continuous-learning recommendations"
-        caption="Derived from the recurring issues below - each is evidenced by the matters it was drawn from."
+        title="Proposed training areas"
+        caption="Areas to improve, collated from what the system is seeing - each is evidenced by the matters it was drawn from."
       >
         {data.training_recommendations.length === 0 ? (
           <p className="text-sm text-zinc-500">
@@ -154,39 +147,44 @@ export default function RCADashboardPage() {
         )}
       </Panel>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recurring SoF gaps */}
-        <Panel title="Recurring source-of-funds gaps" caption="Where source-of-funds checks most often fall short.">
-          {data.sof_gap_types.length === 0 ? (
-            <p className="text-sm text-zinc-500">No source-of-funds gaps recorded.</p>
-          ) : (
-            <ul className="divide-y divide-zinc-100">
-              {data.sof_gap_types.map((g) => (
-                <BarRow key={g.key} label={g.label} count={g.count} max={gapMax} tone="bg-amber-500" />
-              ))}
-            </ul>
-          )}
-        </Panel>
+      {/* Recurring SoF gaps */}
+      <Panel title="Recurring source-of-funds gaps" caption="Where source-of-funds checks most often fall short.">
+        {data.sof_gap_types.length === 0 ? (
+          <p className="text-sm text-zinc-500">No source-of-funds gaps recorded.</p>
+        ) : (
+          <ul className="divide-y divide-zinc-100">
+            {data.sof_gap_types.map((g) => (
+              <BarRow key={g.key} label={g.label} count={g.count} max={gapMax} tone="bg-amber-500" />
+            ))}
+          </ul>
+        )}
+      </Panel>
 
-        {/* Recurring document issues */}
-        <Panel title="Recurring document-verification issues" caption="The most common authenticity flags raised by the pipeline.">
-          {data.top_document_flags.length === 0 ? (
-            <p className="text-sm text-zinc-500">No document-verification issues recorded.</p>
-          ) : (
-            <ul className="divide-y divide-zinc-100">
-              {data.top_document_flags.map((f) => (
-                <li key={f.code} className="flex items-center gap-3 py-2">
-                  <span className={`w-20 shrink-0 text-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${SEV_CLS[f.severity] || SEV_CLS.medium}`}>
-                    {f.severity}
-                  </span>
-                  <span className="flex-1 min-w-0 text-sm text-zinc-800">{f.label}</span>
-                  <span className="w-10 text-right text-sm font-semibold text-zinc-700 tabular-nums">{f.count}</span>
-                </li>
+      {/* Per-user metrics */}
+      <Panel title="Reviewer activity" caption="Who is referring matters to compliance and signing claims off.">
+        {data.user_metrics.length === 0 ? (
+          <p className="text-sm text-zinc-500">No reviewer activity recorded yet.</p>
+        ) : (
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-400 border-b border-zinc-200">
+                <th className="py-2 pr-4">Reviewer</th>
+                <th className="py-2 px-4 text-right">Sent to compliance</th>
+                <th className="py-2 pl-4 text-right">Claims signed off</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {data.user_metrics.map((u) => (
+                <tr key={u.user}>
+                  <td className="py-2 pr-4 text-zinc-800">{u.user}</td>
+                  <td className="py-2 px-4 text-right tabular-nums text-amber-700">{u.referrals}</td>
+                  <td className="py-2 pl-4 text-right tabular-nums text-green-700">{u.verified}</td>
+                </tr>
               ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
+            </tbody>
+          </table>
+        )}
+      </Panel>
 
       {/* Source type breakdown */}
       <Panel title="Source-of-funds claims by type" caption="Which declared sources are hardest to evidence - a pointer to where training is needed.">

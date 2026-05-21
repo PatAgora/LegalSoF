@@ -904,7 +904,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-bold text-zinc-900">📋 Backward Funds Lineage Ledger</h3>
+                <h3 className="text-lg font-bold text-zinc-900">Backward Funds Lineage Ledger</h3>
                 <p className="text-xs text-zinc-600 mt-1">
                   Tracing origin of £{Math.abs(targetTransaction?.amount || 0).toLocaleString()} credited on {formatDate(targetTransaction?.date)}
                 </p>
@@ -918,48 +918,50 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             </div>
           </div>
 
-          {/* Summary Stats */}
-          <div className="px-6 py-4 bg-zinc-50 border-b border-zinc-200">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
-              <div>
-                <div className="text-xl font-bold text-zinc-900">
-                  £{lineageSummary.totalAmount.toLocaleString()}
-                </div>
-                <div className="text-xs text-zinc-600">Total Amount</div>
-              </div>
-              <div>
-                <div className="text-xl font-bold text-green-700">
-                  £{lineageSummary.tracedAmount.toLocaleString()}
-                </div>
-                <div className="text-xs text-zinc-600">Traced to Origin</div>
-              </div>
-              <div>
-                <div className="text-xl font-bold text-amber-700">
-                  £{lineageSummary.untracedAmount.toLocaleString()}
-                </div>
-                <div className="text-xs text-zinc-600">Requires Evidence</div>
-              </div>
-              <div>
-                <div className="text-xl font-bold text-zinc-500">
-                  {lineageSummary.matchedTransfers}
-                </div>
-                <div className="text-xs text-zinc-600">Matched Transfers</div>
-              </div>
-              <div>
-                <div className="text-xl font-bold text-zinc-600">
-                  {(() => {
-                    const days = lineageSummary.accumulationPeriodDays || 0;
-                    const years = Math.floor(days / 365);
-                    const months = Math.floor((days % 365) / 30);
-                    if (years > 0 && months > 0) return `${years}y ${months}m`;
-                    if (years > 0) return `${years} year${years > 1 ? 's' : ''}`;
-                    if (months > 0) return `${months} month${months > 1 ? 's' : ''}`;
-                    return `${days} days`;
-                  })()}
-                </div>
-                <div className="text-xs text-zinc-600">Statement Period</div>
-              </div>
-            </div>
+          {/* Summary - bullet list, matching the Evidence Checklist style */}
+          <div className="px-6 py-4 border-b border-zinc-200">
+            <ul className="space-y-1.5">
+              <li className="flex items-start gap-2 text-sm leading-snug">
+                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
+                <span className="text-zinc-700">
+                  <span className="font-semibold text-zinc-900">£{lineageSummary.totalAmount.toLocaleString()}</span> total amount
+                </span>
+              </li>
+              <li className="flex items-start gap-2 text-sm leading-snug">
+                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-green-500" />
+                <span className="text-zinc-700">
+                  <span className="font-semibold text-green-700">£{lineageSummary.tracedAmount.toLocaleString()}</span> traced to origin
+                </span>
+              </li>
+              <li className="flex items-start gap-2 text-sm leading-snug">
+                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-amber-500" />
+                <span className="text-zinc-700">
+                  <span className="font-semibold text-amber-700">£{lineageSummary.untracedAmount.toLocaleString()}</span> requires evidence
+                </span>
+              </li>
+              <li className="flex items-start gap-2 text-sm leading-snug">
+                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
+                <span className="text-zinc-700">
+                  <span className="font-semibold text-zinc-900">{lineageSummary.matchedTransfers}</span> matched transfers
+                </span>
+              </li>
+              <li className="flex items-start gap-2 text-sm leading-snug">
+                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
+                <span className="text-zinc-700">
+                  <span className="font-semibold text-zinc-900">
+                    {(() => {
+                      const days = lineageSummary.accumulationPeriodDays || 0;
+                      const years = Math.floor(days / 365);
+                      const months = Math.floor((days % 365) / 30);
+                      if (years > 0 && months > 0) return `${years}y ${months}m`;
+                      if (years > 0) return `${years} year${years > 1 ? 's' : ''}`;
+                      if (months > 0) return `${months} month${months > 1 ? 's' : ''}`;
+                      return `${days} days`;
+                    })()}
+                  </span> statement period
+                </span>
+              </li>
+            </ul>
           </div>
 
           {/* Lineage Tree */}

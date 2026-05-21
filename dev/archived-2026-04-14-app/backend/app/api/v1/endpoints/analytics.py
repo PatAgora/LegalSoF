@@ -283,6 +283,13 @@ def rca_dashboard(
     source_stats: Dict[str, Dict[str, int]] = {}
     referral_reasons: Counter = Counter()
     claims_referred = 0
+    # Per-user activity — who refers to compliance and who signs claims off.
+    user_stats: Dict[str, Dict[str, int]] = {}
+
+    def _user(name) -> Dict[str, int]:
+        key = (str(name).strip() or "Unknown")
+        return user_stats.setdefault(key, {"referrals": 0, "verified": 0})
+
     for s in storage_rows:
         ar = s.get("assessment_result") or {}
         claims = ar.get("claims") or []
@@ -293,14 +300,29 @@ def rca_dashboard(
             rec = source_stats.setdefault(st, {"total": 0, "verified": 0})
             rec["total"] += 1
             act = actions.get(str(idx)) or {}
-            if act.get("sufficient"):
+            suff = act.get("sufficient")
+            if suff:
                 rec["verified"] += 1
+                if isinstance(suff, dict) and suff.get("by"):
+                    _user(suff["by"])["verified"] += 1
             comp = act.get("compliance") or {}
             if comp.get("state"):
                 claims_referred += 1
                 reason = (comp.get("reason") or "").strip()
                 if reason:
                     referral_reasons[reason[:90]] += 1
+                if comp.get("sent_by"):
+                    _user(comp["sent_by"])["referrals"] += 1
+        # Non-claim review items (e.g. Transaction Review) referrals.
+        for entry in (s.get("item_actions") or {}).values():
+            comp = (entry or {}).get("compliance") or {}
+            if comp.get("state"):
+                claims_referred += 1
+                reason = (comp.get("reason") or "").strip()
+                if reason:
+                    referral_reasons[reason[:90]] += 1
+                if comp.get("sent_by"):
+                    _user(comp["sent_by"])["referrals"] += 1
         for ev in evidence:
             dv = (ev or {}).get("document_verification") or {}
             for d in (dv.get("differences") or []):
@@ -392,6 +414,31 @@ def rca_dashboard(
             "basis": f"{claims_referred} claims referred to compliance",
         })
 
+    # --- Per-user metrics -----------------------------------------------
+    user_metrics = sorted(
+        (
+            {
+                "user": u,
+                "referrals": v["referrals"],
+                "verified": v["verified"],
+            }
+            for u, v in user_stats.items()
+        ),
+        key=lambda x: (x["referrals"], x["verified"]),
+        reverse=True,
+    )
+    # If one user is referring disproportionately, surface it for review.
+    if len(user_metrics) >= 2 and user_metrics[0]["referrals"] >= 3:
+        top = user_metrics[0]
+        rest = sum(u["referrals"] for u in user_metrics[1:])
+        if top["referrals"] > rest:
+            recs.append({
+                "title": f"Review {top['user']}'s source-of-funds approach",
+                "detail": f"{top['user']} accounts for most of the compliance referrals. "
+                          f"A coaching conversation may resolve issues before escalation.",
+                "basis": f"{top['referrals']} of {top['referrals'] + rest} referrals",
+            })
+
     return {
         "total_matters": total_matters,
         "matters_assessed": matters_assessed,
@@ -406,5 +453,6 @@ def rca_dashboard(
             "claims_referred": claims_referred,
             "top_reasons": top_reasons,
         },
+        "user_metrics": user_metrics,
         "training_recommendations": recs,
     }
