@@ -593,13 +593,20 @@ def serve_document(
 
     # Fall back to the copy held in the database. The upload directory
     # on the host is ephemeral — files uploaded before a redeploy are
-    # no longer on disk, so the DB copy is the durable source.
+    # no longer on disk, so the DB copy is the durable source. Match on
+    # the stored disk name OR the original upload name, so a download
+    # link built from the original filename still resolves.
+    from sqlalchemy import or_
     dv = (
         db.query(DocumentVerification)
         .filter(
             DocumentVerification.matter_id == matter_id,
-            DocumentVerification.disk_filename == safe_filename,
+            or_(
+                DocumentVerification.disk_filename == safe_filename,
+                DocumentVerification.filename == filename,
+            ),
         )
+        .order_by(DocumentVerification.created_at.desc())
         .first()
     )
     if dv is not None and dv.file_bytes:

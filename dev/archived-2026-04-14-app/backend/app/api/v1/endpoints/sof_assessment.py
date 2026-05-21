@@ -1253,7 +1253,18 @@ async def upload_sof_files(
             # labelled form isn't present we fall back to a free 8-
             # digit run.
             # ------------------------------------------------------------
-            account_number = None
+            # ------------------------------------------------------------
+            # Account identity — two statements from the SAME account
+            # must merge into one account in the funds lineage. UK
+            # statements show a sort code (XX-XX-XX) and an account
+            # number that is frequently MASKED to the last four digits
+            # (e.g. "Account No: ****5678"). Keying on sort code + last
+            # four digits identifies the account even when masked, so
+            # consecutive statements for one account merge into one.
+            # ------------------------------------------------------------
+            sort_code = None
+            acct_last4 = None
+            account_number_full = None
             try:
                 if is_pdf:
                     import fitz as _fitz
@@ -1265,43 +1276,56 @@ async def upload_sof_files(
             except Exception:
                 pdf_text_full = ''
 
-            # Prefer labelled matches like "Account number: 12345678" /
-            # "A/C 12345678" — these are far more reliable than a bare
-            # 8-digit run.
+            # Sort code — labelled "Sort Code: 40-11-22", else any XX-XX-XX run.
+            sc = _re.search(r'sort\s*code[:#\s]*(\d{2}[-\s]?\d{2}[-\s]?\d{2})', pdf_text_full, _re.IGNORECASE)
+            if not sc:
+                sc = _re.search(r'\b(\d{2}-\d{2}-\d{2})\b', pdf_text_full)
+            if sc:
+                sort_code = _re.sub(r'\D', '', sc.group(1))
+
+            # Account number — labelled form, accepting a masked prefix
+            # (****5678) as well as a full 8-digit number.
             labelled = _re.search(
-                r'(?:account\s*(?:number|no\.?)|a/?c(?:count)?\s*(?:no\.?|number)?|account)\s*[:#]?\s*(\d{8})',
+                r'(?:account\s*(?:number|no\.?)|a/?c\s*(?:no\.?|number)?)\s*[:#]?\s*'
+                r'((?:[*xX•·]\s*){0,8}\d{4,8})',
                 pdf_text_full,
                 _re.IGNORECASE,
             )
             if labelled:
-                account_number = labelled.group(1)
-
-            # Fall back to ANY isolated 8-digit run in the header (first
-            # 1000 chars) — most banks print the number near the top.
-            if not account_number and pdf_text_full:
-                m = _re.search(r'\b(\d{8})\b', pdf_text_full[:1000])
+                digits = _re.sub(r'\D', '', labelled.group(1))
+                if len(digits) >= 8:
+                    account_number_full = digits[-8:]
+                if len(digits) >= 4:
+                    acct_last4 = digits[-4:]
+            # Fall back to any free 8-digit run near the header.
+            if not acct_last4 and pdf_text_full:
+                m = _re.search(r'\b(\d{8})\b', pdf_text_full[:1200])
                 if m:
-                    account_number = m.group(1)
-
+                    account_number_full = m.group(1)
+                    acct_last4 = m.group(1)[-4:]
             # Last-ditch: scan the parsed transaction fields.
-            if not account_number:
+            if not acct_last4:
                 for txn in new_transactions[:50]:
                     for field in ('account_number', 'description', 'narrative'):
-                        val = str(txn.get(field, ''))
-                        m = _re.search(r'\b(\d{8})\b', val)
+                        m = _re.search(r'\b(\d{8})\b', str(txn.get(field, '')))
                         if m:
-                            account_number = m.group(1)
+                            account_number_full = m.group(1)
+                            acct_last4 = m.group(1)[-4:]
                             break
-                    if account_number:
+                    if acct_last4:
                         break
 
-            # Per-file identifier — falls back to filename when no real
-            # account number could be extracted, so different uploads
-            # still register as distinct accounts.
-            file_account_id = (
-                account_number
-                or f"file:{file.filename or 'unknown'}"
-            )
+            # Most specific stable key available. Sort code + last four
+            # digits identifies an account within a matter's statement
+            # set and survives account-number masking.
+            if sort_code and acct_last4:
+                file_account_id = f"{sort_code}/{acct_last4}"
+            elif acct_last4:
+                file_account_id = f"acct:{acct_last4}"
+            elif sort_code:
+                file_account_id = f"sc:{sort_code}"
+            else:
+                file_account_id = f"file:{file.filename or 'unknown'}"
 
             # Detect account type from filename hints (only override
             # when the parser left it blank or returned 'Unknown').
@@ -1314,6 +1338,10 @@ async def upload_sof_files(
             for txn in new_transactions:
                 txn['account_id'] = file_account_id
                 txn['source_filename'] = file.filename
+                if sort_code:
+                    txn['sort_code'] = txn.get('sort_code') or sort_code
+                if acct_last4:
+                    txn['account_last4'] = acct_last4
                 if detected_type and not str(txn.get('account_type', '')).lower() in ('current', 'savings'):
                     txn['account_type'] = detected_type
 
@@ -2434,6 +2462,12 @@ async def get_sof_assessment_results(
         'funds_lineage': _cfg_on('fl_enabled'),
     }
 
+    # The fee earner's Evidence Checklist tick-offs (per-claim suggested
+    # evidence + transaction-alert items), persisted on the matter.
+    assessment['evidence_checklist'] = storage.get('evidence_checklist') or {
+        'claim_evidence': {}, 'transaction_alerts': [],
+    }
+
     return {
         "matter_id": matter_id,
         "assessment": assessment,
@@ -2446,6 +2480,38 @@ async def get_sof_assessment_results(
             "completed_at": storage['last_updated']
         }
     }
+
+
+@router.put("/matters/{matter_id}/sof-assessment/checklist")
+async def save_evidence_checklist(
+    matter_id: int,
+    request: Dict[str, Any],
+    current_user: User = Depends(require_analyst),
+    db: Session = Depends(get_sync_db),
+):
+    """Persist the fee earner's Evidence Checklist tick-offs to the matter
+    so the worklist progress survives a refresh and is visible to other
+    reviewers. The body is the full checklist state — per-claim suggested
+    evidence ticked, and transaction-alert items ticked."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    claim_evidence = request.get('claim_evidence') or {}
+    transaction_alerts = request.get('transaction_alerts') or []
+    storage['evidence_checklist'] = {
+        'claim_evidence': {
+            str(k): [str(i) for i in v]
+            for k, v in claim_evidence.items() if isinstance(v, list)
+        },
+        'transaction_alerts': [str(x) for x in transaction_alerts],
+    }
+    _db_save_storage(db, matter_id, storage)
+    db.commit()
+    return {"success": True, "evidence_checklist": storage['evidence_checklist']}
 
 
 @router.get("/matters/{matter_id}/sof-assessment/file-note")

@@ -106,6 +106,13 @@ interface AssessmentResult {
     transaction_review: boolean;
     funds_lineage: boolean;
   };
+  // The fee earner's Evidence Checklist tick-offs, persisted on the
+  // matter. claim_evidence maps a claim index to the suggested-evidence
+  // lines ticked; transaction_alerts is the list of alert keys ticked.
+  evidence_checklist?: {
+    claim_evidence?: Record<string, string[]>;
+    transaction_alerts?: string[];
+  };
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -153,6 +160,7 @@ function renderUploadedList(
   category: 'client_info' | 'bank_statement' | 'supporting_doc',
   emptyCopy: string,
   onDelete?: (filename: string) => void,
+  onDownload?: (filename: string) => void,
 ) {
   const files: Array<{ filename: string; category: string; records_count?: number }> =
     (status?.uploaded_files ?? []).filter((f: any) => f.category === category);
@@ -184,6 +192,19 @@ function renderUploadedList(
             </span>
             <div className="flex items-center gap-2 flex-shrink-0">
               {verdictBadge(ver?.verdict)}
+              {onDownload && (
+                <button
+                  type="button"
+                  onClick={() => onDownload(file.filename)}
+                  title="Download this document"
+                  className="p-1 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
+                  aria-label={`Download ${file.filename}`}
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                </button>
+              )}
               {onDelete && (
                 <button
                   type="button"
@@ -675,6 +696,37 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     }
   };
 
+  // ── Evidence Checklist worklist ─────────────────────────────────
+  // The fee earner's tick-offs live on result.evidence_checklist and are
+  // persisted to the matter so worklist progress survives a refresh.
+  const saveChecklist = async (next: { claim_evidence: Record<string, string[]>; transaction_alerts: string[] }) => {
+    setResult((prev) => (prev ? ({ ...prev, evidence_checklist: next } as any) : prev));
+    try {
+      await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/checklist`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+      });
+    } catch {
+      /* optimistic — the tick stays and re-syncs on the next results load */
+    }
+  };
+
+  const toggleClaimEvidence = (claimIdx: number, item: string) => {
+    const ec = result?.evidence_checklist || {};
+    const claimEvidence: Record<string, string[]> = { ...(ec.claim_evidence || {}) };
+    const set = new Set(claimEvidence[String(claimIdx)] || []);
+    if (set.has(item)) set.delete(item); else set.add(item);
+    claimEvidence[String(claimIdx)] = Array.from(set);
+    saveChecklist({ claim_evidence: claimEvidence, transaction_alerts: ec.transaction_alerts || [] });
+  };
+
+  const toggleTransactionAlert = (alertKey: string) => {
+    const ec = result?.evidence_checklist || {};
+    const set = new Set(ec.transaction_alerts || []);
+    if (set.has(alertKey)) set.delete(alertKey); else set.add(alertKey);
+    saveChecklist({ claim_evidence: ec.claim_evidence || {}, transaction_alerts: Array.from(set) });
+  };
+
   // Remove one uploaded file from this matter. Cleans up storage,
   // DocumentVerification rows, and the file on disk. Triggers a
   // status refresh on success so the uploaded-files list re-renders.
@@ -702,6 +754,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     } catch (error: any) {
       console.error('Error deleting file:', error);
       alert(`Could not remove file: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  // Download an uploaded document so another reviewer can see the
+  // original file. Fetched through authFetch (an anchor href would have
+  // no auth header) and handed to the browser as a download.
+  const downloadUploadedFile = async (filename: string) => {
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/documents/${encodeURIComponent(filename)}`,
+      );
+      if (!r.ok) {
+        alert(`Could not download "${filename}" (HTTP ${r.status}). The original file may not be available.`);
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Could not download: ${e?.message || 'Unknown error'}`);
     }
   };
 
@@ -1064,7 +1142,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 : 'border-transparent text-zinc-400 hover:text-zinc-600 hover:border-zinc-200'
             }`}
           >
-            📤 Upload Documents
+            Documents
           </button>
           <button
             onClick={() => setActiveStep('results')}
@@ -1118,7 +1196,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
                 {/* List of client-info files already provided. The toggle
                     below acts as the "Add document" mechanism. */}
-                {renderUploadedList(status, fileVerificationResults, 'client_info', 'No client info provided yet.', (fn) => deleteUploadedFile(fn, 'client_info'))}
+                {renderUploadedList(status, fileVerificationResults, 'client_info', 'No client info provided yet.', (fn) => deleteUploadedFile(fn, 'client_info'), downloadUploadedFile)}
                 <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-3">Add document</div>
                 <div className="text-center">
                   <h3 className="text-lg font-semibold text-zinc-900 mb-2">Client Info</h3>
@@ -1357,7 +1435,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
               {/* Numbered list of bank statements already uploaded */}
-              {renderUploadedList(status, fileVerificationResults, 'bank_statement', 'No bank statements uploaded yet.', (fn) => deleteUploadedFile(fn, 'bank_statement'))}
+              {renderUploadedList(status, fileVerificationResults, 'bank_statement', 'No bank statements uploaded yet.', (fn) => deleteUploadedFile(fn, 'bank_statement'), downloadUploadedFile)}
 
               {/* Add document */}
               <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-2">Add document</div>
@@ -1412,7 +1490,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </summary>
               <div className="px-5 pb-5 pt-4 border-t border-zinc-100">
               {/* Numbered list of supporting documents already uploaded */}
-              {renderUploadedList(status, fileVerificationResults, 'supporting_doc', 'No supporting documents uploaded yet.', (fn) => deleteUploadedFile(fn, 'supporting_doc'))}
+              {renderUploadedList(status, fileVerificationResults, 'supporting_doc', 'No supporting documents uploaded yet.', (fn) => deleteUploadedFile(fn, 'supporting_doc'), downloadUploadedFile)}
 
               {/* Add document */}
               <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 mb-2">Add document</div>
@@ -1585,21 +1663,68 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
             // A claim is Verified only once the reviewer has pressed
             // "Sufficient Evidence Provided" — status is user-driven.
-            const claimVerified = (_ev: any, idx: number): boolean => {
-              const action = (result.claim_actions || {})[String(idx)] || {};
-              return !!action.sufficient;
+            const claimVerified = (idx: number): boolean =>
+              !!((result.claim_actions || {})[String(idx)] || {}).sufficient;
+
+            const fmtMoney = (n: any) => `£${Math.round(Number(n) || 0).toLocaleString()}`;
+            const fmtGapDate = (s: any): string => {
+              if (!s) return 'an unknown date';
+              const str = String(s);
+              if (str.includes('-')) {
+                const p = str.split('-');
+                if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
+              }
+              return str;
             };
 
-            // Build the rows — every claim with a checklist. The
-            // checklist always shows (it is the quick reference for
-            // what evidence has been provided); the "Suggested to
-            // Obtain" framing only applies to unverified claims.
+            // What the other modules have flagged for review against
+            // THIS claim — the per-claim gap detail the Documents
+            // Required tile used to carry, now folded into the checklist
+            // so the fee earner sees it claim-by-claim.
+            const claimGaps = (claim: any, ev: any, verified: boolean, hasProvided: boolean): string[] => {
+              const out: string[] = [];
+              const dv = ev?.document_verification || {};
+              const diffs = Array.isArray(dv.differences) ? dv.differences : [];
+              const claimAmt = Number(claim?.expected_amount || 0);
+              for (const d of diffs) {
+                const field = String(d.field || '');
+                const amt = Number(d.amount || 0);
+                if (field === 'untraced_funds' && amt > 0) {
+                  out.push(`${fmtMoney(amt)} received on ${fmtGapDate(d.date)} is not traced in Funds Lineage${d.found ? ` (${d.found})` : ''}.`);
+                } else if (field === 'funds_discrepancy' && Number(d.discrepancy_amount || 0) > 0) {
+                  const gap = Number(d.discrepancy_amount);
+                  const pct = claimAmt > 0 ? Math.round((gap / claimAmt) * 100) : 0;
+                  out.push(`${pct > 0 ? `≈${pct}% of the ${fmtMoney(claimAmt)} claimed` : fmtMoney(gap)} is not yet evidenced — further statements confirming ${fmtMoney(gap)} required.`);
+                } else if (field === 'statement_gap') {
+                  out.push(`Bank statements for ${d.gap_account || 'the source account'} before ${fmtGapDate(d.gap_account_earliest || d.date)} are required to close a statement gap.`);
+                } else if (d.severity === 'missing') {
+                  out.push(`A document showing ${field.replace(/_/g, ' ')} is required.`);
+                }
+              }
+              const verdict = dv.verdict;
+              if (verdict === 'Suspicious' || verdict === 'LikelyTampered') {
+                out.push('Document Verification flagged this claim’s evidence — see the Document Verification tile.');
+              }
+              if (!verified && !hasProvided && out.length === 0) {
+                out.push('No corroborating evidence has been matched yet — obtain and upload the suggested evidence above.');
+              }
+              return out;
+            };
+
+            // Build the rows — every claim with a checklist or an open
+            // gap. Provided / Suggested / Gaps are precomputed here.
             const rows = (result.claims || []).map((claim: any, idx: number) => {
               const docs: string[] = claim.expected_evidence || [];
               const ev = result.evidence_matches[idx] || {};
               const action = (result.claim_actions || {})[String(idx)] || {};
-              return { claim, idx, docs, verified: claimVerified(ev, idx), action };
-            }).filter((r: any) => r.docs.length > 0);
+              const verified = claimVerified(idx);
+              const provided = docs
+                .map((d: string) => ({ doc: d, file: matchedFile(d) }))
+                .filter((x: any) => x.file);
+              const suggested = docs.filter((d: string) => !matchedFile(d));
+              const gaps = claimGaps(claim, ev, verified, provided.length > 0);
+              return { claim, idx, docs, verified, action, provided, suggested, gaps };
+            }).filter((r: any) => r.docs.length > 0 || r.gaps.length > 0);
 
             if (rows.length === 0) return null;
 
@@ -1613,18 +1738,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </summary>
                 <div className="px-6 py-4">
                   <p className="text-xs text-zinc-500 mb-4">
-                    The corroborating evidence already provided for each claim, and —
-                    where a claim is not yet verified — what is suggested to obtain to
-                    complete it. Tiered to the matter's risk rating (LSAG §6.8).
+                    The fee earner's worklist: what has been provided for each claim, what is
+                    still suggested to obtain (tick each item off as you go), and what the
+                    other modules have flagged as outstanding for that claim. Tiered to the
+                    matter's risk rating (LSAG §6.8).
                   </p>
                   <div className="space-y-4">
                     {rows.map((row: any) => {
                       const label = String(row.claim.source_type || 'Source').replace(/_/g, ' ');
                       const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
-                      const provided = row.docs
-                        .map((d: string) => ({ doc: d, file: matchedFile(d) }))
-                        .filter((x: any) => x.file);
-                      const suggested = row.docs.filter((d: string) => !matchedFile(d));
+                      const provided = row.provided;
+                      const suggested = row.suggested;
+                      const ticked: string[] = (result.evidence_checklist?.claim_evidence || {})[String(row.idx)] || [];
                       return (
                         <div key={row.idx} className="border border-zinc-100 rounded p-3">
                           <div className="text-sm font-medium text-zinc-900 capitalize">
@@ -1654,22 +1779,47 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
                           {suggested.length > 0 && (
                             <div className="mt-2.5">
-                              {/* For an unverified claim the unmatched
-                                  items are an action gap; for a verified
-                                  claim they are just the rest of the
-                                  expected list, shown neutrally. */}
+                              {/* Tickable worklist — the fee earner ticks
+                                  each item off as they obtain it. Provided
+                                  items are auto-matched and not listed here. */}
                               <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${
                                 row.verified ? 'text-zinc-400' : 'text-amber-600'
                               }`}>
                                 {row.verified ? 'Other possible evidence' : 'Suggested Evidence to Obtain'}
                               </div>
                               <ul className="space-y-1">
-                                {suggested.map((doc: string, di: number) => (
-                                  <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
-                                    <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
-                                      row.verified ? 'bg-zinc-300' : 'bg-amber-400'
-                                    }`} />
-                                    {doc}
+                                {suggested.map((doc: string, di: number) => {
+                                  const done = ticked.includes(doc);
+                                  return (
+                                    <li key={di}>
+                                      <label className="flex items-start gap-2 text-xs leading-snug cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={done}
+                                          onChange={() => toggleClaimEvidence(row.idx, doc)}
+                                          className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-zinc-300 text-green-600 focus:ring-green-500"
+                                        />
+                                        <span className={done ? 'text-zinc-400 line-through' : 'text-zinc-700'}>{doc}</span>
+                                      </label>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+
+                          {/* What the other modules have flagged for this
+                              specific claim — the per-claim gap detail. */}
+                          {row.gaps.length > 0 && (
+                            <div className="mt-2.5">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-red-600 mb-1">
+                                Outstanding / flagged for review
+                              </div>
+                              <ul className="space-y-1">
+                                {row.gaps.map((g: string, gi: number) => (
+                                  <li key={gi} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                                    <span className="mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-red-400" />
+                                    {g}
                                   </li>
                                 ))}
                               </ul>
@@ -1776,6 +1926,59 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       );
                     })}
                   </div>
+
+                  {/* Transaction Review worklist — alerts as tickable
+                      items, so the fee earner works through them here
+                      and uses the Transaction Review tile for detail. */}
+                  {(() => {
+                    if (result.sections_enabled?.transaction_review === false) return null;
+                    const trs = result.transaction_review_summary;
+                    const alerts: any[] = (trs?.alerts || (trs as any)?.alert_details || []);
+                    if (alerts.length === 0) return null;
+                    const trTicked: string[] = result.evidence_checklist?.transaction_alerts || [];
+                    return (
+                      <div className="mt-6 pt-4 border-t border-zinc-200">
+                        <div className="text-sm font-semibold text-zinc-900">Transaction Review</div>
+                        <p className="text-xs text-zinc-500 mt-0.5 mb-3">
+                          Alerts raised against the transactions — work through each and tick it
+                          once reviewed. Open the Transaction Review tile for the full detail.
+                        </p>
+                        <ul className="space-y-2">
+                          {alerts.map((alert: any, ai: number) => {
+                            const key = String(ai);
+                            const done = trTicked.includes(key);
+                            const severity = String(alert.severity || 'HIGH').toUpperCase();
+                            const txn = alert.transaction || alert;
+                            const amount = txn.amount ?? alert.amount;
+                            const date = txn.date || alert.date || '';
+                            const narrative = txn.narrative || alert.counterparty || '';
+                            const issue = (alert.reasons && alert.reasons.length > 0) ? alert.reasons[0] : 'AML concern';
+                            return (
+                              <li key={ai}>
+                                <label className="flex items-start gap-2 text-xs leading-snug cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={done}
+                                    onChange={() => toggleTransactionAlert(key)}
+                                    className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-zinc-300 text-green-600 focus:ring-green-500"
+                                  />
+                                  <span className="min-w-0">
+                                    <span className={done ? 'text-zinc-400 line-through' : 'text-zinc-900 font-medium'}>{issue}</span>
+                                    <span className={`ml-1.5 text-[10px] font-semibold uppercase ${
+                                      severity === 'CRITICAL' ? 'text-red-600' : severity === 'HIGH' ? 'text-amber-600' : 'text-zinc-400'
+                                    }`}>{severity}</span>
+                                    <div className={done ? 'text-zinc-300' : 'text-zinc-500'}>
+                                      {amount != null && `£${Number(amount).toLocaleString()}`}{date && ` · ${date}`}{narrative && ` · ${narrative}`}
+                                    </div>
+                                  </span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                  })()}
                 </div>
               </details>
             );
