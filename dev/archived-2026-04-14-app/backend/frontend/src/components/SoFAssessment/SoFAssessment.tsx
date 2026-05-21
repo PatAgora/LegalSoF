@@ -1457,49 +1457,127 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               tile whenever the rationale was header-less. */}
           {renderSoFSection('', result)}
 
-          {/* Source of Funds evidence checklist — the documents that
-              should be obtained to corroborate each declared source,
-              tiered to the matter's risk rating (LSAG §6.8). */}
-          {(result.claims || []).some((c: any) => ((c.expected_evidence || []).length > 0)) && (
-            <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
-              <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
-                <h3 className="text-lg font-bold text-zinc-900">Evidence Checklist</h3>
-                <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </summary>
-              <div className="px-6 py-4">
-                <p className="text-xs text-zinc-500 mb-4">
-                  The corroborating documents expected for each declared source of funds,
-                  set to this matter's risk rating. High-risk matters require the additional
-                  Enhanced Due Diligence documents.
-                </p>
-                <div className="space-y-4">
-                  {(result.claims || []).map((claim: any, idx: number) => {
-                    const docs: string[] = claim.expected_evidence || [];
-                    if (docs.length === 0) return null;
-                    const label = String(claim.source_type || 'Source').replace(/_/g, ' ');
-                    const amt = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
-                    return (
-                      <div key={idx} className="border border-zinc-100 rounded p-3">
-                        <div className="text-sm font-medium text-zinc-900 capitalize">
-                          {label} <span className="text-zinc-400 tabular-nums">· {amt}</span>
+          {/* Source of Funds evidence checklist. For each claim that is
+              NOT yet verified, splits the expected evidence into what
+              has been provided (ticked) and what is still suggested to
+              obtain. Verified claims are omitted — nothing further is
+              needed. Provided-detection is a filename heuristic against
+              the matter's uploads. */}
+          {(() => {
+            const uploaded: any[] = status?.uploaded_files || [];
+
+            // Heuristic: is this expected-evidence line satisfied by an
+            // uploaded file? Bank-statement lines are met by any bank
+            // statement; document lines are keyword-matched against
+            // supporting-doc / client-info filenames.
+            const isProvided = (text: string): boolean => {
+              const t = text.toLowerCase();
+              if (t.includes('bank statement')) {
+                return uploaded.some((f) => f.category === 'bank_statement');
+              }
+              const docFiles = uploaded.filter(
+                (f) => f.category === 'supporting_doc' || f.category === 'client_info',
+              );
+              if (docFiles.length === 0) return false;
+              const TERMS = [
+                'completion', 'contract', 'memorandum', 'probate', 'administration',
+                'will', 'executor', 'estate', 'death certificate', 'payslip', 'p60',
+                'tax return', 'employment', 'pension', 'annuity', 'dividend', 'voucher',
+                'loan', 'mortgage', 'gift', 'settlement', 'redundancy', 'insurance',
+                'endowment', 'title', 'land registry', 'accounts', 'brokerage', 'invoice',
+              ];
+              for (const term of TERMS) {
+                if (!t.includes(term)) continue;
+                const first = term.split(' ')[0];
+                if (docFiles.some((f) => String(f.filename || '').toLowerCase().includes(first))) {
+                  return true;
+                }
+              }
+              return false;
+            };
+
+            const claimVerified = (ev: any): boolean => {
+              const dv = (ev && ev.document_verification) || {};
+              if (dv.manual_review_status === 'accepted') return true;
+              return ev && ev.document_verified === true && (dv.confidence ?? 0) >= 0.999;
+            };
+
+            // Build the rows — only for unverified claims with a checklist.
+            const rows = (result.claims || []).map((claim: any, idx: number) => {
+              const docs: string[] = claim.expected_evidence || [];
+              const ev = result.evidence_matches[idx] || {};
+              return { claim, idx, docs, verified: claimVerified(ev) };
+            }).filter((r: any) => r.docs.length > 0 && !r.verified);
+
+            if (rows.length === 0) return null;
+
+            return (
+              <details className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
+                <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
+                  <h3 className="text-lg font-bold text-zinc-900">Evidence Checklist</h3>
+                  <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
+                <div className="px-6 py-4">
+                  <p className="text-xs text-zinc-500 mb-4">
+                    For each claim that is not yet verified: the corroborating evidence
+                    already provided, and what is suggested to obtain to complete it.
+                    Tiered to the matter's risk rating (LSAG §6.8).
+                  </p>
+                  <div className="space-y-4">
+                    {rows.map((row: any) => {
+                      const label = String(row.claim.source_type || 'Source').replace(/_/g, ' ');
+                      const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
+                      const provided = row.docs.filter((d: string) => isProvided(d));
+                      const suggested = row.docs.filter((d: string) => !isProvided(d));
+                      return (
+                        <div key={row.idx} className="border border-zinc-100 rounded p-3">
+                          <div className="text-sm font-medium text-zinc-900 capitalize">
+                            {label} <span className="text-zinc-400 tabular-nums">· {amt}</span>
+                          </div>
+
+                          {provided.length > 0 && (
+                            <div className="mt-2">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-green-600 mb-1">
+                                Provided
+                              </div>
+                              <ul className="space-y-1">
+                                {provided.map((doc: string, di: number) => (
+                                  <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                                    <svg className="mt-0.5 h-3.5 w-3.5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    {doc}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {suggested.length > 0 && (
+                            <div className="mt-2.5">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 mb-1">
+                                Suggested Evidence to Obtain
+                              </div>
+                              <ul className="space-y-1">
+                                {suggested.map((doc: string, di: number) => (
+                                  <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                                    <span className="mt-[5px] h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                                    {doc}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
-                        <ul className="mt-2 space-y-1">
-                          {docs.map((doc, di) => (
-                            <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
-                              <span className="mt-[5px] h-1.5 w-1.5 rounded-full bg-zinc-300 flex-shrink-0" />
-                              {doc}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            </details>
-          )}
+              </details>
+            );
+          })()}
 
           {/* Remaining rationale sections (Transaction Review). */}
           {renderStructuredRationale(result)}
