@@ -30,7 +30,7 @@ interface DashboardSummary {
 // Shade for each status segment in the stacked bar - matches the dot
 // colours in MatterStatusBadge so the bar reads the same as the badges.
 const STATUS_BAR_COLOUR: Record<string, string> = {
-  'Draft':                    'bg-zinc-300',
+  'Awaiting Review':           'bg-zinc-300',
   'Under Review':             'bg-amber-400',
   'Sent to Compliance':       'bg-blue-500',
   'Returned from Compliance': 'bg-red-500',

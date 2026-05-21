@@ -26,44 +26,62 @@ def _parse_json(raw):
 # views). It is computed from the matter's actual state — never set
 # by hand — so every screen agrees.
 MATTER_STATUSES = [
-    "Draft", "Under Review", "Sent to Compliance",
+    "Awaiting Review", "Under Review", "Sent to Compliance",
     "Returned from Compliance", "Verified",
 ]
 
 
 def derive_matter_status(matter, sof_data) -> str:
-    """Derive the single overarching status of a matter from its state.
+    """Derive the single overarching status of a matter from the state
+    of its individual claims (and review items) — not a matter-level
+    flag. So a matter with one claim still with compliance reads
+    "Sent to Compliance", and a mix of verified and under-review
+    claims reads "Under Review".
 
     Priority:
-      Verified                 — an assessment has run, every claim has
-                                  been marked "Sufficient Evidence
-                                  Provided", and the fee earner has
-                                  confirmed the source of funds adequate.
-      Returned from Compliance  — compliance has returned the matter.
-      Sent to Compliance        — at least one claim is with compliance.
+      Sent to Compliance        — a claim/item is currently with compliance.
+      Returned from Compliance  — a claim/item has been returned by compliance.
+      Verified                  — every claim signed off and the source of
+                                  funds confirmed adequate.
       Under Review              — an assessment has been run.
-      Draft                     — nothing assessed yet.
+      Awaiting Review           — nothing assessed yet.
     """
     sof_data = sof_data or {}
     assessment = sof_data.get('assessment_result') or {}
+    if not assessment:
+        return "Awaiting Review"
     claims = assessment.get('claims') or []
     actions = sof_data.get('claim_actions') or {}
-    comp = getattr(matter, 'compliance_status', None) or 'none'
+    item_actions = sof_data.get('item_actions') or {}
 
+    def _state(entry) -> str:
+        entry = entry or {}
+        if entry.get('sufficient'):
+            return 'verified'
+        st = (entry.get('compliance') or {}).get('state')
+        if st == 'in_review':
+            return 'sent'
+        if st == 'returned':
+            return 'returned'
+        return 'review'
+
+    states = [_state(actions.get(str(i))) for i in range(len(claims))]
+    states += [_state(e) for e in item_actions.values()]
+
+    # Any claim/item with compliance drives the overall status.
+    if 'sent' in states:
+        return "Sent to Compliance"
+    if 'returned' in states:
+        return "Returned from Compliance"
+
+    # Verified needs every claim signed off and the fee earner's final
+    # "source of funds adequate" confirmation.
     all_verified = bool(claims) and all(
         (actions.get(str(i)) or {}).get('sufficient') for i in range(len(claims))
     )
-    # Verified also requires the fee earner's final "source of funds
-    # adequate" sign-off — the file cannot proceed without it.
     if all_verified and sof_data.get('sof_confirmed'):
         return "Verified"
-    if comp == 'returned':
-        return "Returned from Compliance"
-    if comp == 'in_review':
-        return "Sent to Compliance"
-    if assessment:
-        return "Under Review"
-    return "Draft"
+    return "Under Review"
 
 from app.db.session import get_db, get_sync_db, get_sync_session
 from app.api.dependencies.auth import get_current_active_user, require_analyst, require_admin
