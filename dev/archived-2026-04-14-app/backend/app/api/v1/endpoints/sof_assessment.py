@@ -2423,6 +2423,17 @@ async def get_sof_assessment_results(
     assessment['claim_actions'] = storage.get('claim_actions', {})
     assessment['matter_compliance_status'] = getattr(matter, 'compliance_status', None) or 'none'
 
+    # Section master switches from the Configuration page — the frontend
+    # hides a results tile entirely when its module is switched off.
+    def _cfg_on(key: str) -> bool:
+        row = db.query(TransactionConfig).filter(TransactionConfig.key == key).first()
+        return (row is None) or (str(row.value).lower() in ('true', '1', 'yes'))
+    assessment['sections_enabled'] = {
+        'document_verification': _cfg_on('dv_enabled'),
+        'transaction_review': _cfg_on('tr_enabled'),
+        'funds_lineage': _cfg_on('fl_enabled'),
+    }
+
     return {
         "matter_id": matter_id,
         "assessment": assessment,

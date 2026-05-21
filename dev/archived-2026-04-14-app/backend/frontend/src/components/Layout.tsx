@@ -32,6 +32,15 @@ const MATTER_TABS: { id: string; label: string }[] = [
   { id: 'audit-trail',    label: 'Audit Trail' },
 ]
 
+// Optional-module tabs — hidden from the sidebar when their module is
+// switched OFF on the Configuration page. SoF Assessment and Audit Trail
+// are core and always shown.
+const TAB_MODULE_KEY: Record<string, string> = {
+  transactions:    'tr_enabled',
+  'funds-lineage': 'fl_enabled',
+  verification:    'dv_enabled',
+}
+
 function SidebarLink({ href, label, currentPath, onClick }: {
   href: string;
   label: string;
@@ -90,6 +99,7 @@ export default function Layout() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const activeTab = searchParams.get('tab') || 'sof-assessment'
   const fromCompliance = searchParams.get('from') === 'compliance'
+  const [disabledTabs, setDisabledTabs] = useState<Set<string>>(new Set())
 
   const handleLogout = () => {
     logout()
@@ -100,6 +110,31 @@ export default function Layout() {
   useEffect(() => {
     setSidebarOpen(false)
     setShowDropdown(false)
+  }, [location.pathname])
+
+  // Work out which optional modules are switched off on the Configuration
+  // page so their tabs can be hidden from the sidebar. Re-checked on every
+  // navigation so a config change takes effect without a page reload.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config`)
+        if (!r.ok) return
+        const cfg = await r.json()
+        const off = new Set<string>()
+        for (const [tabId, key] of Object.entries(TAB_MODULE_KEY)) {
+          const v = cfg[key]?.value
+          if (v !== undefined && !['true', '1', 'yes'].includes(String(v).toLowerCase())) {
+            off.add(tabId)
+          }
+        }
+        if (!cancelled) setDisabledTabs(off)
+      } catch {
+        /* config is non-critical for nav — leave all tabs visible */
+      }
+    })()
+    return () => { cancelled = true }
   }, [location.pathname])
 
   // Fetch unread count on mount and periodically
@@ -221,7 +256,7 @@ export default function Layout() {
             Matter
           </div>
           <div className="flex flex-col">
-            {MATTER_TABS.map(tab => (
+            {MATTER_TABS.filter(tab => !disabledTabs.has(tab.id)).map(tab => (
               <MatterTabLink
                 key={tab.id}
                 tabId={tab.id}

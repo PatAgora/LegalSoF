@@ -99,6 +99,13 @@ interface AssessmentResult {
   claim_actions?: Record<string, any>;
   // The matter's compliance review status (none | in_review | cleared | returned).
   matter_compliance_status?: string;
+  // Module master switches from the Configuration page. A results tile
+  // is hidden entirely when its module is switched off.
+  sections_enabled?: {
+    document_verification: boolean;
+    transaction_review: boolean;
+    funds_lineage: boolean;
+  };
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -874,6 +881,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const renderTransactionReviewSection = (content: string, result: AssessmentResult) => {
+    // Hidden entirely when the Transaction Review module is switched
+    // off on the Configuration page.
+    if (result.sections_enabled?.transaction_review === false) return null;
     const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/);
     const overallStatus = overallMatch ? overallMatch[1].trim() : '';
 
@@ -1777,6 +1787,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
           {/* ============================================================ */}
           {/* FUNDS LINEAGE SECTION (collapsible by default)                */}
           {/* ============================================================ */}
+          {result.sections_enabled?.funds_lineage !== false && (
           <details id="tile-funds-lineage" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
             <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
               <h3 className="text-lg font-bold text-zinc-900">Funds Lineage</h3>
@@ -1957,11 +1968,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </div>
             )}
           </details>
+          )}
 
           {/* ============================================================ */}
           {/* DOCUMENT VERIFICATION SECTION (collapsible by default)        */}
           {/* ============================================================ */}
-          {docVerificationSummary && docVerificationSummary.total_documents > 0 && (
+          {docVerificationSummary && docVerificationSummary.total_documents > 0 &&
+            result.sections_enabled?.document_verification !== false && (
             <details id="tile-doc-verification" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
               <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
                 <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">

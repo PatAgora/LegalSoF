@@ -24,6 +24,7 @@ from app.models.document_verification import (
     VerificationVerdict,
 )
 from app.models.audit import AuditLog, AuditLogAction
+from app.models.transaction import TransactionConfig
 from app.schemas.document_verification import (
     DocumentVerificationResponse, AdminOverrideRequest, AdminOverrideResponse,
     VerificationSummaryResponse, VerificationFlagResponse,
@@ -31,6 +32,14 @@ from app.schemas.document_verification import (
 from app.services.evidence_pack_builder import build_evidence_pack
 
 router = APIRouter()
+
+
+def _dv_enabled(db: Session) -> bool:
+    """Whether the Document Verification module is switched on in the
+    Configuration page. When off, the verification UI is hidden — the
+    summary reports zero documents and the list returns nothing."""
+    row = db.query(TransactionConfig).filter(TransactionConfig.key == 'dv_enabled').first()
+    return (row is None) or (str(row.value).lower() in ('true', '1', 'yes'))
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +55,10 @@ def list_verifications(matter_id: int, current_user: User = Depends(require_anal
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(404, "Matter not found")
+
+    # Document Verification module switched off on the Configuration page.
+    if not _dv_enabled(db):
+        return []
 
     verifications = (
         db.query(DocumentVerification)
@@ -70,6 +83,11 @@ def get_verification_summary(matter_id: int, current_user: User = Depends(requir
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(404, "Matter not found")
+
+    # Document Verification module switched off on the Configuration page —
+    # report an empty summary so the SoF results tile hides itself.
+    if not _dv_enabled(db):
+        return VerificationSummaryResponse()
 
     verifications = (
         db.query(DocumentVerification)
