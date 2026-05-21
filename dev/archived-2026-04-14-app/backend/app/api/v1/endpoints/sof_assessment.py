@@ -3202,3 +3202,164 @@ async def cancel_claim_compliance(
         "claim_actions": storage.get('claim_actions', {}),
         "compliance_status": matter.compliance_status,
     }
+
+
+# ---------------------------------------------------------------------------
+# Compliance officer — per-referral review + return to fee earner
+# ---------------------------------------------------------------------------
+
+@router.get("/matters/{matter_id}/compliance-referrals")
+async def get_compliance_referrals(
+    matter_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_sync_db),
+):
+    """List the claims on a matter that have been referred to compliance,
+    with each referral's reason and whether the officer has reviewed it.
+    Admin (compliance officer) only."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id) or {}
+    claims = (storage.get('assessment_result') or {}).get('claims') or []
+    actions = storage.get('claim_actions') or {}
+
+    referrals = []
+    for key, entry in actions.items():
+        comp = entry.get('compliance') or {}
+        if comp.get('state') != 'in_review':
+            continue
+        try:
+            idx = int(key)
+        except (TypeError, ValueError):
+            continue
+        claim = claims[idx] if 0 <= idx < len(claims) else {}
+        referrals.append({
+            "claim_index": idx,
+            "source_type": str(claim.get('source_type', 'Source')).replace('_', ' '),
+            "amount": claim.get('expected_amount', 0),
+            "reason": comp.get('reason', ''),
+            "sent_by": comp.get('sent_by', ''),
+            "sent_at": comp.get('sent_at', ''),
+            "reviewed": bool(comp.get('reviewed')),
+            "reviewed_by": (comp.get('reviewed') or {}).get('by', ''),
+            "reviewed_at": (comp.get('reviewed') or {}).get('at', ''),
+        })
+    referrals.sort(key=lambda r: r['claim_index'])
+    return {
+        "matter_id": matter_id,
+        "compliance_status": matter.compliance_status or 'none',
+        "referrals": referrals,
+        "all_reviewed": bool(referrals) and all(r['reviewed'] for r in referrals),
+    }
+
+
+@router.post("/matters/{matter_id}/sof-assessment/claims/{claim_index}/mark-reviewed")
+async def mark_referral_reviewed(
+    matter_id: int,
+    claim_index: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_sync_db),
+):
+    """Compliance officer marks a single referred claim as reviewed."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id)
+    if not storage:
+        raise HTTPException(status_code=404, detail="No assessment data for this matter")
+
+    entry = _claim_action_entry(storage, claim_index)
+    comp = entry.get('compliance') or {}
+    if comp.get('state') != 'in_review':
+        raise HTTPException(status_code=409, detail="This claim is not currently referred to compliance")
+
+    who = current_user.full_name or current_user.email
+    comp['reviewed'] = {'by': who, 'at': datetime.now(timezone.utc).isoformat()}
+    entry['compliance'] = comp
+    _db_save_storage(db, matter_id, storage)
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.UPDATED,
+        entity_type="sof_claim",
+        entity_id=matter_id,
+        description=(
+            f"Compliance referral for claim {claim_index + 1} on matter "
+            f"{matter.reference_number} marked as reviewed by {who}."
+        ),
+        details={"claim_index": claim_index, "reviewed_by": who},
+    ))
+    db.commit()
+    return {"success": True, "claim_actions": storage.get('claim_actions', {})}
+
+
+@router.post("/matters/{matter_id}/return-to-fee-earner")
+async def return_to_fee_earner(
+    matter_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_sync_db),
+):
+    """Compliance officer returns the matter to the fee earner. Only
+    permitted once every referral on the matter has been reviewed; sets
+    the matter's compliance status to 'returned'."""
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    storage = _db_load_storage(db, matter_id) or {}
+    actions = storage.get('claim_actions') or {}
+
+    referrals = [
+        entry for entry in actions.values()
+        if (entry.get('compliance') or {}).get('state') == 'in_review'
+    ]
+    if not referrals:
+        raise HTTPException(status_code=409, detail="This matter has no open compliance referrals")
+    unreviewed = [r for r in referrals if not (r.get('compliance') or {}).get('reviewed')]
+    if unreviewed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(unreviewed)} of {len(referrals)} referral(s) have not been "
+                f"reviewed. Review every referral before returning the matter."
+            ),
+        )
+
+    who = current_user.full_name or current_user.email
+    now = datetime.now(timezone.utc)
+    matter.compliance_status = 'returned'
+    matter.compliance_reviewed_at = now
+    matter.compliance_reviewed_by = who
+    matter.compliance_review_outcome = 'returned'
+
+    db.add(AuditLog(
+        matter_id=matter_id,
+        user_id=current_user.id,
+        action=AuditLogAction.UPDATED,
+        entity_type="matter",
+        entity_id=matter_id,
+        description=(
+            f"Matter {matter.reference_number} returned to the fee earner by "
+            f"compliance ({who}) — all {len(referrals)} referral(s) reviewed."
+        ),
+        details={"reviewer": who, "referrals": len(referrals)},
+    ))
+    if matter.compliance_submitted_by:
+        submitter = db.query(User).filter(
+            (User.full_name == matter.compliance_submitted_by)
+            | (User.email == matter.compliance_submitted_by)
+        ).first()
+        if submitter:
+            db.add(Notification(
+                user_id=submitter.id,
+                matter_id=matter_id,
+                type="compliance_review",
+                title="Returned from compliance",
+                message=(
+                    f"Matter {matter.reference_number} has been reviewed and "
+                    f"returned to you by compliance ({who})."
+                ),
+            ))
+    db.commit()
+    return {"success": True, "compliance_status": matter.compliance_status}
