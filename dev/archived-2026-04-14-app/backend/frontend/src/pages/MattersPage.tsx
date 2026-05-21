@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { API_BASE_URL, authFetch } from '../lib/api'
+import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
 
 export default function MattersPage() {
   const navigate = useNavigate()
@@ -86,7 +87,7 @@ export default function MattersPage() {
         (matter.client_name || '').toLowerCase().includes(term) ||
         (matter.reference_number || '').toLowerCase().includes(term)
       const matchesStatus =
-        !statusFilter || (matter.status || '').toLowerCase() === statusFilter
+        !statusFilter || (matter.status || '') === statusFilter
       const matchesRisk =
         !riskFilter || (matter.risk_rating || '').toLowerCase() === riskFilter
       return matchesSearch && matchesStatus && matchesRisk
@@ -109,27 +110,6 @@ export default function MattersPage() {
     return { total, underReview, approved, highRisk }
   }, [matters])
 
-  // --- Status badge ---
-  const getStatusBadge = (status: string) => {
-    const s = (status || 'draft').toLowerCase()
-    const config: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-      draft:            { bg: 'bg-zinc-50 border border-zinc-200',    text: 'text-zinc-600',   dot: 'bg-zinc-400',    label: 'Draft' },
-      awaiting_client:  { bg: 'bg-amber-50 border border-amber-200',   text: 'text-amber-700',  dot: 'bg-amber-500',   label: 'Awaiting Client' },
-      client_uploading: { bg: 'bg-zinc-50',  text: 'text-zinc-900', dot: 'bg-zinc-400', label: 'Client Uploading' },
-      under_review:     { bg: 'bg-amber-50 border border-amber-200',   text: 'text-amber-700',  dot: 'bg-amber-500',   label: 'Under Review' },
-      queries_raised:   { bg: 'bg-amber-100 border border-amber-200',  text: 'text-amber-700', dot: 'bg-amber-500',  label: 'Queries Raised' },
-      approved:         { bg: 'bg-green-50 border border-green-200', text: 'text-green-700', dot: 'bg-green-500', label: 'Approved' },
-      rejected:         { bg: 'bg-red-50 border border-red-200',     text: 'text-red-700',    dot: 'bg-red-500',     label: 'Rejected' },
-      completed:        { bg: 'bg-zinc-50 border border-zinc-200',    text: 'text-zinc-600',   dot: 'bg-zinc-400',    label: 'Completed' },
-    }
-    const c = config[s] || config.draft
-    return (
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold ${c.bg} ${c.text}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} aria-hidden="true" />
-        {c.label}
-      </span>
-    )
-  }
 
   // --- Risk badge ---
   const getRiskBadge = (risk: string) => {
@@ -241,14 +221,9 @@ export default function MattersPage() {
               className="block w-full appearance-none rounded border border-zinc-200 bg-white py-2.5 pl-4 pr-10 text-sm text-zinc-600 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
             >
               <option value="">All Statuses</option>
-              <option value="draft">Draft</option>
-              <option value="awaiting_client">Awaiting Client</option>
-              <option value="client_uploading">Client Uploading</option>
-              <option value="under_review">Under Review</option>
-              <option value="queries_raised">Queries Raised</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="completed">Completed</option>
+              {MATTER_STATUSES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
               <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -363,7 +338,7 @@ export default function MattersPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(matter.status)}
+                      <MatterStatusBadge status={matter.status} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getRiskBadge(matter.risk_rating)}

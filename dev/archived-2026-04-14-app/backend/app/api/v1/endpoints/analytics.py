@@ -108,16 +108,24 @@ def dashboard_summary(
     """Single rollup payload powering the front-end dashboard."""
 
     # ---- Matter counts -------------------------------------------------
-    total_matters = db.query(Matter).count()
+    from app.api.v1.endpoints.matters import derive_matter_status, MATTER_STATUSES
+    from app.models.assessment_storage import AssessmentStorage
 
-    matters_by_status: Dict[str, int] = {s.value: 0 for s in MatterStatus}
-    for status, count in (
-        db.query(Matter.status, func.count(Matter.id))
-        .group_by(Matter.status)
-        .all()
-    ):
-        key = status.value if hasattr(status, "value") else str(status)
-        matters_by_status[key] = count
+    all_matters = db.query(Matter).all()
+    total_matters = len(all_matters)
+
+    # Bucket by the single derived matter status so the dashboard
+    # agrees with every other view.
+    storage_map = {
+        row.matter_id: row.data
+        for row in db.query(AssessmentStorage).all() if row.data
+    }
+    matters_by_status: Dict[str, int] = {s: 0 for s in MATTER_STATUSES}
+    derived_for: Dict[int, str] = {}
+    for m in all_matters:
+        ds = derive_matter_status(m, storage_map.get(m.id))
+        derived_for[m.id] = ds
+        matters_by_status[ds] = matters_by_status.get(ds, 0) + 1
 
     matters_by_risk: Dict[str, int] = {r.value: 0 for r in RiskRating}
     for risk, count in (
@@ -196,7 +204,7 @@ def dashboard_summary(
             "id": m.id,
             "reference_number": getattr(m, "reference_number", None),
             "client_name": getattr(m, "client_name", None),
-            "status": (m.status.value if m.status else None),
+            "status": derived_for.get(m.id) or derive_matter_status(m, storage_map.get(m.id)),
             "risk_rating": (m.risk_rating.value if m.risk_rating else None),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }

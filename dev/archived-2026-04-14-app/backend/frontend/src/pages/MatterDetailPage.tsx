@@ -2,12 +2,12 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import TransactionList from '../components/TransactionReview/TransactionList'
 import SoFAssessment from '../components/SoFAssessment/SoFAssessment'
-import StatusUpdateModal from '../components/StatusUpdateModal'
 import FundsLineage from '../components/FundsLineage/FundsLineage'
 import DocumentVerificationPage from '../components/DocumentVerification/DocumentVerificationPage'
 import { API_BASE_URL, authFetch } from '../lib/api'
 import { useCurrentMatter } from '../stores/currentMatterStore'
 import { useAuthStore } from '../stores/authStore'
+import MatterStatusBadge from '../components/ui/MatterStatusBadge'
 
 type TabType = 'risk-cdd' | 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
@@ -24,7 +24,6 @@ export default function MatterDetailPage() {
   const [matter, setMatter] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showStatusModal, setShowStatusModal] = useState(false)
 
   const setCurrentMatter = useCurrentMatter((s) => s.setMatter)
   const clearCurrentMatter = useCurrentMatter((s) => s.clearMatter)
@@ -93,7 +92,10 @@ export default function MatterDetailPage() {
       <div className="mb-8 border-b border-zinc-200 pb-6">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="font-serif text-3xl font-normal tracking-tight text-zinc-900">{matter.reference_number}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="font-serif text-3xl font-normal tracking-tight text-zinc-900">{matter.reference_number}</h1>
+              <MatterStatusBadge status={matter.status} />
+            </div>
             <p className="mt-2 text-sm text-zinc-500">
               {matter.client_name} — {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
             </p>
@@ -138,12 +140,6 @@ export default function MatterDetailPage() {
               submittedBy={matter.compliance_submitted_by}
               onSent={() => refreshMatter()}
             />
-            <button
-              onClick={() => setShowStatusModal(true)}
-              className="px-4 py-2 text-sm font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors"
-            >
-              Update Status
-            </button>
           </div>
         </div>
       </div>
@@ -160,24 +156,6 @@ export default function MatterDetailPage() {
         {activeTab === 'verification' && <DocumentVerificationPage matterId={matter.id} />}
         {activeTab === 'audit-trail' && <AuditTrailTab matterId={matter.id} />}
       </div>
-
-      {/* Status Update Modal */}
-      {showStatusModal && (
-        <StatusUpdateModal
-          matterId={matter.id}
-          currentStatus={matter.status}
-          onClose={() => setShowStatusModal(false)}
-          onSuccess={() => {
-            // Refresh matter data after status update
-            if (id) {
-              authFetch(`${API_BASE_URL}/api/v1/matters/${id}`)
-                .then(res => res.json())
-                .then(data => setMatter(data))
-                .catch(err => console.error('Error refreshing matter:', err))
-            }
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -538,14 +516,13 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
 
   const statusBadgeColor = (status: string) => {
     switch (status) {
-      case 'APPROVED':
-      case 'COMPLETED':
+      case 'Verified':
         return 'bg-green-100 text-green-700 border-green-200'
-      case 'REJECTED':
+      case 'Returned from Compliance':
         return 'bg-red-100 text-red-700 border-red-200'
-      case 'UNDER_REVIEW':
+      case 'Sent to Compliance':
         return 'bg-blue-100 text-blue-700 border-blue-200'
-      case 'QUERIES_RAISED':
+      case 'Under Review':
         return 'bg-amber-100 text-amber-700 border-amber-200'
       default:
         return 'bg-zinc-50 text-zinc-600 border-zinc-200'

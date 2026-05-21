@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { API_BASE_URL, authFetch } from '../lib/api'
 import { Card, StatusChip, Spinner, Alert } from '../components/ui'
+import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
 
 // ---------------------------------------------------------------------------
 // Dashboard — live rollup of the case load. Single round-trip to
@@ -35,29 +36,14 @@ interface DashboardSummary {
   recent_matters: RecentMatter[]
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: 'Draft',
-  AWAITING_CLIENT: 'Awaiting client',
-  CLIENT_UPLOADING: 'Client uploading',
-  UNDER_REVIEW: 'Under review',
-  QUERIES_RAISED: 'Queries raised',
-  APPROVED: 'Approved',
-  REJECTED: 'Rejected',
-  COMPLETED: 'Completed',
-}
-
-// Shade for each status segment in the stacked bar. Greys throughout
-// except APPROVED (subtle black) and REJECTED (subtle red) to give the
-// terminal outcomes visual weight.
+// Shade for each status segment in the stacked bar — matches the dot
+// colours in MatterStatusBadge so the bar reads the same as the badges.
 const STATUS_BAR_COLOUR: Record<string, string> = {
-  DRAFT:            'bg-zinc-200',
-  AWAITING_CLIENT:  'bg-zinc-300',
-  CLIENT_UPLOADING: 'bg-zinc-400',
-  UNDER_REVIEW:     'bg-zinc-500',
-  QUERIES_RAISED:   'bg-amber-400',
-  APPROVED:         'bg-zinc-900',
-  REJECTED:         'bg-red-500',
-  COMPLETED:        'bg-zinc-700',
+  'Draft':                    'bg-zinc-300',
+  'Under Review':             'bg-amber-400',
+  'Sent to Compliance':       'bg-blue-500',
+  'Returned from Compliance': 'bg-red-500',
+  'Verified':                 'bg-green-500',
 }
 
 const SEVERITY_BAR_COLOUR: Record<string, string> = {
@@ -115,8 +101,9 @@ export default function DashboardPage() {
   }
 
   const activeReviews =
-    (data.matters_by_status.UNDER_REVIEW || 0) +
-    (data.matters_by_status.QUERIES_RAISED || 0)
+    (data.matters_by_status['Under Review'] || 0) +
+    (data.matters_by_status['Sent to Compliance'] || 0) +
+    (data.matters_by_status['Returned from Compliance'] || 0)
 
   return (
     <div className="space-y-10">
@@ -253,12 +240,7 @@ export default function DashboardPage() {
                     </td>
                     <td className="px-6 py-3 text-zinc-700">{m.client_name || '—'}</td>
                     <td className="px-6 py-3">
-                      {m.status ? (
-                        <StatusChip
-                          severity={statusSeverity(m.status)}
-                          label={STATUS_LABELS[m.status] || m.status}
-                        />
-                      ) : '—'}
+                      <MatterStatusBadge status={m.status} />
                     </td>
                     <td className="px-6 py-3 text-zinc-700">{m.risk_rating || '—'}</td>
                     <td className="px-6 py-3 text-zinc-500 tabular-nums">
@@ -332,7 +314,8 @@ function StatusBar({ status, total }: { status: Record<string, number>; total: n
   }
   return (
     <div className="h-2 w-full rounded-full overflow-hidden bg-zinc-100 flex">
-      {Object.entries(status).map(([key, count]) => {
+      {MATTER_STATUSES.map((key) => {
+        const count = status[key] || 0
         if (count === 0) return null
         const widthPct = (count / total) * 100
         return (
@@ -340,7 +323,7 @@ function StatusBar({ status, total }: { status: Record<string, number>; total: n
             key={key}
             className={STATUS_BAR_COLOUR[key] || 'bg-zinc-300'}
             style={{ width: `${widthPct}%` }}
-            title={`${STATUS_LABELS[key] || key}: ${count}`}
+            title={`${key}: ${count}`}
           />
         )
       })}
@@ -352,29 +335,13 @@ function StatusLegend({ status, total }: { status: Record<string, number>; total
   if (total === 0) return null
   return (
     <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-600">
-      {Object.entries(status).map(([key, count]) => (
+      {MATTER_STATUSES.map((key) => (
         <div key={key} className="inline-flex items-center gap-2">
           <span className={`h-2 w-2 rounded-sm ${STATUS_BAR_COLOUR[key] || 'bg-zinc-300'}`} />
-          <span>{STATUS_LABELS[key] || key}</span>
-          <span className="text-zinc-400 tabular-nums">{count}</span>
+          <span>{key}</span>
+          <span className="text-zinc-400 tabular-nums">{status[key] || 0}</span>
         </div>
       ))}
     </div>
   )
-}
-
-// Map a matter status to a severity (purely for chip colouring).
-function statusSeverity(status: string): 'critical' | 'high' | 'medium' | 'low' | 'info' {
-  switch (status) {
-    case 'REJECTED':      return 'critical'
-    case 'QUERIES_RAISED':return 'high'
-    case 'UNDER_REVIEW':
-    case 'AWAITING_CLIENT':
-    case 'CLIENT_UPLOADING':
-      return 'medium'
-    case 'APPROVED':
-    case 'COMPLETED':
-      return 'info'
-    default:              return 'low'
-  }
 }

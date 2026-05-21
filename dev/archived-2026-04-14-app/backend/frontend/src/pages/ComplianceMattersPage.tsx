@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { API_BASE_URL, authFetch } from '../lib/api';
-import { ComplianceStatusChip } from './ComplianceDashboardPage';
+import MatterStatusBadge from '../components/ui/MatterStatusBadge';
 
 interface ComplianceMatter {
   id: number;
   reference_number: string;
   client_name: string;
+  status: string;
   compliance_status: string;
   compliance_submitted_at: string | null;
   compliance_submitted_by: string | null;
@@ -127,7 +128,7 @@ export default function ComplianceMattersPage() {
                     )}
                   </td>
                   <td className="px-5 py-3 text-zinc-600 capitalize">{(m.risk_rating || 'medium').toLowerCase()}</td>
-                  <td className="px-5 py-3"><ComplianceStatusChip status={m.compliance_status} /></td>
+                  <td className="px-5 py-3"><MatterStatusBadge status={m.status} /></td>
                   <td className="px-5 py-3 text-zinc-500">
                     {fmtDate(m.compliance_submitted_at)}
                     {m.compliance_submitted_by && (

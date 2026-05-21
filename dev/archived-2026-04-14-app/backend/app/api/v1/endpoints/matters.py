@@ -20,6 +20,48 @@ def _parse_json(raw):
     except (TypeError, ValueError):
         return None
 
+
+# The single, derived matter status. This is the ONE status shown
+# everywhere (matters list, dashboard, matter detail, compliance
+# views). It is computed from the matter's actual state — never set
+# by hand — so every screen agrees.
+MATTER_STATUSES = [
+    "Draft", "Under Review", "Sent to Compliance",
+    "Returned from Compliance", "Verified",
+]
+
+
+def derive_matter_status(matter, sof_data) -> str:
+    """Derive the single overarching status of a matter from its state.
+
+    Priority:
+      Verified                 — an assessment has run and every claim
+                                  has been marked "Sufficient Evidence
+                                  Provided" by the reviewer.
+      Returned from Compliance  — compliance has returned the matter.
+      Sent to Compliance        — at least one claim is with compliance.
+      Under Review              — an assessment has been run.
+      Draft                     — nothing assessed yet.
+    """
+    sof_data = sof_data or {}
+    assessment = sof_data.get('assessment_result') or {}
+    claims = assessment.get('claims') or []
+    actions = sof_data.get('claim_actions') or {}
+    comp = getattr(matter, 'compliance_status', None) or 'none'
+
+    all_verified = bool(claims) and all(
+        (actions.get(str(i)) or {}).get('sufficient') for i in range(len(claims))
+    )
+    if all_verified:
+        return "Verified"
+    if comp == 'returned':
+        return "Returned from Compliance"
+    if comp == 'in_review':
+        return "Sent to Compliance"
+    if assessment:
+        return "Under Review"
+    return "Draft"
+
 from app.db.session import get_db, get_sync_db, get_sync_session
 from app.api.dependencies.auth import get_current_active_user, require_analyst, require_admin
 from app.models import Matter, MatterStatus, RiskRating, TransactionType
@@ -224,7 +266,7 @@ async def list_matters(
                 "target_amount": float(matter.target_amount) if matter.target_amount else None,
                 "target_currency": "GBP",  # Default currency
                 "transaction_date": matter.transaction_date.isoformat() if matter.transaction_date else None,
-                "status": matter.status.value if matter.status else "draft",
+                "status": derive_matter_status(matter, sof_data),
                 "risk_rating": matter.risk_rating.value if matter.risk_rating else "medium",
                 "description": matter.description,
                 "created_at": matter.created_at.isoformat() if matter.created_at else None,
@@ -273,7 +315,8 @@ async def get_matter(
             "target_amount": float(matter.target_amount) if matter.target_amount else None,
             "target_currency": "GBP",
             "transaction_date": matter.transaction_date.isoformat() if matter.transaction_date else None,
-            "status": matter.status.value if matter.status else "draft",
+            "status": derive_matter_status(matter, sof_data),
+            "workflow_status": matter.status.value if matter.status else "draft",
             "risk_rating": matter.risk_rating.value if matter.risk_rating else "medium",
             "risk_rating_auto": matter.risk_rating_auto.value if matter.risk_rating_auto else None,
             "risk_rating_override": bool(matter.risk_rating_override),
@@ -547,6 +590,7 @@ async def compliance_dashboard(
             .limit(8)
             .all()
         )
+        storage_map = _safe_load_storage_db(sync_db)
         return {
             "awaiting_review": awaiting,
             "cleared": cleared,
@@ -556,6 +600,7 @@ async def compliance_dashboard(
                     "id": m.id,
                     "reference_number": m.reference_number,
                     "client_name": m.client_name,
+                    "status": derive_matter_status(m, storage_map.get(str(m.id))),
                     "compliance_status": m.compliance_status or 'none',
                     "compliance_submitted_at": (m.compliance_submitted_at.isoformat()
                                                 if m.compliance_submitted_at else None),
@@ -583,11 +628,13 @@ async def compliance_matters(
             .order_by(Matter.compliance_submitted_at.desc().nullslast())
             .all()
         )
+        storage_map = _safe_load_storage_db(sync_db)
         return [
             {
                 "id": m.id,
                 "reference_number": m.reference_number,
                 "client_name": m.client_name,
+                "status": derive_matter_status(m, storage_map.get(str(m.id))),
                 "compliance_status": m.compliance_status or 'none',
                 "compliance_submitted_at": (m.compliance_submitted_at.isoformat()
                                             if m.compliance_submitted_at else None),
