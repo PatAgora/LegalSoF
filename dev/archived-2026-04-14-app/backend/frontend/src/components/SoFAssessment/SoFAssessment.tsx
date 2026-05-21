@@ -2152,6 +2152,18 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 ))}
+                                {stmtMatch && (
+                                  <li key="match" className="flex items-start gap-3 text-xs leading-snug">
+                                    {checkIcon}
+                                    <span className="flex-1 min-w-0 text-zinc-700">
+                                      {stmtMatch.account_label} showing a {fmtCredit(stmtMatch.credit_amount)} credit
+                                      {stmtMatch.credit_date ? ` on ${stmtMatch.credit_date}` : ''}
+                                    </span>
+                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={stmtMatch.filename}>
+                                      {stmtMatch.filename}
+                                    </span>
+                                  </li>
+                                )}
                                 {savingsStatements.map((s: any, si: number) => (
                                   <li key={`sv${si}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
@@ -2164,18 +2176,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     </span>
                                   </li>
                                 ))}
-                                {savingsStatements.length === 0 && stmtMatch && (
-                                  <li key="match" className="flex items-start gap-3 text-xs leading-snug">
-                                    {checkIcon}
-                                    <span className="flex-1 min-w-0 text-zinc-700">
-                                      {stmtMatch.account_label} showing a {fmtCredit(stmtMatch.credit_amount)} credit
-                                      {stmtMatch.credit_date ? ` on ${stmtMatch.credit_date}` : ''}
-                                    </span>
-                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={stmtMatch.filename}>
-                                      {stmtMatch.filename}
-                                    </span>
-                                  </li>
-                                )}
                                 {savingsStatements.length === 0 && !stmtMatch && statements.map((s: any, si: number) => (
                                   <li key={`s${si}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
