@@ -607,7 +607,7 @@ def run_automated_funds_lineage(
                 'source_account': source_type,  # External source (salary, interest, etc.)
                 'destination_account': txn_account,  # Where it landed
                 'match_type': 'external_origin',
-                'notes': f'External origin: {source_type}',
+                'notes': f'Origin: {source_type}',
                 'children': []
             }
         

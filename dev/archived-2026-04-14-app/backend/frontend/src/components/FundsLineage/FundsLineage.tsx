@@ -391,7 +391,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         sourceAccount: externalCheck.sourceType,
         destinationAccount: target.account,
         children: [],
-        notes: `✅ External origin identified: ${externalCheck.sourceType}`,
+        notes: `✅ Origin identified: ${externalCheck.sourceType}`,
         isOrigin: true
       };
     }
@@ -619,13 +619,14 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = Array.isArray(node.children) && node.children.length > 0;
     
-    // Use simple colored dots instead of emojis for consistent display
+    // Green marks a verified origin (traced or matched); amber marks a
+    // point that still requires evidence.
     const statusColor =
-      node.matchType === 'matched' ? 'bg-zinc-400' :
-      node.matchType === 'external_origin' ? 'bg-green-500' :
       node.matchType === 'requires_evidence' ? 'bg-amber-500' :
       node.matchType === 'statement_gap' ? 'bg-amber-500' :
-      'bg-zinc-400';
+      'bg-green-500';
+    const needsEvidence =
+      node.matchType === 'requires_evidence' || node.matchType === 'statement_gap';
 
     // Get transaction safely
     const txn = node.transaction || {};
@@ -634,118 +635,78 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
     const txnDesc = txn.description || node.description || 'No description';
     const txnId = txn.id || node.id || 'N/A';
 
-    return (
-      <div key={node.id} className="relative">
-        {/* Connection line */}
-        {(node.level || 0) > 0 && (
-          <div className="absolute left-4 -top-3 w-0.5 h-3 bg-zinc-200"></div>
-        )}
-        
-        {/* Node card */}
-        <div className="mb-2" style={{ marginLeft: `${(node.level || 0) * 24}px` }}>
-          <div className="border border-zinc-100 rounded p-3">
-            {/* Header row */}
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-2 min-w-0">
-                {hasChildren ? (
-                  <button
-                    onClick={() => toggleNode(node.id)}
-                    className="mt-0.5 text-zinc-400 hover:text-zinc-600 font-mono text-xs"
-                  >
-                    {isExpanded ? '▼' : '▶'}
-                  </button>
-                ) : (
-                  <span className="w-3" />
-                )}
-                <span className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${statusColor}`} />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-zinc-900">
-                    {(() => {
-                      // Try to extract meaningful account names from various sources
-                      let source = node.sourceAccount;
-                      let dest = node.destinationAccount;
-                      
-                      // If source is missing or 'Unknown', try to extract from description/notes
-                      if (!source || source === 'Unknown' || source === 'Unknown Source') {
-                        const desc = (node.description || txnDesc || '').toUpperCase();
-                        const notes = (node.notes || '').toLowerCase();
-                        
-                        // Extract from "FROM XXXX" pattern in description
-                        const fromMatch = desc.match(/FROM\s+([\w\s*]+\*{4}\d{4})/i);
-                        if (fromMatch) {
-                          source = fromMatch[1].trim();
-                        } else if (notes.includes('verified transfer from')) {
-                          // Extract from notes like "Verified transfer from Santander Savings ****3456"
-                          const notesMatch = notes.match(/from\s+([\w\s*]+\*{4}\d{4})/i);
-                          if (notesMatch) source = notesMatch[1].trim();
-                        } else if (notes.includes('external origin')) {
-                          // Extract source type from notes
-                          const originMatch = notes.match(/external origin[:\s]+(.+)/i);
-                          if (originMatch) source = originMatch[1].trim();
-                        } else if (node.account) {
-                          source = node.account;
-                        }
-                      }
-                      
-                      // If dest is missing, use account field
-                      if (!dest || dest === 'Unknown' || dest === 'Destination') {
-                        dest = node.account || 'Destination';
-                      }
-                      
-                      // Clean up the display
-                      source = source || 'Unknown';
-                      dest = dest || 'Destination';
-                      
-                      return `${source} → ${dest}`;
-                    })()}
-                  </div>
-                  <div className="text-xs text-zinc-400">{txnDate}</div>
-                </div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div className="text-sm font-semibold text-zinc-900 tabular-nums">
-                  £{Math.abs(txnAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-                <div className="text-[10px] text-zinc-400 font-mono">TXN-{txnId}</div>
-              </div>
-            </div>
+    // Account path (source → destination), derived from whatever the
+    // node carries.
+    const accountLabel = (() => {
+      let source = node.sourceAccount;
+      let dest = node.destinationAccount;
+      if (!source || source === 'Unknown' || source === 'Unknown Source') {
+        const desc = (node.description || txnDesc || '').toUpperCase();
+        const notes = (node.notes || '').toLowerCase();
+        const fromMatch = desc.match(/FROM\s+([\w\s*]+\*{4}\d{4})/i);
+        if (fromMatch) {
+          source = fromMatch[1].trim();
+        } else if (notes.includes('transfer from')) {
+          const notesMatch = notes.match(/from\s+([\w\s*]+\*{4}\d{4})/i);
+          if (notesMatch) source = notesMatch[1].trim();
+        } else if (notes.includes('origin')) {
+          const originMatch = notes.match(/origin[:\s]+(.+)/i);
+          if (originMatch) source = originMatch[1].trim();
+        } else if (node.account) {
+          source = node.account;
+        }
+      }
+      if (!dest || dest === 'Unknown' || dest === 'Destination') {
+        dest = node.account || 'Destination';
+      }
+      return `${source || 'Unknown'} → ${dest || 'Destination'}`;
+    })();
 
-            {/* Detail - crisp bullet lines, matching the Evidence Checklist */}
-            <ul className="mt-2 space-y-1">
-              <li className="flex items-start gap-2 text-xs text-zinc-600 leading-snug">
-                <span className="mt-[5px] h-1 w-1 rounded-full flex-shrink-0 bg-zinc-300" />
-                <span>{txnDesc}</span>
-              </li>
+    const indent = 12 + (node.level || 0) * 20;
+
+    return (
+      <div key={node.id}>
+        {/* Bank-statement style row — one line, click to expand and see
+            the entry from another statement that led to it. */}
+        <div
+          onClick={() => toggleNode(node.id)}
+          className="flex items-center gap-3 px-3 py-2 border-b border-zinc-100 cursor-pointer hover:bg-zinc-50"
+          style={{ paddingLeft: `${indent}px` }}
+        >
+          <span className="w-3 flex-shrink-0 text-zinc-400 text-[10px] font-mono">
+            {isExpanded ? '▼' : '▶'}
+          </span>
+          <span className={`h-2 w-2 rounded-full flex-shrink-0 ${statusColor}`} />
+          <span className="w-24 flex-shrink-0 text-xs text-zinc-500 tabular-nums">{txnDate}</span>
+          <span className="flex-1 min-w-0 text-sm text-zinc-800 truncate" title={txnDesc}>{txnDesc}</span>
+          <span className="flex-shrink-0 text-sm font-semibold text-zinc-900 tabular-nums">
+            £{Math.abs(txnAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+
+        {/* Expanded detail + the entries that led to this one. */}
+        {isExpanded && (
+          <>
+            <div
+              className="bg-zinc-50/70 border-b border-zinc-100 py-2 pr-3 text-xs text-zinc-600 space-y-0.5"
+              style={{ paddingLeft: `${indent + 26}px` }}
+            >
+              <div><span className="font-medium text-zinc-500">Account:</span> {accountLabel}</div>
+              <div className="font-mono text-[10px] text-zinc-400">TXN-{txnId}</div>
               {node.matchedTransaction && (
-                <li className="flex items-start gap-2 text-xs text-zinc-600 leading-snug">
-                  <span className="mt-[5px] h-1 w-1 rounded-full flex-shrink-0 bg-zinc-300" />
-                  <span>
-                    <span className="font-medium text-zinc-700">Matched with:</span>{' '}
-                    {node.matchedTransaction.description} ({formatDate(node.matchedTransaction.date)})
-                  </span>
-                </li>
+                <div>
+                  <span className="font-medium text-zinc-500">Matched with:</span>{' '}
+                  {node.matchedTransaction.description} ({formatDate(node.matchedTransaction.date)})
+                </div>
               )}
               {node.notes && (
-                <li className="flex items-start gap-2 text-xs leading-snug">
-                  <span className={`mt-[5px] h-1 w-1 rounded-full flex-shrink-0 ${statusColor}`} />
-                  <span className={
-                    node.matchType === 'external_origin' ? 'text-green-700' :
-                    node.matchType === 'requires_evidence' || node.matchType === 'statement_gap' ? 'text-amber-700' :
-                    'text-zinc-500'
-                  }>{node.notes}</span>
-                </li>
+                <div className={needsEvidence ? 'text-amber-700' : 'text-green-700'}>{node.notes}</div>
               )}
-            </ul>
-          </div>
-        </div>
-        
-        {/* Children */}
-        {isExpanded && hasChildren && (
-          <div className="relative">
-            {node.children.map((child: LineageNode, idx: number) => 
+            </div>
+            {hasChildren && node.children.map((child: LineageNode, idx: number) =>
               renderLineageNode(child, idx === node.children.length - 1)
             )}
-          </div>
+          </>
         )}
       </div>
     );
@@ -968,20 +929,12 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           <div className="px-6 py-3 bg-zinc-50 border-t border-zinc-200">
             <div className="flex flex-wrap gap-4 text-xs">
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-green-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
-                <span>External Origin (Verified)</span>
+                <span className="h-2.5 w-2.5 bg-green-500 rounded-full" />
+                <span>Verified origin</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-zinc-400 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
-                <span>Internal Transfer (Matched)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-amber-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
-                <span>Requires Evidence</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 bg-amber-500 rounded-full" style={{ minWidth: '12px', minHeight: '12px' }}></span>
-                <span>Statement Gap (Need Earlier Statements)</span>
+                <span className="h-2.5 w-2.5 bg-amber-500 rounded-full" />
+                <span>Requires evidence</span>
               </div>
             </div>
           </div>
@@ -1088,7 +1041,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
               <div className="font-semibold mb-1">📜 Compliance Statement</div>
               <p>
                 This backward funds lineage traces credited funds through uploaded bank statements.
-                Funds traced to external origins (salary, investments, etc.) are marked as verified.
+                Funds traced to an origin (salary, investments, etc.) are marked as verified.
                 Unmatched transactions require additional source documentation.
               </p>
               <div className="mt-2 text-zinc-400">
