@@ -619,13 +619,6 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = Array.isArray(node.children) && node.children.length > 0;
     
-    const bgColor =
-      node.matchType === 'matched' ? 'bg-zinc-50 border-zinc-300' :
-      node.matchType === 'external_origin' ? 'bg-green-50 border-green-200' :
-      node.matchType === 'requires_evidence' ? 'bg-amber-50 border-amber-200' :
-      node.matchType === 'statement_gap' ? 'bg-amber-50 border-amber-200' :
-      'bg-zinc-50 border-zinc-200';
-    
     // Use simple colored dots instead of emojis for consistent display
     const statusColor =
       node.matchType === 'matched' ? 'bg-zinc-400' :
@@ -649,25 +642,24 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         )}
         
         {/* Node card */}
-        <div className={`ml-${Math.min((node.level || 0) * 4, 16)} mb-2`} style={{ marginLeft: `${(node.level || 0) * 24}px` }}>
-          <div className={`border-l-4 rounded-md p-3 ${bgColor}`}>
+        <div className="mb-2" style={{ marginLeft: `${(node.level || 0) * 24}px` }}>
+          <div className="border border-zinc-100 rounded p-3">
             {/* Header row */}
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2">
-                {hasChildren && (
-                  <button 
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2 min-w-0">
+                {hasChildren ? (
+                  <button
                     onClick={() => toggleNode(node.id)}
-                    className="text-zinc-400 hover:text-zinc-600 font-mono text-sm"
+                    className="mt-0.5 text-zinc-400 hover:text-zinc-600 font-mono text-xs"
                   >
                     {isExpanded ? '▼' : '▶'}
                   </button>
+                ) : (
+                  <span className="w-3" />
                 )}
-                <span 
-                  className={`inline-block w-4 h-4 rounded-full flex-shrink-0 ${statusColor}`}
-                  style={{ minWidth: '16px', minHeight: '16px' }}
-                ></span>
-                <div>
-                  <div className="font-semibold text-zinc-900">
+                <span className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${statusColor}`} />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-zinc-900">
                     {(() => {
                       // Try to extract meaningful account names from various sources
                       let source = node.sourceAccount;
@@ -707,40 +699,43 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                       return `${source} → ${dest}`;
                     })()}
                   </div>
-                  <div className="text-xs text-zinc-600">{txnDate}</div>
+                  <div className="text-xs text-zinc-400">{txnDate}</div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-lg font-bold text-zinc-900">
+              <div className="text-right flex-shrink-0">
+                <div className="text-sm font-semibold text-zinc-900 tabular-nums">
                   £{Math.abs(txnAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </div>
-                <div className="text-xs text-zinc-400">TXN-{txnId}</div>
+                <div className="text-[10px] text-zinc-400 font-mono">TXN-{txnId}</div>
               </div>
             </div>
-            
-            {/* Transaction description */}
-            <div className="mt-2 text-sm text-zinc-600 bg-white/50 rounded p-2">
-              {txnDesc}
-            </div>
-            
-            {/* Match details */}
-            {node.matchedTransaction && (
-              <div className="mt-2 text-xs bg-zinc-100 rounded p-2">
-                <span className="font-semibold">Matched with:</span> {node.matchedTransaction.description}
-                <span className="ml-2 text-zinc-600">({formatDate(node.matchedTransaction.date)})</span>
-              </div>
-            )}
-            
-            {/* Notes */}
-            <div className={`mt-2 text-xs ${
-              node.matchType === 'external_origin' ? 'text-green-700' :
-              node.matchType === 'requires_evidence' ? 'text-amber-700' :
-              node.matchType === 'statement_gap' ? 'text-amber-700' :
-              node.matchType === 'matched' ? 'text-zinc-500' :
-              'text-zinc-600'
-            }`}>
-              {node.notes || ''}
-            </div>
+
+            {/* Detail - crisp bullet lines, matching the Evidence Checklist */}
+            <ul className="mt-2 space-y-1">
+              <li className="flex items-start gap-2 text-xs text-zinc-600 leading-snug">
+                <span className="mt-[5px] h-1 w-1 rounded-full flex-shrink-0 bg-zinc-300" />
+                <span>{txnDesc}</span>
+              </li>
+              {node.matchedTransaction && (
+                <li className="flex items-start gap-2 text-xs text-zinc-600 leading-snug">
+                  <span className="mt-[5px] h-1 w-1 rounded-full flex-shrink-0 bg-zinc-300" />
+                  <span>
+                    <span className="font-medium text-zinc-700">Matched with:</span>{' '}
+                    {node.matchedTransaction.description} ({formatDate(node.matchedTransaction.date)})
+                  </span>
+                </li>
+              )}
+              {node.notes && (
+                <li className="flex items-start gap-2 text-xs leading-snug">
+                  <span className={`mt-[5px] h-1 w-1 rounded-full flex-shrink-0 ${statusColor}`} />
+                  <span className={
+                    node.matchType === 'external_origin' ? 'text-green-700' :
+                    node.matchType === 'requires_evidence' || node.matchType === 'statement_gap' ? 'text-amber-700' :
+                    'text-zinc-500'
+                  }>{node.notes}</span>
+                </li>
+              )}
+            </ul>
           </div>
         </div>
         
@@ -918,50 +913,48 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             </div>
           </div>
 
-          {/* Summary - bullet list, matching the Evidence Checklist style */}
-          <div className="px-6 py-4 border-b border-zinc-200">
-            <ul className="space-y-1.5">
-              <li className="flex items-start gap-2 text-sm leading-snug">
-                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
-                <span className="text-zinc-700">
-                  <span className="font-semibold text-zinc-900">£{lineageSummary.totalAmount.toLocaleString()}</span> total amount
-                </span>
-              </li>
-              <li className="flex items-start gap-2 text-sm leading-snug">
-                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-green-500" />
-                <span className="text-zinc-700">
-                  <span className="font-semibold text-green-700">£{lineageSummary.tracedAmount.toLocaleString()}</span> traced to origin
-                </span>
-              </li>
-              <li className="flex items-start gap-2 text-sm leading-snug">
-                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-amber-500" />
-                <span className="text-zinc-700">
-                  <span className="font-semibold text-amber-700">£{lineageSummary.untracedAmount.toLocaleString()}</span> requires evidence
-                </span>
-              </li>
-              <li className="flex items-start gap-2 text-sm leading-snug">
-                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
-                <span className="text-zinc-700">
-                  <span className="font-semibold text-zinc-900">{lineageSummary.matchedTransfers}</span> matched transfers
-                </span>
-              </li>
-              <li className="flex items-start gap-2 text-sm leading-snug">
-                <span className="mt-[6px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-zinc-400" />
-                <span className="text-zinc-700">
-                  <span className="font-semibold text-zinc-900">
-                    {(() => {
-                      const days = lineageSummary.accumulationPeriodDays || 0;
-                      const years = Math.floor(days / 365);
-                      const months = Math.floor((days % 365) / 30);
-                      if (years > 0 && months > 0) return `${years}y ${months}m`;
-                      if (years > 0) return `${years} year${years > 1 ? 's' : ''}`;
-                      if (months > 0) return `${months} month${months > 1 ? 's' : ''}`;
-                      return `${days} days`;
-                    })()}
-                  </span> statement period
-                </span>
-              </li>
-            </ul>
+          {/* Summary Stats */}
+          <div className="px-6 py-4 bg-zinc-50 border-b border-zinc-200">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
+              <div>
+                <div className="text-xl font-bold text-zinc-900">
+                  £{lineageSummary.totalAmount.toLocaleString()}
+                </div>
+                <div className="text-xs text-zinc-600">Total Amount</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-green-700">
+                  £{lineageSummary.tracedAmount.toLocaleString()}
+                </div>
+                <div className="text-xs text-zinc-600">Traced to Origin</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-amber-700">
+                  £{lineageSummary.untracedAmount.toLocaleString()}
+                </div>
+                <div className="text-xs text-zinc-600">Requires Evidence</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-zinc-500">
+                  {lineageSummary.matchedTransfers}
+                </div>
+                <div className="text-xs text-zinc-600">Matched Transfers</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-zinc-600">
+                  {(() => {
+                    const days = lineageSummary.accumulationPeriodDays || 0;
+                    const years = Math.floor(days / 365);
+                    const months = Math.floor((days % 365) / 30);
+                    if (years > 0 && months > 0) return `${years}y ${months}m`;
+                    if (years > 0) return `${years} year${years > 1 ? 's' : ''}`;
+                    if (months > 0) return `${months} month${months > 1 ? 's' : ''}`;
+                    return `${days} days`;
+                  })()}
+                </div>
+                <div className="text-xs text-zinc-600">Statement Period</div>
+              </div>
+            </div>
           </div>
 
           {/* Lineage Tree */}
