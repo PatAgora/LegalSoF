@@ -1809,6 +1809,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               !!((result.claim_actions || {})[String(idx)] || {}).sufficient;
 
             const fmtMoney = (n: any) => `£${Math.round(Number(n) || 0).toLocaleString()}`;
+            // Enrich a provided-evidence line with the claim amount it
+            // confirms, e.g. "...letter for the sale" becomes
+            // "...letter confirming £400,000 for the sale".
+            const enrichDoc = (doc: string, amount: any): string => {
+              const amt = Math.round(Number(amount) || 0);
+              if (amt <= 0 || /£[\d,]/.test(doc)) return doc;
+              const money = `£${amt.toLocaleString()}`;
+              const lastFor = doc.toLowerCase().lastIndexOf(' for ');
+              if (lastFor > 0) {
+                return `${doc.slice(0, lastFor)} confirming ${money}${doc.slice(lastFor)}`;
+              }
+              return `${doc} (confirming ${money})`;
+            };
             const fmtGapDate = (s: any): string => {
               if (!s) return 'an unknown date';
               const str = String(s);
@@ -1996,7 +2009,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     <svg className="mt-0.5 h-3.5 w-3.5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                     </svg>
-                                    <span className="flex-1 min-w-0 text-zinc-700">{item.doc}</span>
+                                    <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>
                                     <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
                                       {item.file}
                                     </span>
@@ -2301,170 +2314,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </details>
             );
           })()}
-
-          {/* Remaining rationale sections (Transaction Review). */}
-          {renderStructuredRationale(result)}
-
-          {/* ============================================================ */}
-          {/* FUNDS LINEAGE SECTION (collapsible by default)                */}
-          {/* ============================================================ */}
-          {result.sections_enabled?.funds_lineage !== false && (
-          <details id="tile-funds-lineage" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
-            <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
-              <h3 className="text-lg font-bold text-zinc-900">Funds Lineage</h3>
-              <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </summary>
-
-            {fundsLineageData?.exists && fundsLineageData.summary ? (
-              (() => {
-                const s = fundsLineageData.summary!;
-                const total = s.totalAmount || 0;
-                const traced = s.tracedAmount || 0;
-                const untraced = s.untracedAmount || 0;
-                const tracedPct = total > 0 ? Math.round((traced / total) * 100) : 0;
-                const fmt = (n: number) => `£${Math.round(n).toLocaleString()}`;
-                const unresolvedCount = fundsLineageData.unresolved_items?.length || 0;
-                return (
-                  <>
-                    {/* Stat strip */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-zinc-100">
-                      <div className="px-6 py-4">
-                        <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{fmt(total)}</div>
-                        <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Total amount</div>
-                      </div>
-                      <div className="px-6 py-4">
-                        <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{fmt(traced)}</div>
-                        <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Traced ({tracedPct}%)</div>
-                      </div>
-                      <div className="px-6 py-4">
-                        <div className={`font-serif text-2xl font-normal tabular-nums ${untraced > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{fmt(untraced)}</div>
-                        <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Untraced ({Math.max(0, 100 - tracedPct)}%)</div>
-                      </div>
-                      <div className="px-6 py-4">
-                        <div className="font-serif text-2xl font-normal text-zinc-900 tabular-nums">{s.matchedTransfers || 0}</div>
-                        <div className="mt-1 text-[11px] uppercase tracking-wider text-zinc-400">Matched transfers</div>
-                      </div>
-                    </div>
-
-                    {/* Progress bar - traced vs untraced */}
-                    {total > 0 && (
-                      <div className="px-6 py-4 border-t border-zinc-100">
-                        <div className="h-2 w-full rounded-full overflow-hidden bg-zinc-100 flex">
-                          {traced > 0 && (
-                            <div className="bg-green-500" style={{ width: `${tracedPct}%` }} title={`Traced ${fmt(traced)}`} />
-                          )}
-                          {untraced > 0 && (
-                            <div className="bg-amber-500" style={{ width: `${Math.max(0, 100 - tracedPct)}%` }} title={`Untraced ${fmt(untraced)}`} />
-                          )}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-500">
-                          <span className="inline-flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-sm bg-green-500" />
-                            Traced to source
-                          </span>
-                          <span className="inline-flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-sm bg-amber-500" />
-                            Untraced / requires evidence
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Period + unresolved summary */}
-                    <div className="px-6 py-4 border-t border-zinc-100 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                      {s.accumulationPeriodDays > 0 && (
-                        <div>
-                          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1">Accumulation period</div>
-                          <div className="text-zinc-700">{s.accumulationPeriodDays} day{s.accumulationPeriodDays !== 1 ? 's' : ''}</div>
-                        </div>
-                      )}
-                      {(s.externalOrigins ?? 0) > 0 && (
-                        <div>
-                          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1">External origins</div>
-                          <div className="text-zinc-700">{s.externalOrigins}</div>
-                        </div>
-                      )}
-                      {(s.requiresEvidence ?? 0) > 0 && (
-                        <div>
-                          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1">Requires evidence</div>
-                          <div className="text-amber-700 font-medium">{s.requiresEvidence}</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Circular references - high-priority callout */}
-                    {(s.circularReferences ?? 0) > 0 && (
-                      <div className="px-6 py-4 border-t border-zinc-100 bg-red-50/50">
-                        <div className="flex items-start gap-3">
-                          <span className="mt-1 h-2 w-2 rounded-full bg-red-500 shrink-0" />
-                          <div>
-                            <div className="text-sm font-semibold text-red-900">
-                              {s.circularReferences} circular reference{(s.circularReferences ?? 0) !== 1 ? 's' : ''} detected
-                            </div>
-                            <p className="text-xs text-red-700 mt-0.5">
-                              One or more transactions reference funding that loops back to an earlier point in the chain.
-                              This can indicate round-tripping. Open the full lineage to review.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Unresolved items preview (top 3) */}
-                    {unresolvedCount > 0 && (
-                      <div className="px-6 py-4 border-t border-zinc-100">
-                        <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2">
-                          Unresolved items ({unresolvedCount})
-                        </div>
-                        <ul className="space-y-1.5">
-                          {fundsLineageData.unresolved_items!.slice(0, 3).map((item, idx) => (
-                            <li key={idx} className="text-sm text-zinc-700 flex items-baseline justify-between gap-3">
-                              <span className="truncate">
-                                <span className="text-zinc-400 mr-2 tabular-nums">{item.date}</span>
-                                {item.reason === 'circular_reference' && (
-                                  <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-100 text-red-700">
-                                    CIRCULAR
-                                  </span>
-                                )}
-                                {item.description || item.message || '-'}
-                              </span>
-                              <span className="text-amber-700 tabular-nums font-medium shrink-0">{fmt(item.amount)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        {unresolvedCount > 3 && (
-                          <Link
-                            to={`/matters/${matterId}?tab=funds-lineage`}
-                            className="mt-2 inline-block text-xs text-zinc-700 hover:text-zinc-900 underline-offset-2 hover:underline"
-                          >
-                            + {unresolvedCount - 3} more - open full lineage
-                          </Link>
-                        )}
-                      </div>
-                    )}
-                  </>
-                );
-              })()
-            ) : (
-              <div className="px-6 py-8 text-center">
-                <p className="text-sm text-zinc-600">
-                  No funds-lineage analysis has been run yet for this matter.
-                </p>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Funds lineage traces credits in the bank statements back to their source. Open the tab to run it.
-                </p>
-                <Link
-                  to={`/matters/${matterId}?tab=funds-lineage`}
-                  className="inline-block mt-3 px-3 py-1.5 text-xs font-medium bg-zinc-900 text-white rounded hover:bg-zinc-800 transition-colors"
-                >
-                  Open Funds Lineage
-                </Link>
-              </div>
-            )}
-          </details>
-          )}
 
           {/* ============================================================ */}
           {/* DOCUMENT VERIFICATION SECTION (collapsible by default)        */}
