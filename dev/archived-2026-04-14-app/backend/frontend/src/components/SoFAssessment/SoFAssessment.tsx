@@ -1015,6 +1015,23 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
     const verifiedCount = claimList.filter((_c: any, idx: number) => claimStatus(idx) === 'verified').length;
 
+    const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
+      verified: { label: 'Verified', cls: 'bg-green-50 text-green-700 ring-green-200/80', dot: 'bg-green-500' },
+      sent:     { label: 'Sent to Compliance', cls: 'bg-blue-50 text-blue-700 ring-blue-200/80', dot: 'bg-blue-500' },
+      returned: { label: 'Returned from Compliance', cls: 'bg-red-50 text-red-700 ring-red-200/80', dot: 'bg-red-500' },
+      review:   { label: 'Under Review', cls: 'bg-amber-50 text-amber-700 ring-amber-200/80', dot: 'bg-amber-500' },
+    };
+    // The funds shortfall is shown as the first row, in the same format
+    // as a claim; its status follows the funds-shortfall review item.
+    const shortfallAction = (result.item_actions || {})['funds-shortfall'] || {};
+    const shortfallStatus = shortfallAction.sufficient
+      ? 'verified'
+      : (shortfallAction.compliance || {}).state === 'in_review'
+        ? 'sent'
+        : (shortfallAction.compliance || {}).state === 'returned'
+          ? 'returned'
+          : 'review';
+
     return (
       <details key="sof" className="bg-white border border-zinc-200 rounded-md overflow-hidden group" open>
         {/* Header - clickable summary, chevron rotates when open */}
@@ -1035,20 +1052,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </summary>
-
-        {/* Funds-sufficiency warning - the declared sources do not add
-            up to the transaction value (SRA poor practice). */}
-        {result.funds_shortfall && (
-          <div className="bg-red-50 border-b border-red-200 px-6 py-3">
-            <div className="text-sm font-semibold text-red-800">Declared funds do not cover the transaction</div>
-            <p className="mt-1 text-xs text-red-700">
-              The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but the
-              transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a shortfall
-              of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for the difference, or
-              establish and record how the balance is funded, before proceeding.
-            </p>
-          </div>
-        )}
 
         {/* Explicit empty state - a zero-claim result must be loud, not
             an invisible missing tile. */}
@@ -1075,16 +1078,30 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-zinc-100">
+                {result.funds_shortfall && (() => {
+                  const chip = STATUS_CHIP[shortfallStatus];
+                  return (
+                    <tr className="hover:bg-zinc-50/60">
+                      <td className="px-5 py-3.5 text-sm text-zinc-900">
+                        <span className="font-medium text-red-800">Funds shortfall</span>
+                        <span className="ml-2 text-xs text-zinc-500 tabular-nums">£{Number(result.funds_shortfall.shortfall).toLocaleString()}</span>
+                        <div className="mt-0.5 text-xs text-zinc-500">
+                          Declared sources are £{Number(result.funds_shortfall.shortfall).toLocaleString()} short of the
+                          £{Number(result.funds_shortfall.transaction_value).toLocaleString()} transaction value.
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset ${chip.cls}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />{chip.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })()}
                 {claimList.map((claim, idx) => {
                   const status = claimStatus(idx);
                   const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
                   const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
-                  const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
-                    verified: { label: 'Verified', cls: 'bg-green-50 text-green-700 ring-green-200/80', dot: 'bg-green-500' },
-                    sent:     { label: 'Sent to Compliance', cls: 'bg-blue-50 text-blue-700 ring-blue-200/80', dot: 'bg-blue-500' },
-                    returned: { label: 'Returned from Compliance', cls: 'bg-red-50 text-red-700 ring-red-200/80', dot: 'bg-red-500' },
-                    review:   { label: 'Under Review', cls: 'bg-amber-50 text-amber-700 ring-amber-200/80', dot: 'bg-amber-500' },
-                  };
                   const chip = STATUS_CHIP[status];
                   return (
                     <tr key={idx} className="hover:bg-zinc-50/60">
@@ -2007,6 +2024,22 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   </svg>
                 </summary>
                 <div className="px-6 py-4">
+                  {/* Funds-shortfall - a reviewable item the fee earner
+                      can mark satisfied (with a rationale) or send to
+                      compliance, the same as a claim. */}
+                  {result.funds_shortfall && (
+                    <div className="border border-red-200 rounded p-3 mb-4 bg-red-50/40">
+                      <div className="text-sm font-semibold text-red-800">Declared funds do not cover the transaction</div>
+                      <p className="mt-1 text-xs text-red-700">
+                        The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but
+                        the transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a
+                        shortfall of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for
+                        the difference, establish how the balance is funded, or record a rationale below for why the
+                        shortfall is acceptable.
+                      </p>
+                      {renderItemControls('funds-shortfall')}
+                    </div>
+                  )}
                   <div className="space-y-4">
                     {rows.map((row: any) => {
                       const label = String(row.claim.source_type || 'Source').replace(/_/g, ' ');
