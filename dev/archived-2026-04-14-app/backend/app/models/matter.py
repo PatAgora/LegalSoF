@@ -72,6 +72,7 @@ class Matter(Base):
     compliance_status = Column(String(20), default="none")
     compliance_submitted_at = Column(DateTime(timezone=True))
     compliance_submitted_by = Column(String(200))
+    compliance_reason = Column(Text)   # why it was sent to compliance
     compliance_reviewed_at = Column(DateTime(timezone=True))
     compliance_reviewed_by = Column(String(200))
     compliance_review_outcome = Column(String(20))   # cleared | returned

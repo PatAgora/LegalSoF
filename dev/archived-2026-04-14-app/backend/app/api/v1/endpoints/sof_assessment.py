@@ -2421,6 +2421,7 @@ async def get_sof_assessment_results(
     # so the frontend can render claim status + the action buttons.
     assessment = dict(storage['assessment_result'])
     assessment['claim_actions'] = storage.get('claim_actions', {})
+    assessment['matter_compliance_status'] = getattr(matter, 'compliance_status', None) or 'none'
 
     return {
         "matter_id": matter_id,
@@ -3069,11 +3070,19 @@ async def mark_claim_sufficient(
 async def send_claim_to_compliance(
     matter_id: int,
     claim_index: int,
+    request: Dict[str, Any],
     current_user: User = Depends(require_analyst),
     db: Session = Depends(get_sync_db),
 ):
     """Send a single claim to the compliance team for review. Puts the
-    claim — and the matter — into 'in_review' and notifies admins."""
+    claim — and the matter — into 'in_review' and notifies admins. A
+    reason is required so compliance can see why it was referred."""
+    reason = (request.get('reason') or '').strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="A reason (at least 10 characters) is required so compliance can see why the claim was referred.",
+        )
     matter = db.query(Matter).filter(Matter.id == matter_id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
@@ -3088,12 +3097,14 @@ async def send_claim_to_compliance(
         'state': 'in_review',
         'sent_by': who,
         'sent_at': now.isoformat(),
+        'reason': reason,
     }
     _db_save_storage(db, matter_id, storage)
 
     matter.compliance_status = 'in_review'
     matter.compliance_submitted_at = now
     matter.compliance_submitted_by = who
+    matter.compliance_reason = reason
 
     claims = (storage.get('assessment_result') or {}).get('claims') or []
     claim_label = ''
@@ -3108,9 +3119,10 @@ async def send_claim_to_compliance(
         entity_id=matter_id,
         description=(
             f"Claim {claim_index + 1} ({claim_label}) on matter "
-            f"{matter.reference_number} sent to compliance review by {who}."
+            f"{matter.reference_number} sent to compliance review by {who}. "
+            f"Reason: {reason}"
         ),
-        details={"claim_index": claim_index, "sent_by": who},
+        details={"claim_index": claim_index, "sent_by": who, "reason": reason},
     ))
     for admin in db.query(User).filter(User.role == UserRole.ADMIN).all():
         try:
@@ -3122,7 +3134,7 @@ async def send_claim_to_compliance(
                 message=(
                     f"{who} sent a Source of Funds claim on matter "
                     f"{matter.reference_number} ({matter.client_name}) for "
-                    f"compliance review."
+                    f"compliance review. Reason: {reason}"
                 ),
             ))
         except Exception:

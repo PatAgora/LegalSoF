@@ -286,6 +286,7 @@ async def get_matter(
             "compliance_submitted_at": (matter.compliance_submitted_at.isoformat()
                                         if getattr(matter, 'compliance_submitted_at', None) else None),
             "compliance_submitted_by": getattr(matter, 'compliance_submitted_by', None),
+            "compliance_reason": getattr(matter, 'compliance_reason', None),
             "compliance_reviewed_at": (matter.compliance_reviewed_at.isoformat()
                                        if getattr(matter, 'compliance_reviewed_at', None) else None),
             "compliance_reviewed_by": getattr(matter, 'compliance_reviewed_by', None),
@@ -591,6 +592,7 @@ async def compliance_matters(
                 "compliance_submitted_at": (m.compliance_submitted_at.isoformat()
                                             if m.compliance_submitted_at else None),
                 "compliance_submitted_by": m.compliance_submitted_by,
+                "compliance_reason": m.compliance_reason,
                 "compliance_reviewed_at": (m.compliance_reviewed_at.isoformat()
                                            if m.compliance_reviewed_at else None),
                 "compliance_reviewed_by": m.compliance_reviewed_by,

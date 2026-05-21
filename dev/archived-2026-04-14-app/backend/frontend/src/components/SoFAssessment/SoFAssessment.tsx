@@ -97,6 +97,8 @@ interface AssessmentResult {
   red_flags: any[];
   // Per-claim reviewer / compliance actions, keyed by claim index.
   claim_actions?: Record<string, any>;
+  // The matter's compliance review status (none | in_review | cleared | returned).
+  matter_compliance_status?: string;
   document_verification?: {
     overall_verification_rate: number;
     missing_documents: string[];
@@ -581,11 +583,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   };
 
   const sendClaimToCompliance = async (claimIndex: number) => {
-    if (!confirm('Send this claim to the compliance team for review?')) return;
+    const reason = window.prompt(
+      'Send this claim to compliance. Give the reason for the referral (required) — '
+      + 'the compliance team sees this so they know why it has come to them.',
+      '',
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 10) {
+      alert('A reason of at least 10 characters is required.');
+      return;
+    }
     try {
       const r = await authFetch(
         `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/send-to-compliance`,
-        { method: 'POST' },
+        { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) },
       );
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
@@ -749,17 +760,19 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const renderSoFSection = (_content: string, result: AssessmentResult) => {
     const claimList = result.claims || [];
 
-    // A claim passes when the evidence adequately supports it: the
-    // reviewer has marked it as having sufficient evidence, an analyst
-    // accepted it on review, OR the supporting document verified at
-    // high confidence. Anything else needs more information.
-    const claimPasses = (evidence: any, idx: number): boolean => {
+    // Claim status is reviewer-driven, one of four states:
+    //   verified  — the reviewer pressed "Sufficient Evidence Provided"
+    //   sent      — the claim has been sent to compliance
+    //   returned  — compliance returned the matter with queries
+    //   review    — the default; still under review
+    const claimStatus = (idx: number): 'verified' | 'sent' | 'returned' | 'review' => {
       const action = (result.claim_actions || {})[String(idx)] || {};
-      if (action.sufficient) return true;
-      const dv = (evidence && evidence.document_verification) || {};
-      if (dv.manual_review_status === 'accepted') return true;
-      const confidence = dv.confidence ?? 0;
-      return evidence && evidence.document_verified === true && confidence >= 0.999;
+      if (action.sufficient) return 'verified';
+      const comp = action.compliance || {};
+      if (comp.state === 'in_review') {
+        return result.matter_compliance_status === 'returned' ? 'returned' : 'sent';
+      }
+      return 'review';
     };
 
     // For a claim that needs action, work out WHICH results tile the
@@ -828,10 +841,20 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               <tbody className="bg-white divide-y divide-zinc-100">
                 {claimList.map((claim, idx) => {
                   const evidence = result.evidence_matches[idx] || {};
-                  const passes = claimPasses(evidence, idx);
+                  const status = claimStatus(idx);
                   const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
                   const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
-                  const action = passes ? null : claimAction(evidence, claim);
+                  // An action link is shown for claims still with the
+                  // reviewer (Under Review or Returned from Compliance).
+                  const action = (status === 'review' || status === 'returned')
+                    ? claimAction(evidence, claim) : null;
+                  const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
+                    verified: { label: 'Verified', cls: 'bg-green-50 text-green-700 ring-green-200/80', dot: 'bg-green-500' },
+                    sent:     { label: 'Sent to Compliance', cls: 'bg-blue-50 text-blue-700 ring-blue-200/80', dot: 'bg-blue-500' },
+                    returned: { label: 'Returned from Compliance', cls: 'bg-red-50 text-red-700 ring-red-200/80', dot: 'bg-red-500' },
+                    review:   { label: 'Under Review', cls: 'bg-amber-50 text-amber-700 ring-amber-200/80', dot: 'bg-amber-500' },
+                  };
+                  const chip = STATUS_CHIP[status];
                   return (
                     <tr key={idx} className="hover:bg-zinc-50/60">
                       <td className="px-5 py-3.5 text-sm text-zinc-900">
@@ -839,15 +862,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         <span className="ml-2 text-xs text-zinc-500 tabular-nums">{amountStr}</span>
                       </td>
                       <td className="px-5 py-3.5 text-sm whitespace-nowrap">
-                        {passes ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset bg-green-50 text-green-700 ring-green-200/80">
-                            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />Pass
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200/80">
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Information Required
-                          </span>
-                        )}
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold ring-1 ring-inset ${chip.cls}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />{chip.label}
+                        </span>
                       </td>
                       <td className="px-5 py-3.5 text-sm whitespace-nowrap">
                         {action ? (
@@ -1573,12 +1590,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               return null;
             };
 
-            const claimVerified = (ev: any, idx: number): boolean => {
+            // A claim is Verified only once the reviewer has pressed
+            // "Sufficient Evidence Provided" — status is user-driven.
+            const claimVerified = (_ev: any, idx: number): boolean => {
               const action = (result.claim_actions || {})[String(idx)] || {};
-              if (action.sufficient) return true;
-              const dv = (ev && ev.document_verification) || {};
-              if (dv.manual_review_status === 'accepted') return true;
-              return ev && ev.document_verified === true && (dv.confidence ?? 0) >= 0.999;
+              return !!action.sufficient;
             };
 
             // Build the rows — every claim with a checklist. The
@@ -1652,7 +1668,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${
                                 row.verified ? 'text-zinc-400' : 'text-amber-600'
                               }`}>
-                                {row.verified ? 'Other expected evidence' : 'Suggested Evidence to Obtain'}
+                                {row.verified ? 'Other possible evidence' : 'Suggested Evidence to Obtain'}
                               </div>
                               <ul className="space-y-1">
                                 {suggested.map((doc: string, di: number) => (
@@ -1680,7 +1696,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     onClick={() => cancelClaimCompliance(row.idx)}
                                     className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors"
                                   >
-                                    Compliance Review Cancelled
+                                    Cancel Compliance Referral
                                   </button>
                                 ) : (
                                   <button

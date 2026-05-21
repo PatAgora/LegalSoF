@@ -980,6 +980,12 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
                 Sent by {matter.compliance_submitted_by || 'a reviewer'}
                 {matter.compliance_submitted_at ? ` on ${fmt(matter.compliance_submitted_at)}` : ''}.
               </div>
+              {matter.compliance_reason && (
+                <div className="mt-1.5 text-xs text-amber-800">
+                  <span className="font-semibold">Reason for referral:</span>{' '}
+                  <span className="italic">"{matter.compliance_reason}"</span>
+                </div>
+              )}
             </>
           )}
           {status === 'cleared' && (

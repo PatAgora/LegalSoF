@@ -10,6 +10,7 @@ interface ComplianceMatter {
   compliance_status: string;
   compliance_submitted_at: string | null;
   compliance_submitted_by: string | null;
+  compliance_reason: string | null;
   compliance_reviewed_at: string | null;
   compliance_reviewed_by: string | null;
   risk_rating: string;
@@ -117,7 +118,14 @@ export default function ComplianceMattersPage() {
                       {m.reference_number}
                     </Link>
                   </td>
-                  <td className="px-5 py-3 text-zinc-700">{m.client_name}</td>
+                  <td className="px-5 py-3 text-zinc-700">
+                    {m.client_name}
+                    {m.compliance_reason && (
+                      <div className="mt-0.5 text-xs italic text-zinc-500 max-w-xs">
+                        "{m.compliance_reason}"
+                      </div>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-zinc-600 capitalize">{(m.risk_rating || 'medium').toLowerCase()}</td>
                   <td className="px-5 py-3"><ComplianceStatusChip status={m.compliance_status} /></td>
                   <td className="px-5 py-3 text-zinc-500">
