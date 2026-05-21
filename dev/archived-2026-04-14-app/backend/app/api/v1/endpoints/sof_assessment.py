@@ -2648,100 +2648,288 @@ async def download_file_note(
             detail=f"Assessment not completed (status: {storage['status']})"
         )
     
-    # Get file note text
-    file_note = storage['assessment_result']['file_note_summary']
-    
-    # Generate Word document
+    # ------------------------------------------------------------------
+    # Source of Funds Audit Report - a full, SRA-aligned record of the
+    # source of funds work on the matter (MLR 2017 regs 28/33/40; LSAG
+    # §6.8; SRA SoF thematic review, Nov 2025).
+    # ------------------------------------------------------------------
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from io import BytesIO
     from fastapi.responses import StreamingResponse
-    
+    from app.api.v1.endpoints.matters import derive_matter_status
+
+    assessment = storage.get('assessment_result') or {}
+    claims = assessment.get('claims') or []
+    evidence_matches = assessment.get('evidence_matches') or []
+    claim_actions = storage.get('claim_actions') or {}
+    item_actions = storage.get('item_actions') or {}
+    client_info = storage.get('client_info') or {}
+    lineage_summary = (storage.get('funds_lineage') or {}).get('summary') or {}
+    sof_confirmed = storage.get('sof_confirmed') or {}
+    overall_status = derive_matter_status(matter, storage)
+
+    dv_rows = (
+        db.query(DocumentVerification)
+        .filter(DocumentVerification.matter_id == matter_id)
+        .order_by(DocumentVerification.created_at.asc())
+        .all()
+    )
+    audit_rows = (
+        db.query(AuditLog)
+        .filter(AuditLog.matter_id == matter_id)
+        .order_by(AuditLog.created_at.asc())
+        .all()
+    )
+
+    def _money(n):
+        try:
+            return f"£{float(n):,.2f}"
+        except (TypeError, ValueError):
+            return "£0.00"
+
+    def _fmt(v):
+        if not v:
+            return ''
+        try:
+            d = v if hasattr(v, 'strftime') else datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+            return d.strftime('%d/%m/%Y %H:%M')
+        except Exception:
+            return str(v)
+
     doc = Document()
-    
-    # Set document margins
-    sections = doc.sections
-    for section in sections:
-        section.top_margin = Inches(1)
-        section.bottom_margin = Inches(1)
-        section.left_margin = Inches(1)
-        section.right_margin = Inches(1)
-    
-    # Add title
-    title = doc.add_heading('Source of Funds Assessment File Note', level=0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Add matter reference
-    matter_ref = doc.add_paragraph()
-    matter_ref.add_run(f'Matter Reference: {matter.reference_number or f"MAT-{matter.id}"}').bold = True
-    matter_ref.add_run(f'\nClient: {matter.client_name}')
-    matter_ref.add_run(f'\nDate: {datetime.now().strftime("%d %B %Y")}')
-    matter_ref.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    doc.add_paragraph()  # Spacing
-    
-    # Parse and format the file note sections
-    sections_text = file_note.split('===')
-    
-    for section in sections_text:
-        if not section.strip():
+    for section in doc.sections:
+        section.top_margin = Inches(0.9)
+        section.bottom_margin = Inches(0.9)
+        section.left_margin = Inches(0.9)
+        section.right_margin = Inches(0.9)
+
+    def H(text):
+        h = doc.add_heading(text, level=1)
+        for r in h.runs:
+            r.font.color.rgb = RGBColor(0x1a, 0x1a, 0x1a)
+
+    def P(text='', bold=False, italic=False):
+        p = doc.add_paragraph()
+        run = p.add_run(text)
+        run.bold = bold
+        run.italic = italic
+        p.paragraph_format.space_after = Pt(4)
+
+    def KV(label, value):
+        p = doc.add_paragraph()
+        p.add_run(f"{label}: ").bold = True
+        p.add_run(str(value) if value not in (None, '') else 'Not recorded')
+        p.paragraph_format.space_after = Pt(2)
+
+    def bullet(text, bold=False):
+        p = doc.add_paragraph(style='List Bullet')
+        p.add_run(text).bold = bold
+        p.paragraph_format.space_after = Pt(2)
+
+    # --- Title ---------------------------------------------------------
+    title = doc.add_heading('Source of Funds Audit Report', level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    P(f"{matter.reference_number or f'MAT-{matter.id}'}  -  {matter.client_name}", italic=True)
+    P(f"Generated {datetime.now().strftime('%d/%m/%Y %H:%M')} by {current_user.full_name or current_user.email}", italic=True)
+    P(f"Overall status: {overall_status}", bold=True)
+
+    # --- 1. Matter and transaction ------------------------------------
+    H('1. Matter and transaction')
+    _tt = getattr(matter.transaction_type, 'value', None) or str(matter.transaction_type or '')
+    KV('Matter reference', matter.reference_number or f'MAT-{matter.id}')
+    KV('Client', matter.client_name)
+    KV('Transaction type', _tt.replace('_', ' ').title())
+    KV('Transaction value', _money(matter.target_amount))
+    KV('Assessment completed', _fmt(storage.get('last_updated')))
+
+    # --- 2. Matter risk assessment ------------------------------------
+    H('2. Matter risk assessment')
+    _rr = getattr(matter.risk_rating, 'value', None) or str(matter.risk_rating or 'medium')
+    KV('Risk rating', _rr.title())
+    P('The risk rating determines the depth of source of funds enquiry applied '
+      '(MLR 2017 reg 28(11) - checks "where necessary", proportionate to risk).')
+    if getattr(matter, 'risk_notes', None):
+        P('Basis for the rating:', bold=True)
+        P(matter.risk_notes)
+    else:
+        P('Basis for the rating: not recorded on file.', italic=True)
+
+    # --- 3. Declared source of funds ----------------------------------
+    H('3. Declared source of funds')
+    _expl = client_info.get('sof_explanation') or client_info.get('explanation') or ''
+    if _expl:
+        P("Client's stated explanation:", bold=True)
+        P(str(_expl), italic=True)
+    claims_total = 0.0
+    for i, c in enumerate(claims):
+        amt = c.get('expected_amount') or 0
+        try:
+            claims_total += float(amt)
+        except (TypeError, ValueError):
+            pass
+        bullet(f"{str(c.get('source_type', 'source')).replace('_', ' ').title()} - {_money(amt)}")
+    try:
+        _txn_val = float(matter.target_amount or 0)
+    except (TypeError, ValueError):
+        _txn_val = 0.0
+    KV('Declared sources total', _money(claims_total))
+    if _txn_val > 0 and claims_total + 1 < _txn_val:
+        P(f"Shortfall: the declared sources fall {_money(_txn_val - claims_total)} short of the "
+          f"transaction value. The balance must be evidenced before funds are accepted.", bold=True)
+
+    # --- 4. Evidence obtained and assessed ----------------------------
+    H('4. Evidence obtained and assessed')
+    P('For each declared source: the evidence expected, the reviewer’s recorded '
+      'conclusion, and the document-verification outcome.')
+    for i, c in enumerate(claims):
+        act = claim_actions.get(str(i)) or {}
+        suff = act.get('sufficient') or {}
+        P(f"Claim {i + 1}: {str(c.get('source_type', 'source')).replace('_', ' ').title()} "
+          f"({_money(c.get('expected_amount') or 0)})", bold=True)
+        for ev in (c.get('expected_evidence') or []):
+            bullet(str(ev))
+        if suff.get('rationale'):
+            KV('Reviewer conclusion', suff['rationale'])
+            KV('Signed off by', f"{suff.get('by', 'unknown')} on {_fmt(suff.get('at'))}")
+        else:
+            P('Not yet marked as having sufficient evidence.', italic=True)
+        dv = (evidence_matches[i] if i < len(evidence_matches) else {}) or {}
+        verdict = ((dv.get('document_verification') or {}).get('verdict'))
+        if verdict:
+            KV('Document verification', verdict)
+
+    # --- 5. Funds tracing / lineage -----------------------------------
+    H('5. Funds tracing and lineage')
+    if lineage_summary:
+        KV('Total amount', _money(lineage_summary.get('totalAmount')))
+        KV('Traced to origin', _money(lineage_summary.get('tracedAmount')))
+        KV('Requires evidence', _money(lineage_summary.get('untracedAmount')))
+        KV('Matched transfers', lineage_summary.get('matchedTransfers', 0))
+        if lineage_summary.get('accumulationPeriodDays'):
+            KV('Statement period', f"{lineage_summary['accumulationPeriodDays']} days")
+    else:
+        P('Funds lineage has not been run for this matter.', italic=True)
+
+    # --- 6. Transaction review ----------------------------------------
+    H('6. Transaction review')
+    trs = assessment.get('transaction_review_summary') or {}
+    KV('Total alerts', trs.get('total_alerts', 0))
+    KV('Critical / High / Medium',
+       f"{trs.get('critical_alerts', 0)} / {trs.get('high_alerts', 0)} / {trs.get('medium_alerts', 0)}")
+    _alert_actions = ((item_actions.get('transaction-review') or {}).get('alerts')) or {}
+    if _alert_actions:
+        P('Alerts reviewed and satisfied:', bold=True)
+        for k, a in _alert_actions.items():
+            bullet(f"Alert {int(k) + 1}: {a.get('rationale', '')} ({a.get('by', 'unknown')})")
+
+    # --- 7. Red flags and how they were resolved ----------------------
+    H('7. Red flags and resolution')
+    _flag_count = 0
+    for i, ev in enumerate(evidence_matches):
+        diffs = ((ev or {}).get('document_verification') or {}).get('differences') or []
+        for d in diffs:
+            _flag_count += 1
+            field = str(d.get('field', '')).replace('_', ' ')
+            bullet(f"Claim {i + 1}: {field or 'issue flagged'}")
+    if _flag_count == 0:
+        P('No outstanding red flags recorded against the declared sources.', italic=True)
+
+    # --- 8. Third-party funding ---------------------------------------
+    H('8. Third-party funding')
+    _tp = [(i, c) for i, c in enumerate(claims)
+           if any(k in str(c.get('source_type', '')).lower() for k in ('gift', 'loan'))]
+    if _tp:
+        P('Funds contributed by a third party require the donor/lender to be checked '
+          'in the same way as the client (SRA thematic review, case study 1).')
+        for i, c in _tp:
+            bullet(f"Claim {i + 1}: {str(c.get('source_type')).title()} of "
+                   f"{_money(c.get('expected_amount') or 0)}")
+    else:
+        P('No third-party (gift or loan) funding declared on this matter.', italic=True)
+
+    # --- 9. Compliance review -----------------------------------------
+    H('9. Compliance review')
+    _had_compliance = False
+    for key, entry in list(claim_actions.items()) + list(item_actions.items()):
+        comp = (entry or {}).get('compliance') or {}
+        thread = comp.get('thread') or []
+        if not thread:
             continue
-            
-        lines = section.strip().split('\n')
-        section_title = lines[0].strip()
-        section_content = '\n'.join(lines[1:]).strip()
-        
-        # Add section heading
-        if section_title:
-            heading = doc.add_heading(section_title, level=1)
-            # Style the heading
-            for run in heading.runs:
-                run.font.color.rgb = RGBColor(0, 51, 102)  # Dark blue
-        
-        # Add section content
-        if section_content:
-            # Split content into paragraphs
-            paragraphs = section_content.split('\n\n')
-            for para_text in paragraphs:
-                if not para_text.strip():
-                    continue
-                    
-                para = doc.add_paragraph()
-                
-                # Handle bullet points and formatting
-                if para_text.strip().startswith('•') or para_text.strip().startswith('-'):
-                    para.style = 'List Bullet'
-                    para_text = para_text.strip()[1:].strip()
-                
-                # Add text with basic formatting
-                for line in para_text.split('\n'):
-                    if not line.strip():
-                        continue
-                    
-                    # Bold text between ** **
-                    parts = line.split('**')
-                    for i, part in enumerate(parts):
-                        if i % 2 == 0:
-                            para.add_run(part)
-                        else:
-                            para.add_run(part).bold = True
-                    
-                    para.add_run('\n')
-                
-                # Set paragraph spacing
-                para_format = para.paragraph_format
-                para_format.space_after = Pt(6)
-    
-    # Add footer
+        _had_compliance = True
+        label = f"Claim {int(key) + 1}" if str(key).isdigit() else str(key).replace('-', ' ').title()
+        P(f"{label} - {comp.get('state', 'referred')}", bold=True)
+        for m in thread:
+            who = 'Compliance' if m.get('actor') == 'compliance' else 'Fee earner'
+            bullet(f"{who} ({m.get('by', 'unknown')}, {_fmt(m.get('at'))}): {m.get('message', '')}")
+    if not _had_compliance:
+        P('No claims or sections were referred to the compliance team.', italic=True)
+
+    # --- 10. Conclusion and sign-off ----------------------------------
+    H('10. Conclusion and sign-off')
+    KV('Overall determination', overall_status)
+    _outcome = assessment.get('outcome') or {}
+    if _outcome.get('status'):
+        KV('Assessment outcome', str(_outcome.get('status')).title())
+    if sof_confirmed:
+        KV('Source of funds confirmed adequate by',
+           f"{sof_confirmed.get('by', 'unknown')} on {_fmt(sof_confirmed.get('at'))}")
+    else:
+        P('The source of funds has not yet been confirmed adequate - the matter '
+          'must not proceed until this sign-off is given.', bold=True)
+    if getattr(matter, 'compliance_reviewed_by', None):
+        KV('Compliance review',
+           f"{matter.compliance_review_outcome or 'reviewed'} by {matter.compliance_reviewed_by}")
+    if overall_status != 'Verified':
+        P('Where the source of funds cannot be established, the firm must not carry out '
+          'the transaction and should consider its obligations under reg 31 MLR 2017 and '
+          'whether a disclosure to the MLRO / NCA is required.')
+
+    # --- 11. Audit trail and record-keeping ---------------------------
+    H('11. Audit trail and record-keeping')
+    if audit_rows:
+        tbl = doc.add_table(rows=1, cols=2)
+        tbl.style = 'Table Grid'
+        hdr = tbl.rows[0].cells
+        hdr[0].paragraphs[0].add_run('Date').bold = True
+        hdr[1].paragraphs[0].add_run('Event').bold = True
+        for a in audit_rows:
+            row = tbl.add_row().cells
+            row[0].text = _fmt(a.created_at)
+            row[1].text = a.description or (getattr(a.action, 'value', None) or str(a.action or ''))
+    else:
+        P('No audit-log entries recorded.', italic=True)
+    _files = storage.get('uploaded_files') or []
+    if _files:
+        P('Documents held on file:', bold=True)
+        for f in _files:
+            bullet(f"{f.get('filename', 'document')} ({str(f.get('category', '')).replace('_', ' ')})")
+    if dv_rows:
+        P('Document verification:', bold=True)
+        for dv in dv_rows:
+            bullet(f"{dv.filename} - {getattr(dv.verdict, 'value', None) or dv.verdict}")
+    P('Retention: this record and its supporting documents must be retained for five '
+      'years from the end of the business relationship or completion of the transaction '
+      '(reg 40(2) MLR 2017), then deleted unless a specific legal exception applies.')
+
+    # --- 12. Standards applied ----------------------------------------
+    H('12. Standards applied')
+    P('This assessment was conducted against:')
+    for s in (
+        'Money Laundering, Terrorist Financing and Transfer of Funds (Information on the '
+        'Payer) Regulations 2017 - regs 28(11), 33, 35 and 40.',
+        'LSAG Anti-Money Laundering Guidance for the Legal Sector - §6.8 (Source of Funds).',
+        'SRA Thematic Review of Source of Funds and Wealth Compliance (5 November 2025).',
+    ):
+        bullet(s)
+
     doc.add_paragraph()
-    footer = doc.add_paragraph()
-    footer.add_run('_' * 80)
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    footer_text = doc.add_paragraph()
-    footer_text.add_run('\nDocument generated on: ' + datetime.now().strftime("%d %B %Y at %H:%M"))
-    footer_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    foot = doc.add_paragraph()
+    fr = foot.add_run(f"Generated by the Agora Source of Funds platform on "
+                      f"{datetime.now().strftime('%d/%m/%Y at %H:%M')}.")
+    fr.italic = True
+    fr.font.size = Pt(8)
     
     # Save to BytesIO
     docx_buffer = BytesIO()
@@ -2753,7 +2941,7 @@ async def download_file_note(
         docx_buffer,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            "Content-Disposition": f"attachment; filename=SoF_File_Note_Matter_{matter.reference_number or matter.id}.docx"
+            "Content-Disposition": f"attachment; filename=SoF_Audit_Report_{matter.reference_number or matter.id}.docx"
         }
     )
 
