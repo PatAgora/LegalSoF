@@ -596,6 +596,13 @@ def run_automated_funds_lineage(
                 'source_type': source_type
             })
             print(f"    {'  ' * level}✓ EXTERNAL: £{txn_amount:,.2f} - {source_type}")
+            # For a salary origin, state the salary amount and the date
+            # of the payment so the reviewer sees it without drilling in.
+            _origin_note = f'Origin: {source_type}'
+            if 'salary' in source_type.lower() or 'employment' in source_type.lower():
+                _sd = parse_date_flexible(txn_date)
+                _sd_str = _sd.strftime('%d/%m/%Y') if _sd else (txn_date or 'an unknown date')
+                _origin_note = f'Salary of £{txn_amount:,.2f} received on {_sd_str}'
             return {
                 'id': node_id,
                 'level': level,
@@ -607,7 +614,7 @@ def run_automated_funds_lineage(
                 'source_account': source_type,  # External source (salary, interest, etc.)
                 'destination_account': txn_account,  # Where it landed
                 'match_type': 'external_origin',
-                'notes': f'Origin: {source_type}',
+                'notes': _origin_note,
                 'children': []
             }
         

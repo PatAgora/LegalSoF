@@ -391,7 +391,9 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         sourceAccount: externalCheck.sourceType,
         destinationAccount: target.account,
         children: [],
-        notes: `✅ Origin identified: ${externalCheck.sourceType}`,
+        notes: /salary|employment/i.test(externalCheck.sourceType)
+          ? `Salary of £${Math.abs(target.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} received on ${formatDate(target.date)}`
+          : `✅ Origin identified: ${externalCheck.sourceType}`,
         isOrigin: true
       };
     }
