@@ -1986,6 +1986,17 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 .map((d: string) => ({ doc: d, file: matchedFile(d) }))
                 .filter((x: any) => x.file);
               const suggested = docs.filter((d: string) => !matchedFile(d));
+              // Where the lineage has flagged credits whose origin is not
+              // established (e.g. unexplained faster payments into the
+              // statement), ask for evidence of where those funds came from.
+              const dvDiffs = (ev?.document_verification?.differences) || [];
+              const hasUnverifiedCredits = Array.isArray(dvDiffs) && dvDiffs.some(
+                (d: any) => String(d?.field || '') === 'untraced_funds' && Number(d?.amount || 0) > 0,
+              );
+              const UNVERIFIED_LINE = 'Evidence to support source of unverified credits';
+              if (hasUnverifiedCredits && !suggested.includes(UNVERIFIED_LINE)) {
+                suggested.push(UNVERIFIED_LINE);
+              }
               const gaps = claimGaps(claim, ev, verified, provided.length > 0);
               return { claim, idx, docs, verified, action, provided, suggested, gaps };
             }).filter((r: any) => r.docs.length > 0 || r.gaps.length > 0);
