@@ -25,7 +25,6 @@ const NAV_LINKS: { href: string; label: string }[] = [
 // links via ?tab=<id> on the current matter URL so the tab choice is
 // reflected in the address bar (bookmarkable, refresh-safe).
 const MATTER_TABS: { id: string; label: string }[] = [
-  { id: 'risk-cdd',       label: 'Risk & CDD' },
   { id: 'sof-assessment', label: 'SoF Assessment' },
   { id: 'transactions',   label: 'Transaction Review' },
   { id: 'funds-lineage',  label: 'Funds Lineage' },

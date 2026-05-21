@@ -2,9 +2,13 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+// Bundle the PDF.js worker with the app rather than pulling it from a
+// CDN. The app's Content-Security-Policy is `script-src 'self'`, which
+// blocks a cross-origin (unpkg) worker — so the PDF never renders. The
+// `?url` import makes Vite emit the worker as a same-origin asset.
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Configure PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface PDFViewerProps {
   fileUrl: string;

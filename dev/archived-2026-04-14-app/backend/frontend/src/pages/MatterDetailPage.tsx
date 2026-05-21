@@ -9,10 +9,10 @@ import { useCurrentMatter } from '../stores/currentMatterStore'
 import { useAuthStore } from '../stores/authStore'
 import MatterStatusBadge from '../components/ui/MatterStatusBadge'
 
-type TabType = 'risk-cdd' | 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
+type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
 const VALID_TABS: TabType[] = [
-  'risk-cdd', 'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'audit-trail',
+  'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'audit-trail',
 ]
 
 export default function MatterDetailPage() {
@@ -20,10 +20,14 @@ export default function MatterDetailPage() {
   const [searchParams] = useSearchParams()
   const tabParam = searchParams.get('tab') as TabType | null
   const activeTab: TabType = (tabParam && VALID_TABS.includes(tabParam)) ? tabParam : 'sof-assessment'
-  // The compliance review panel is the compliance team's surface, so it
-  // only shows when the matter is opened from a Compliance route
-  // (?from=compliance), not from the normal Workspace route.
+  // The compliance review panel is the compliance team's surface. It
+  // shows when the matter is opened from a Compliance route
+  // (?from=compliance) and, for admin (compliance officer) users, on the
+  // normal Workspace route too.
   const fromCompliance = searchParams.get('from') === 'compliance'
+  const currentUser = useAuthStore((s) => s.user)
+  const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin'
+  const showCompliancePanel = fromCompliance || isAdmin
 
   const [matter, setMatter] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -148,14 +152,13 @@ export default function MatterDetailPage() {
         </div>
       </div>
 
-      {/* Compliance review panel — shown only on the Compliance route. */}
-      {fromCompliance && (
+      {/* Compliance review panel — Compliance route, plus admins anywhere. */}
+      {showCompliancePanel && (
         <ComplianceReviewPanel matter={matter} onReviewed={() => refreshMatter()} />
       )}
 
       {/* Tab Content — sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
-        {activeTab === 'risk-cdd' && <RiskAssessmentTab matter={matter} onSaved={() => refreshMatter()} />}
         {activeTab === 'sof-assessment' && <SoFAssessment matterId={matter.id} />}
         {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
         {activeTab === 'funds-lineage' && <FundsLineageTab matterId={matter.id} />}
@@ -694,214 +697,6 @@ function SendToComplianceButton({
 }
 
 // ──────────────────────────────────────────
-// Risk & CDD tab — matter risk assessment
-// ──────────────────────────────────────────
-
-// MLR 2017 Reg 18 / LSAG §4.4 higher-risk indicator categories.
-const RISK_FACTOR_CATEGORIES: { key: string; label: string; factors: string[] }[] = [
-  { key: 'client', label: 'Client', factors: [
-    'Politically Exposed Person (PEP), family member or close associate',
-    'Client unwilling or slow to provide identification',
-    'Complex or opaque ownership / control structure',
-    'Cash-intensive business',
-    'Unexplained use of intermediaries',
-    'Adverse media or sanctions exposure',
-  ]},
-  { key: 'geographic', label: 'Geographic', factors: [
-    'High-risk third country (HM Treasury / FATF list)',
-    'Jurisdiction with weak AML/CTF controls or significant corruption',
-    'Active conflict zone',
-    'Sanctioned territory',
-  ]},
-  { key: 'service', label: 'Service / Product', factors: [
-    'Conveyancing (residential or commercial)',
-    'Company or trust formation',
-    'Tax advice',
-    'Large or unusual movements through client account',
-    'Pooled-funds arrangement',
-    'Use of escrow',
-  ]},
-  { key: 'transaction', label: 'Transaction', factors: [
-    'Unusually high value',
-    'Cash or third-party funding',
-    'Rapid movement of funds',
-    'Pre-payment later refunded',
-    'Unexplained change in instructions',
-    'Unusual urgency with no business rationale',
-  ]},
-  { key: 'delivery_channel', label: 'Delivery Channel', factors: [
-    'Non-face-to-face onboarding',
-    'Use of agents or introducers',
-    'Reliance on third-party verification',
-    'Client introduced by a party unknown to the firm',
-  ]},
-]
-
-function RiskAssessmentTab({ matter, onSaved }: { matter: any; onSaved: () => void }) {
-  const [rating, setRating] = useState<string>((matter.risk_rating || 'medium').toLowerCase())
-  const [factors, setFactors] = useState<Record<string, string[]>>(() => {
-    const f = matter.risk_factors || {}
-    const out: Record<string, string[]> = {}
-    for (const c of RISK_FACTOR_CATEGORIES) out[c.key] = Array.isArray(f[c.key]) ? f[c.key] : []
-    return out
-  })
-  const [notes, setNotes] = useState<string>(matter.risk_notes || '')
-  const [saving, setSaving] = useState(false)
-  const [savedNote, setSavedNote] = useState<string | null>(null)
-
-  const toggleFactor = (catKey: string, factor: string) => {
-    setFactors((prev) => {
-      const cur = prev[catKey] || []
-      const next = cur.includes(factor) ? cur.filter((x) => x !== factor) : [...cur, factor]
-      return { ...prev, [catKey]: next }
-    })
-  }
-
-  const totalSelected = Object.values(factors).reduce((n, arr) => n + arr.length, 0)
-
-  const save = async () => {
-    setSaving(true)
-    setSavedNote(null)
-    try {
-      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/risk-assessment`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          risk_rating: rating,
-          risk_factors: factors,
-          risk_notes: notes.trim() || null,
-        }),
-      })
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}))
-        alert(`Could not save: ${err.detail || r.statusText}`)
-        return
-      }
-      setSavedNote('Risk assessment saved.')
-      setTimeout(() => setSavedNote(null), 4000)
-      onSaved()
-    } catch (e: any) {
-      alert(`Could not save: ${e?.message || 'Unknown error'}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const ratingStyle: Record<string, string> = {
-    low: 'border-green-300 bg-green-50 text-green-700',
-    medium: 'border-amber-300 bg-amber-50 text-amber-700',
-    high: 'border-red-300 bg-red-50 text-red-700',
-    critical: 'border-red-400 bg-red-100 text-red-800',
-  }
-
-  return (
-    <div className="space-y-6 max-w-4xl">
-      {/* Header + save */}
-      <div className="flex items-start justify-between gap-6">
-        <div>
-          <h2 className="font-serif text-2xl text-zinc-900">Matter Risk Assessment &amp; CDD</h2>
-          <p className="mt-1 text-sm text-zinc-500 max-w-2xl">
-            The documented matter-level risk assessment (MLR 2017 Reg 18 / LSAG §4.3–4.4).
-            The rating set here drives the per-risk-tier rule configuration applied to every
-            assessment for this matter.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <button
-            onClick={save}
-            disabled={saving}
-            className={`px-4 py-2 text-sm font-medium rounded transition-colors whitespace-nowrap ${
-              saving ? 'bg-zinc-100 text-zinc-400' : 'bg-zinc-900 text-white hover:bg-zinc-800'
-            }`}
-          >
-            {saving ? 'Saving…' : 'Save risk assessment'}
-          </button>
-          {savedNote && <span className="text-xs text-green-700">{savedNote}</span>}
-        </div>
-      </div>
-
-      {/* Overall rating */}
-      <section className="bg-white border border-zinc-200 rounded-md p-6">
-        <h3 className="text-sm font-bold text-zinc-900 mb-1">Overall risk rating</h3>
-        <p className="text-xs text-zinc-500 mb-3">
-          Critical-rated matters use the High-tier rule settings.
-        </p>
-        <div className="flex gap-2">
-          {['low', 'medium', 'high', 'critical'].map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => setRating(r)}
-              className={`px-4 py-2 text-sm font-semibold rounded border capitalize transition-colors ${
-                rating === r ? ratingStyle[r] : 'border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50'
-              }`}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-        {matter.risk_assessed_at && (
-          <p className="mt-3 text-xs text-zinc-400">
-            Last assessed by {matter.risk_assessed_by || 'unknown'} on{' '}
-            {formatDate(matter.risk_assessed_at)}.
-          </p>
-        )}
-      </section>
-
-      {/* Risk factors */}
-      <section className="bg-white border border-zinc-200 rounded-md p-6">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-sm font-bold text-zinc-900">Higher-risk indicators</h3>
-          <span className="text-xs text-zinc-400">{totalSelected} selected</span>
-        </div>
-        <p className="text-xs text-zinc-500 mt-1 mb-4">
-          Tick every indicator that applies. These document the basis for the rating above.
-        </p>
-        <div className="space-y-5">
-          {RISK_FACTOR_CATEGORIES.map((cat) => (
-            <div key={cat.key}>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">
-                {cat.label}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5">
-                {cat.factors.map((factor) => {
-                  const checked = (factors[cat.key] || []).includes(factor)
-                  return (
-                    <label key={factor} className="flex items-start gap-2 cursor-pointer text-sm text-zinc-700">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleFactor(cat.key, factor)}
-                        className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
-                      />
-                      <span className="leading-snug">{factor}</span>
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Risk reasoning */}
-      <section className="bg-white border border-zinc-200 rounded-md p-6">
-        <h3 className="text-sm font-bold text-zinc-900 mb-1">Risk reasoning</h3>
-        <p className="text-xs text-zinc-500 mb-3">
-          Record why this rating was chosen, in a way another reviewer could follow.
-        </p>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={4}
-          placeholder="e.g. Standard residential conveyancing, UK-resident client met in person, no PEP or adverse-media match, funds from a domestic property sale — assessed Medium."
-          className="w-full px-3 py-2 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-300"
-        />
-      </section>
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────
 // Compliance review panel
 // ──────────────────────────────────────────
 
@@ -980,6 +775,10 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
   }
 
   const allReviewed = referrals.length > 0 && referrals.every((r) => r.reviewed)
+  // A matter can be returned once every per-claim referral has been
+  // reviewed — or when there are none (it was sent to compliance as a
+  // whole rather than claim-by-claim).
+  const canReturn = referrals.length === 0 || allReviewed
   const tone =
     status === 'returned' ? 'border-red-200 bg-red-50'
       : status === 'cleared' ? 'border-green-200 bg-green-50'
@@ -1030,7 +829,11 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
             Referred claims — review each, then return the matter
           </div>
           {referrals.length === 0 ? (
-            <div className="text-xs text-amber-700">No open referrals found.</div>
+            <div className="text-xs text-amber-700">
+              This matter was sent to compliance as a whole — there are no
+              individual claim referrals to review. Add a rationale and return
+              it to the fee earner below.
+            </div>
           ) : (
             <ul className="space-y-2">
               {referrals.map((r) => (
@@ -1063,14 +866,14 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
             </ul>
           )}
           <div className="mt-3 flex items-center justify-end gap-3">
-            {!allReviewed && referrals.length > 0 && (
+            {!canReturn && (
               <span className="text-xs text-amber-700">Review every referral to enable return.</span>
             )}
             <button
               onClick={returnToFeeEarner}
-              disabled={busy || !allReviewed}
+              disabled={busy || !canReturn}
               className={`px-3.5 py-1.5 text-xs font-semibold rounded-full transition-colors ${
-                allReviewed && !busy
+                canReturn && !busy
                   ? 'bg-zinc-900 text-white hover:bg-zinc-800'
                   : 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
               }`}

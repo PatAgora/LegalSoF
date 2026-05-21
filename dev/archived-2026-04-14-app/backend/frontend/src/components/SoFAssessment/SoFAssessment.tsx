@@ -203,6 +203,7 @@ function renderUploadedList(
 const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.user);
+  const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
   const [status, setStatus] = useState<AssessmentStatus | null>(null);
   const [result, setResult] = useState<AssessmentResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -634,6 +635,36 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       applyClaimActions(data.claim_actions);
     } catch (e: any) {
       alert(`Could not cancel: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  // Compliance officer (admin) responds to a referred claim and returns
+  // it to the fee earner — the compliance side of the conversation.
+  const complianceReturnClaim = async (claimIndex: number) => {
+    const response = window.prompt(
+      'Return this claim to the fee earner. Give your response (required) — '
+      + 'the fee earner sees this so they know what compliance found.',
+      '',
+    );
+    if (response === null) return;
+    if (response.trim().length < 10) {
+      alert('A response of at least 10 characters is required.');
+      return;
+    }
+    try {
+      const r = await authFetch(
+        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/compliance-return`,
+        { method: 'POST', body: JSON.stringify({ response: response.trim() }) },
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(`Could not return: ${err.detail || r.statusText}`);
+        return;
+      }
+      const data = await r.json();
+      applyClaimActions(data.claim_actions);
+    } catch (e: any) {
+      alert(`Could not return: ${e?.message || 'Unknown error'}`);
     }
   };
 
@@ -1686,6 +1717,15 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                             const sufficient = !!row.action.sufficient;
                             return (
                               <div className="mt-3 pt-3 border-t border-zinc-100 flex items-center justify-end gap-2">
+                                {isAdmin && inReview && (
+                                  <button
+                                    type="button"
+                                    onClick={() => complianceReturnClaim(row.idx)}
+                                    className="px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                                  >
+                                    Return to Fee Earner
+                                  </button>
+                                )}
                                 {inReview ? (
                                   <button
                                     type="button"
@@ -2050,52 +2090,33 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                         )}
                       </div>
 
-                      {/* Issues list — plain English */}
+                      {/* Issues list — plain-English bullet points, no
+                          coloured boxes (matches the Evidence Checklist). */}
                       {actionableFlags.length > 0 && !isVerified && (
-                        <div className="border-t border-zinc-200 mx-4 pt-3 pb-4 space-y-2">
+                        <div className="border-t border-zinc-200 mx-4 pt-3 pb-4">
                           <div className="text-xs font-semibold text-zinc-900 uppercase tracking-wide mb-2">Why this document was flagged</div>
 
-                          {criticalFlags.map((f: any, fi: number) => {
-                            const t = translateFlag(f);
-                            return (
-                              <div key={`c-${fi}`} className="flex gap-3 items-start bg-red-50 border border-red-200 rounded-md p-3">
-                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-red-500" />
-                                <div>
-                                  <div className="text-sm font-semibold text-red-700">{t.headline}</div>
-                                  <div className="text-xs text-red-700 mt-0.5 leading-relaxed">{t.explanation}</div>
-                                </div>
-                              </div>
-                            );
-                          })}
-
-                          {highFlags.map((f: any, fi: number) => {
-                            const t = translateFlag(f);
-                            return (
-                              <div key={`h-${fi}`} className="flex gap-3 items-start bg-amber-50 border border-amber-200 rounded-md p-3">
-                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                <div>
-                                  <div className="text-sm font-semibold text-amber-700">{t.headline}</div>
-                                  <div className="text-xs text-amber-700 mt-0.5 leading-relaxed">{t.explanation}</div>
-                                </div>
-                              </div>
-                            );
-                          })}
-
-                          {mediumFlags.map((f: any, fi: number) => {
-                            const t = translateFlag(f);
-                            return (
-                              <div key={`m-${fi}`} className="flex gap-3 items-start bg-zinc-50 border border-zinc-200 rounded-md p-3">
-                                <span className="mt-1 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                                <div>
-                                  <div className="text-sm font-medium text-zinc-900">{t.headline}</div>
-                                  <div className="text-xs text-zinc-600 mt-0.5 leading-relaxed">{t.explanation}</div>
-                                </div>
-                              </div>
-                            );
-                          })}
+                          <ul className="space-y-2.5">
+                            {[...criticalFlags, ...highFlags, ...mediumFlags].map((f: any, fi: number) => {
+                              const t = translateFlag(f);
+                              const sev = String(f.severity || '').toLowerCase();
+                              const dot = sev === 'critical' ? 'bg-red-500'
+                                : sev === 'high' ? 'bg-amber-500'
+                                : 'bg-zinc-400';
+                              return (
+                                <li key={fi} className="flex gap-2.5 items-start">
+                                  <span className={`mt-[5px] flex-shrink-0 w-1.5 h-1.5 rounded-full ${dot}`} />
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-medium text-zinc-900">{t.headline}</div>
+                                    <div className="text-xs text-zinc-600 mt-0.5 leading-relaxed">{t.explanation}</div>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
 
                           {minorFlags.length > 0 && (
-                            <div className="text-xs text-zinc-400 pl-1">
+                            <div className="text-xs text-zinc-400 pl-4 mt-2.5">
                               + {minorFlags.length} minor observation{minorFlags.length !== 1 ? 's' : ''}
                             </div>
                           )}
