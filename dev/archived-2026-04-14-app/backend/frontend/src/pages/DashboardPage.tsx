@@ -1,20 +1,13 @@
 import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { API_BASE_URL, authFetch } from '../lib/api'
-import { Card, StatusChip, Spinner, Alert } from '../components/ui'
+import { Card, Spinner, Alert } from '../components/ui'
 import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
 
 // ---------------------------------------------------------------------------
 // Dashboard — live rollup of the case load. Single round-trip to
 // /api/v1/analytics/dashboard-summary.
 // ---------------------------------------------------------------------------
-
-interface FlagRow {
-  code: string
-  severity: string
-  count: number
-  label: string
-}
 
 interface RecentMatter {
   id: number
@@ -32,7 +25,6 @@ interface DashboardSummary {
   total_documents_verified: number
   documents_by_verdict: Record<string, number>
   matters_with_blocking_issues: number
-  top_flag_codes: FlagRow[]
   recent_matters: RecentMatter[]
 }
 
@@ -44,14 +36,6 @@ const STATUS_BAR_COLOUR: Record<string, string> = {
   'Sent to Compliance':       'bg-blue-500',
   'Returned from Compliance': 'bg-red-500',
   'Verified':                 'bg-green-500',
-}
-
-const SEVERITY_BAR_COLOUR: Record<string, string> = {
-  critical: 'bg-red-500',
-  high:     'bg-amber-500',
-  medium:   'bg-zinc-400',
-  low:      'bg-zinc-300',
-  info:     'bg-blue-400',
 }
 
 export default function DashboardPage() {
@@ -134,47 +118,6 @@ export default function DashboardPage() {
             <StatusBar status={data.matters_by_status} total={data.total_matters} />
             <StatusLegend status={data.matters_by_status} total={data.total_matters} />
           </div>
-        </Card>
-      </section>
-
-      {/* Top issues — root cause analysis */}
-      <section>
-        <SectionHeader
-          title="Top verification issues"
-          caption="The most common reasons documents are being flagged. Useful for spotting forgery patterns and weak documentation areas."
-        />
-        <Card>
-          {data.top_flag_codes.length === 0 ? (
-            <div className="px-6 py-8 text-center text-sm text-zinc-400">
-              No flagged documents yet.
-            </div>
-          ) : (
-            <ul className="divide-y divide-zinc-100">
-              {data.top_flag_codes.map((row) => {
-                const maxCount = Math.max(...data.top_flag_codes.map((r) => r.count))
-                const widthPct = Math.max(8, Math.round((row.count / maxCount) * 100))
-                return (
-                  <li key={row.code} className="px-6 py-3 flex items-center gap-4">
-                    <div className="w-28 shrink-0">
-                      <StatusChip severity={row.severity as any} label={row.severity.toUpperCase()} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-zinc-900 truncate">{row.label}</div>
-                      <div className="mt-1.5 h-1 bg-zinc-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${SEVERITY_BAR_COLOUR[row.severity] || 'bg-zinc-400'}`}
-                          style={{ width: `${widthPct}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="w-16 text-right text-sm font-medium text-zinc-700 tabular-nums">
-                      {row.count}
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
         </Card>
       </section>
 
