@@ -2024,19 +2024,29 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   </svg>
                 </summary>
                 <div className="px-6 py-4">
-                  {/* Funds-shortfall - a reviewable item the fee earner
-                      can mark satisfied (with a rationale) or send to
-                      compliance, the same as a claim. */}
+                  {/* Funds-shortfall - a reviewable item in the same
+                      card format as a claim; the fee earner can mark it
+                      satisfied with a rationale or send it to compliance. */}
                   {result.funds_shortfall && (
-                    <div className="border border-red-200 rounded p-3 mb-4 bg-red-50/40">
-                      <div className="text-sm font-semibold text-red-800">Declared funds do not cover the transaction</div>
-                      <p className="mt-1 text-xs text-red-700">
-                        The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but
-                        the transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a
-                        shortfall of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for
-                        the difference, establish how the balance is funded, or record a rationale below for why the
-                        shortfall is acceptable.
-                      </p>
+                    <div className="border border-zinc-100 rounded p-3 mb-4">
+                      <div className="text-sm font-medium text-zinc-900">Declared funds do not cover the transaction</div>
+                      <div className="mt-2.5">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-red-600 mb-1">
+                          Outstanding / flagged for review
+                        </div>
+                        <ul className="space-y-1">
+                          <li className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
+                            <span className="mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-red-400" />
+                            <span>
+                              The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but
+                              the transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a
+                              shortfall of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for the
+                              difference, establish how the balance is funded, or record a rationale below for why the shortfall
+                              is acceptable.
+                            </span>
+                          </li>
+                        </ul>
+                      </div>
                       {renderItemControls('funds-shortfall')}
                     </div>
                   )}
