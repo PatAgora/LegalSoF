@@ -1127,8 +1127,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               working on. Uses native <details> for the open/close
               behaviour (no extra state needed). */}
           <div className="space-y-3">
-            {/* Client Info — tile #1 */}
+            {/* Client Info — tile #1.
+                key includes the uploaded flag so the tile remounts —
+                and therefore reliably re-applies its `open` default —
+                the moment the category flips to uploaded. React does
+                not consistently reconcile the uncontrolled <details
+                open> attribute on its own. */}
             <details
+              key={`tile-client-${!!(status && status.files_summary && status.files_summary.client_info === 'uploaded')}`}
               className="bg-white border border-zinc-200 rounded-md group"
               open={!(status && status.files_summary && status.files_summary.client_info === 'uploaded')}
             >
@@ -1364,8 +1370,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
             </details>
 
-            {/* Bank Statements — tile #2 */}
+            {/* Bank Statements — tile #2.
+                Keyed on the uploaded flag so it remounts and collapses
+                on the first upload (see Client Info tile note). */}
             <details
+              key={`tile-bank-${(status?.files_summary?.bank_statements_count ?? 0) > 0}`}
               className="bg-white border border-zinc-200 rounded-md group"
               open={!status || !status.files_summary || status.files_summary.bank_statements_count === 0}
             >
@@ -1416,8 +1425,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               </div>
             </details>
 
-            {/* Supporting Documents — tile #3 */}
+            {/* Supporting Documents — tile #3.
+                Keyed on the uploaded flag so it remounts and collapses
+                on the first upload (see Client Info tile note). */}
             <details
+              key={`tile-docs-${(status?.files_summary?.supporting_docs_count ?? 0) > 0}`}
               className="bg-white border border-zinc-200 rounded-md group"
               open={!status || !status.files_summary || status.files_summary.supporting_docs_count === 0}
             >
