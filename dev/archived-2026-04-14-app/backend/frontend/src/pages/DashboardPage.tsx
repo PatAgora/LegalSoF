@@ -23,7 +23,6 @@ interface DashboardSummary {
   matters_by_status: Record<string, number>
   matters_by_risk: Record<string, number>
   total_documents_verified: number
-  documents_by_verdict: Record<string, number>
   matters_with_blocking_issues: number
   recent_matters: RecentMatter[]
 }
@@ -117,33 +116,6 @@ export default function DashboardPage() {
           <div className="px-6 py-5">
             <StatusBar status={data.matters_by_status} total={data.total_matters} />
             <StatusLegend status={data.matters_by_status} total={data.total_matters} />
-          </div>
-        </Card>
-      </section>
-
-      {/* Documents by verdict - small inline strip */}
-      <section>
-        <SectionHeader
-          title="Document verdicts"
-          caption="Authenticity outcomes across every document verified by the pipeline."
-        />
-        <Card>
-          <div className="grid grid-cols-3 divide-x divide-zinc-100">
-            <Stat
-              label="Verified"
-              value={data.documents_by_verdict.Verified || 0}
-              tone="success"
-            />
-            <Stat
-              label="Suspicious"
-              value={data.documents_by_verdict.Suspicious || 0}
-              tone="warning"
-            />
-            <Stat
-              label="Likely tampered"
-              value={data.documents_by_verdict.LikelyTampered || 0}
-              tone="danger"
-            />
           </div>
         </Card>
       </section>
