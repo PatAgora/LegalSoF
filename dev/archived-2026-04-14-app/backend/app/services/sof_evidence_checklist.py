@@ -81,7 +81,7 @@ _CHECKLIST: Dict[str, Dict[str, List[str]]] = {
         "base": [
             "Signed gift letter or deed from the donor confirming the amount and that it is unconditional",
             "Identity verification of the donor",
-            "Evidence of the donor's own source of funds for the gift (e.g. the donor's bank statements)",
+            "Explanation and Evidence of the donor's source of funds (e.g Bank statements)",
             "Bank statement showing the gift received",
         ],
         "enhanced": [

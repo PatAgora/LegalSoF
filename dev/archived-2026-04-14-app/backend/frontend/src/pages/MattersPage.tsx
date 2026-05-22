@@ -468,10 +468,6 @@ export default function MattersPage() {
                       </svg>
                     </div>
                   </div>
-                  <p className="mt-1.5 text-xs text-zinc-400">
-                    Sets the risk tier from the outset. Refine it later with a full
-                    assessment on the matter's Risk &amp; CDD tab.
-                  </p>
                 </div>
               </div>
               {/* Footer */}

@@ -1681,7 +1681,26 @@ async def run_sof_assessment(
     if not isinstance(purchase, dict):
         print(f"⚠️ purchase is not a dict: {type(purchase)}")
         purchase = {'amount': 0, 'currency': 'GBP', 'description': 'Unknown'}
-    
+
+    # Backfill the matter's transaction value from the client_info
+    # purchase amount when the matter was created without a value
+    # entered (Matter.target_amount defaults to 0 in that case). Keeps
+    # the audit report, matter list and reports consistent with the
+    # funds-sufficiency check, which reads the client_info amount.
+    try:
+        _purchase_amt = float(purchase.get('amount') or 0)
+    except (TypeError, ValueError):
+        _purchase_amt = 0.0
+    try:
+        _matter_amt = float(matter.target_amount or 0)
+    except (TypeError, ValueError):
+        _matter_amt = 0.0
+    if _purchase_amt > 0 and _matter_amt <= 0:
+        matter.target_amount = _purchase_amt
+        db.add(matter)
+        db.commit()
+        print(f"   ↪ Backfilled matter.target_amount = £{_purchase_amt:,.2f} from client_info")
+
     if isinstance(client_info_data, dict) and 'sof_explanation' in client_info_data:
         sof_explanation = client_info_data.get('sof_explanation') or ''
     else:
@@ -2778,6 +2797,25 @@ async def download_file_note(
     lineage_summary = (storage.get('funds_lineage') or {}).get('summary') or {}
     sof_confirmed = storage.get('sof_confirmed') or {}
 
+    # Transaction value — prefer the matter record, but fall back to the
+    # client_info purchase amount. A matter created without a value
+    # entered has Matter.target_amount = 0, while the real figure is in
+    # the uploaded client_info JSON; without this fallback the report
+    # shows £0.00 while the funds-sufficiency check shows the true value.
+    def _resolve_txn_value() -> float:
+        try:
+            mv = float(matter.target_amount or 0)
+        except (TypeError, ValueError):
+            mv = 0.0
+        if mv > 0:
+            return mv
+        _p = client_info.get('purchase') if isinstance(client_info.get('purchase'), dict) else {}
+        try:
+            return float((_p or {}).get('amount') or client_info.get('purchase_amount') or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    _txn_value = _resolve_txn_value()
+
     def esc(v):
         return _html.escape(str(v)) if v not in (None, '') else ''
 
@@ -2878,7 +2916,7 @@ async def download_file_note(
     KV('Matter reference', _ref)
     KV('Client', matter.client_name)
     KV('Transaction type', _tt.replace('_', ' ').title())
-    KV('Transaction value', money(matter.target_amount))
+    KV('Transaction value', money(_txn_value))
     KV('Assessment completed', fmt_dt(storage.get('last_updated')))
 
     # --- 2. Matter risk assessment ------------------------------------
@@ -2914,10 +2952,7 @@ async def download_file_note(
             claims_total += float(c.get('expected_amount') or 0)
         except (TypeError, ValueError):
             pass
-    try:
-        _txn_val = float(matter.target_amount or 0)
-    except (TypeError, ValueError):
-        _txn_val = 0.0
+    _txn_val = _txn_value
     KV('Total declared', money(claims_total))
     KV('Transaction value', money(_txn_val))
     if _txn_val > 0 and claims_total + 1 < _txn_val:
