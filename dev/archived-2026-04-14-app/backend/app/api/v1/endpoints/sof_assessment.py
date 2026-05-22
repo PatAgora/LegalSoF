@@ -2786,6 +2786,7 @@ async def download_file_note(
     from reportlab.lib.colors import HexColor
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+        CondPageBreak,
     )
 
     assessment = storage.get('assessment_result') or {}
@@ -2885,6 +2886,10 @@ async def download_file_note(
         story.append(Paragraph(text, style or body))
 
     def H(text):
+        # Keep a section heading with the start of its content — if too
+        # little of the page is left, push the heading to the next page
+        # so a title never sits alone at the foot of a page.
+        story.append(CondPageBreak(110))
         story.append(Paragraph(esc(text), heading))
 
     def KV(label, value):
@@ -3021,6 +3026,45 @@ async def download_file_note(
     else:
         P('No transaction-review alerts were individually cleared.')
 
+    # Third-party funding detected from the evidence — a claim that is
+    # not itself a gift or a loan, but whose evidence shows funds
+    # arriving from a third party (a transfer / faster payment among
+    # the untraced items). SRA headline finding: the declared source
+    # must match what the evidence actually shows. Mirrors the per-claim
+    # check in the Evidence Checklist (SoFAssessment.tsx claimGaps).
+    import re as _re_tp
+
+    def _flag_resolution(_i: int) -> str:
+        _act = claim_actions.get(str(_i)) or {}
+        _suff = _act.get('sufficient') or {}
+        _comp = _act.get('compliance') or {}
+        if _suff.get('rationale'):
+            return str(_suff.get('rationale'))
+        if _comp.get('state') == 'in_review':
+            return 'Referred to the compliance team and currently under review.'
+        if _comp.get('state') == 'returned':
+            return 'Returned by the compliance team to the fee earner for further work.'
+        return 'Outstanding - not yet resolved.'
+
+    _third_party_findings = []  # (claim_index, declared_source_label, resolution)
+    for _i, _ev in enumerate(evidence_matches):
+        _claim = claims[_i] if _i < len(claims) else {}
+        _stype = str(_claim.get('source_type', '')).lower()
+        if 'gift' in _stype or 'loan' in _stype:
+            continue
+        _diffs = ((_ev or {}).get('document_verification') or {}).get('differences') or []
+        _has_tp = False
+        for _d in _diffs:
+            if str(_d.get('field', '')) != 'untraced_funds':
+                continue
+            _desc = str(_d.get('found') or _d.get('description') or '').lower()
+            if _re_tp.search(r'(transfer|faster payment|\bfp\b|from [a-z])', _desc):
+                _has_tp = True
+                break
+        if _has_tp:
+            _third_party_findings.append(
+                (_i, _stype.replace('_', ' ') or 'as stated', _flag_resolution(_i)))
+
     # --- 7. Red flags and how they were resolved ----------------------
     H('7. Red flags and how they were resolved')
     _flag_rows = []
@@ -3041,6 +3085,13 @@ async def download_file_note(
             else:
                 res = 'Outstanding - not yet resolved.'
             _flag_rows.append((flag_txt, res))
+    for _i, _label, _res in _third_party_findings:
+        _flag_rows.append((
+            f"Claim {_i + 1}: The evidence shows funds arriving from a third party, "
+            f"which may not match the declared source ({_label}). Confirm the true "
+            f"origin of these funds.",
+            _res,
+        ))
     if _flag_rows:
         _tbl = [[Paragraph('Red flag', cell_head),
                  Paragraph('How it was resolved', cell_head)]]
@@ -3071,7 +3122,14 @@ async def download_file_note(
         for i, c in _tp:
             bullet(f"Claim {i + 1}: {esc(str(c.get('source_type')).title())} of "
                    f"{money(c.get('expected_amount') or 0)}")
-    else:
+    if _third_party_findings:
+        P('Third-party funding was not declared, but evidence of it was found. The '
+          'evidence shows funds arriving from a third party that may not match the '
+          'declared source. The donor or lender must be checked in the same way as '
+          'the client. How each finding stands:')
+        for _i, _label, _res in _third_party_findings:
+            bullet(f"Claim {_i + 1} (declared as {esc(_label)}): {esc(_res)}")
+    if not _tp and not _third_party_findings:
         P('No third-party funding, such as a gift or a loan, was declared on this matter.')
 
     # --- 9. Compliance touch points -----------------------------------
