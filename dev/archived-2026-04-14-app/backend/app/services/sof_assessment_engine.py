@@ -1050,7 +1050,34 @@ class SoFAssessmentEngine:
                 match_quality = "none"
                 verified = False
 
-            partially_verified = bool(matches) and not verified
+            # Savings are an accumulated balance, not a single credit of
+            # the claimed amount — a savings claim with no transaction
+            # match is corroborated (partially) when an account on the
+            # matter holds a balance covering the claim. Ownership of the
+            # account still needs human confirmation, so this never fully
+            # verifies.
+            balance_evidence = None
+            if match_quality == "none" and 'saving' in str(
+                    claim.get('source_type', '')).lower():
+                expected = float(claim.get('expected_amount', 0) or 0)
+                best_bal, best_acct = 0.0, None
+                for txn in bank_statements:
+                    try:
+                        bal = float(txn.get('balance') or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if bal > best_bal:
+                        best_bal, best_acct = bal, txn.get('account_id')
+                if expected > 0 and best_bal >= expected * 0.9:
+                    match_quality = "balance_evidence"
+                    balance_evidence = {
+                        "account_id": best_acct,
+                        "max_balance": round(best_bal, 2),
+                    }
+
+            partially_verified = (
+                bool(matches) or match_quality == "balance_evidence"
+            ) and not verified
 
             evidence_matches.append({
                 "claim_id": claim['claim_id'],
@@ -1062,6 +1089,7 @@ class SoFAssessmentEngine:
                 "partially_verified": partially_verified,
                 "ai_only_evidence": ai_only,
                 "requires_confirmation": partially_verified or ai_only,
+                "balance_evidence": balance_evidence,
                 "document_verified": False,  # Initialize to False, will be set to True if docs verify
                 "document_verification": None  # Will be populated if docs are provided
             })
@@ -1606,12 +1634,19 @@ class SoFAssessmentEngine:
             if evidence.get('verified'):
                 continue
             if evidence.get('partially_verified'):
+                if evidence.get('match_quality') == 'balance_evidence':
+                    be = evidence.get('balance_evidence') or {}
+                    detail = (f"account balance of £{be.get('max_balance', 0):,.2f} "
+                              f"in {be.get('account_id', 'account')} covers the claim - "
+                              f"confirm account ownership")
+                else:
+                    detail = (f"matched by amount only ({evidence.get('match_quality')}) - "
+                              f"payer/source not corroborated; confirmation required")
                 red_flags.append({
                     "severity": "MEDIUM",
                     "source": "SoF_ANALYSIS",
-                    "flag": f"Claimed {claim['source_type']} of £{claim['expected_amount']:,.2f} "
-                           f"matched by amount only ({evidence.get('match_quality')}) - "
-                           f"payer/source not corroborated; confirmation required",
+                    "flag": f"Claimed {claim['source_type']} of £{claim['expected_amount']:,.2f}: "
+                           f"{detail}",
                     "claim_id": claim['claim_id']
                 })
             else:
@@ -1663,7 +1698,16 @@ class SoFAssessmentEngine:
         #     Undeclared third-party funding is an SRA thematic-review
         #     focus and must be surfaced by name.
         tp_threshold = float(self.settings.get('sof_third_party_min_amount', 1000.0))
+        # Employment income is by definition paid by a third party
+        # (the employer) — routine salary/pension credits are ordinary
+        # income, not undeclared third-party funding of the purchase.
+        income_patterns = ('salary', 'wages', 'payroll', 'pension',
+                           'hmrc', 'dwp', 'universal credit')
         if client_name:
+            # Aggregate per payer: one flag per distinct third party,
+            # not one per transaction — a recurring payer produces a
+            # single reviewable item with count and total.
+            by_payer: Dict[str, Dict[str, Any]] = {}
             for txn in bank_statements:
                 if txn.get('direction') != 'credit':
                     continue
@@ -1679,17 +1723,34 @@ class SoFAssessmentEngine:
                 payer_text = payer or str(txn.get('description') or '')
                 if not payer_text.strip():
                     continue
+                if any(p in payer_text.lower() for p in income_patterns):
+                    continue
                 if self._names_match(client_name, payer_text):
                     continue
+                key = (payer or payer_text[:60]).lower()
+                entry = by_payer.setdefault(key, {
+                    "payer": payer or payer_text[:60],
+                    "count": 0, "total": 0.0,
+                    "first_date": txn.get('date'), "last_date": txn.get('date'),
+                    "ref": f"{txn.get('account_id')}-{txn.get('date')}",
+                })
+                entry["count"] += 1
+                entry["total"] += amt
+                entry["last_date"] = txn.get('date')
+            for entry in by_payer.values():
+                span = (f"on {entry['first_date']}" if entry["count"] == 1
+                        else f"across {entry['count']} credits, "
+                             f"{entry['first_date']} to {entry['last_date']}")
                 red_flags.append({
                     "severity": "HIGH",
                     "source": "SoF_ANALYSIS",
                     "rule": "THIRD_PARTY_FUNDS",
-                    "flag": f"THIRD_PARTY_FUNDS: credit of £{amt:,.2f} on {txn.get('date')} "
-                           f"from undeclared third party '{payer or payer_text[:60]}' - "
+                    "flag": f"THIRD_PARTY_FUNDS: £{entry['total']:,.2f} {span} "
+                           f"from undeclared third party '{entry['payer']}' - "
                            f"not matched to any declared source",
-                    "transaction_ref": f"{txn.get('account_id')}-{txn.get('date')}",
-                    "details": [f"Payer: {payer or payer_text[:120]}",
+                    "transaction_ref": entry["ref"],
+                    "details": [f"Payer: {entry['payer']}",
+                                f"Credits: {entry['count']}, total £{entry['total']:,.2f}",
                                 "Third-party funds must be declared and evidenced "
                                 "(donor identity, relationship and source of funds)"]
                 })
