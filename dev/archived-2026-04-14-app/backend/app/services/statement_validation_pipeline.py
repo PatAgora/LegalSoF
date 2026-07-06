@@ -802,6 +802,7 @@ class StatementValidationPipeline:
         debit_col = self._find_col(headers, ["debit", "debits", "money out", "paid out", "debit amount", "withdrawals"])
         balance_col = self._find_col(headers, ["balance", "closing balance", "running balance", "available balance"])
         type_col = self._find_col(headers, ["type", "transaction type"])
+        direction_col = self._find_col(headers, ["direction", "dr/cr", "cr/dr", "in/out", "credit/debit"])
 
         transactions = []
         for row in data_rows:
@@ -816,7 +817,18 @@ class StatementValidationPipeline:
                 if amount_col is not None and amount_col < len(row):
                     amt_val = self._parse_amount(row[amount_col])
                     if amt_val is not None:
-                        direction = "credit" if amt_val >= 0 else "debit"
+                        # A signed amount is authoritative; for unsigned
+                        # amounts honour an explicit direction column
+                        # (common export shape: direction=credit/debit
+                        # with all-positive amounts).
+                        if amt_val < 0:
+                            direction = "debit"
+                        else:
+                            direction = "credit"
+                            if direction_col is not None and direction_col < len(row):
+                                dval = row[direction_col].strip().lower()
+                                if dval in ("debit", "dr", "out", "d", "withdrawal"):
+                                    direction = "debit"
                         amt_val = abs(amt_val)
                     else:
                         continue
