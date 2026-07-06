@@ -22,7 +22,9 @@ logger = structlog.get_logger(__name__)
 
 
 class MFASetupResponse(BaseModel):
-    qr_code: str
+    qr_code: str      # base64-encoded PNG (no data: prefix)
+    secret: str       # base32 secret for manual authenticator entry
+    otpauth_uri: str  # otpauth:// provisioning URI
 
 
 class MFAVerifyRequest(BaseModel):
@@ -57,7 +59,7 @@ async def setup_mfa(
 
     logger.info("mfa_setup_initiated", user_id=current_user.id)
 
-    return MFASetupResponse(qr_code=qr_code)
+    return MFASetupResponse(qr_code=qr_code, secret=secret, otpauth_uri=uri)
 
 
 @router.post("/verify", response_model=MFAStatusResponse)

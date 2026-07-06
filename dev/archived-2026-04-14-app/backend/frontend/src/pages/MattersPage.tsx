@@ -1,12 +1,30 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { API_BASE_URL, authFetch } from '../lib/api'
 import { formatDate as formatFullDate, formatCurrencyWhole } from '../lib/format'
+import { showToast } from '../lib/toast'
 import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
 import Modal from '../components/ui/Modal'
 
+type ViewTab = 'all' | 'mine' | 'overdue'
+
+interface PickerUser {
+  id: number
+  full_name: string
+  email: string
+  role: string
+}
+
 export default function MattersPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // Deep-linkable view (e.g. the Dashboard "Overdue matters" card links
+  // to /matters?view=overdue).
+  const initialView: ViewTab =
+    searchParams.get('view') === 'overdue' ? 'overdue'
+      : searchParams.get('view') === 'mine' ? 'mine'
+      : 'all'
+  const [viewTab, setViewTab] = useState<ViewTab>(initialView)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
@@ -16,19 +34,27 @@ export default function MattersPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [users, setUsers] = useState<PickerUser[]>([])
   const [newMatter, setNewMatter] = useState({
     client_name: '',
     reference: '',
     description: '',
     risk_level: 'medium',
+    target_completion_date: '',
+    assigned_analyst_id: '',
   })
 
-  // Fetch (or re-fetch) matters from the API.
-  const fetchMatters = async () => {
+  // Fetch (or re-fetch) matters from the API — the view tab is applied
+  // server-side via query params.
+  const fetchMatters = async (view: ViewTab = viewTab) => {
     try {
       setLoading(true)
       setError(null)
-      const response = await authFetch(`${API_BASE_URL}/api/v1/matters`)
+      const params = new URLSearchParams()
+      if (view === 'mine') params.set('assigned_to_me', 'true')
+      if (view === 'overdue') params.set('overdue', 'true')
+      const qs = params.toString()
+      const response = await authFetch(`${API_BASE_URL}/api/v1/matters${qs ? `?${qs}` : ''}`)
       if (!response.ok) {
         throw new Error('Failed to fetch matters')
       }
@@ -43,8 +69,22 @@ export default function MattersPage() {
   }
 
   useEffect(() => {
-    fetchMatters()
+    fetchMatters(viewTab)
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewTab])
+
+  // Users for the "Assign to" dropdown in the create modal.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await authFetch(`${API_BASE_URL}/api/v1/users`)
+        if (r.ok && !cancelled) setUsers(await r.json())
+      } catch {
+        // Non-blocking — the dropdown simply stays empty.
+      }
+    })()
+    return () => { cancelled = true }
   }, [])
 
   const handleCreateMatter = async () => {
@@ -63,22 +103,35 @@ export default function MattersPage() {
           reference: newMatter.reference.trim() || undefined,
           description: newMatter.description.trim() || undefined,
           risk_level: newMatter.risk_level,
-          status: 'draft'
+          status: 'draft',
+          target_completion_date: newMatter.target_completion_date || undefined,
+          assigned_analyst_id: newMatter.assigned_analyst_id
+            ? Number(newMatter.assigned_analyst_id)
+            : undefined,
         }),
       })
 
       if (response.ok) {
         const created = await response.json()
         setShowCreateModal(false)
-        setNewMatter({ client_name: '', reference: '', description: '', risk_level: 'medium' })
+        setNewMatter({
+          client_name: '', reference: '', description: '', risk_level: 'medium',
+          target_completion_date: '', assigned_analyst_id: '',
+        })
+        showToast(`Matter ${created.reference_number || ''} created.`.trim(), 'success')
         // Navigate to the new matter
         navigate(`/matters/${created.id}`)
       } else {
-        throw new Error('Failed to create matter')
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to create matter')
       }
     } catch (err) {
       console.debug('Error creating matter:', err)
-      setCreateError('The matter could not be created. Please try again.')
+      setCreateError(
+        err instanceof Error && err.message && err.message !== 'Failed to create matter'
+          ? err.message
+          : 'The matter could not be created. Please try again.'
+      )
     } finally {
       setCreating(false)
     }
@@ -160,7 +213,7 @@ export default function MattersPage() {
         <p className="text-zinc-900 font-semibold text-lg mb-1">Unable to load matters</p>
         <p className="text-zinc-400 text-sm mb-6">{error}</p>
         <button
-          onClick={fetchMatters}
+          onClick={() => fetchMatters()}
           className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-zinc-800 rounded-lg hover:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -199,6 +252,29 @@ export default function MattersPage() {
         <SummaryCard label="In Progress" value={counts.underReview} color="amber" />
         <SummaryCard label="Approved" value={counts.approved} color="emerald" />
         <SummaryCard label="High Risk" value={counts.highRisk} color="red" />
+      </div>
+
+      {/* ───────── View tabs (server-side filters) ───────── */}
+      <div className="flex items-center gap-1 border-b border-zinc-200" role="tablist" aria-label="Matter views">
+        {([
+          { key: 'all', label: 'All' },
+          { key: 'mine', label: 'My matters' },
+          { key: 'overdue', label: 'Overdue' },
+        ] as { key: ViewTab; label: string }[]).map((tab) => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={viewTab === tab.key}
+            onClick={() => setViewTab(tab.key)}
+            className={`px-4 py-2.5 -mb-px text-sm font-medium border-b-2 transition-colors ${
+              viewTab === tab.key
+                ? 'border-zinc-900 text-zinc-900'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* ───────── Filter bar ───────── */}
@@ -283,8 +359,8 @@ export default function MattersPage() {
       {/* ───────── Matters table ───────── */}
       {filteredMatters.length === 0 ? (
         <EmptyState
-          hasFilters={!!(searchTerm || statusFilter || riskFilter)}
-          onClearFilters={() => { setSearchTerm(''); setStatusFilter(''); setRiskFilter('') }}
+          hasFilters={!!(searchTerm || statusFilter || riskFilter || viewTab !== 'all')}
+          onClearFilters={() => { setSearchTerm(''); setStatusFilter(''); setRiskFilter(''); setViewTab('all') }}
           onCreateMatter={() => setShowCreateModal(true)}
         />
       ) : (
@@ -307,6 +383,15 @@ export default function MattersPage() {
                   </th>
                   <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                     Risk
+                  </th>
+                  <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                    Assigned to
+                  </th>
+                  <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                    Target date
+                  </th>
+                  <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                    Days in status
                   </th>
                   <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                     Created
@@ -348,6 +433,35 @@ export default function MattersPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getRiskBadge(matter.risk_rating)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {matter.assigned_analyst_name ? (
+                        <span className="text-sm text-zinc-700">{matter.assigned_analyst_name}</span>
+                      ) : (
+                        <span className="text-sm text-zinc-400 italic">Unassigned</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {matter.target_completion_date ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span className={`text-sm tabular-nums ${matter.is_overdue ? 'text-red-700 font-semibold' : 'text-zinc-700'}`}>
+                            {formatFullDate(matter.target_completion_date)}
+                          </span>
+                          {matter.is_overdue && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-50 border border-red-200 text-red-700">
+                              Overdue
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-zinc-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="text-sm tabular-nums text-zinc-700">
+                        {matter.days_in_current_status ?? '-'}
+                        {matter.days_in_current_status != null ? 'd' : ''}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-zinc-400" title={formatFullDate(matter.created_at)}>
@@ -480,6 +594,41 @@ export default function MattersPage() {
                       <option value="medium">Medium</option>
                       <option value="high">High</option>
                       <option value="critical">Critical</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                      <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                {/* Target completion date */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-600 mb-1.5">
+                    Target completion date <span className="text-zinc-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={newMatter.target_completion_date}
+                    onChange={(e) => setNewMatter({...newMatter, target_completion_date: e.target.value})}
+                    className="w-full rounded border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-900 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
+                  />
+                </div>
+                {/* Assign to */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-600 mb-1.5">
+                    Assign to <span className="text-zinc-400 font-normal">(optional)</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={newMatter.assigned_analyst_id}
+                      onChange={(e) => setNewMatter({...newMatter, assigned_analyst_id: e.target.value})}
+                      className="block w-full appearance-none rounded border border-zinc-200 bg-white px-4 py-2.5 pr-10 text-sm text-zinc-900 focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200 focus:outline-none transition-colors"
+                    >
+                      <option value="">Unassigned</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
+                      ))}
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
                       <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">

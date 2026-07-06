@@ -2,7 +2,7 @@
 Matter schemas for API requests and responses.
 """
 from pydantic import BaseModel, Field, ConfigDict
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 from decimal import Decimal
 
@@ -25,6 +25,7 @@ class MatterCreate(MatterBase):
     """Schema for creating a new matter."""
     assigned_analyst_id: Optional[int] = None
     risk_rating: RiskRating = RiskRating.MEDIUM
+    target_completion_date: Optional[date] = None
 
 
 class MatterUpdate(BaseModel):
@@ -41,6 +42,7 @@ class MatterUpdate(BaseModel):
     risk_rating_override: Optional[bool] = None
     risk_notes: Optional[str] = None
     assigned_analyst_id: Optional[int] = None
+    target_completion_date: Optional[date] = None
     description: Optional[str] = None
 
 
@@ -57,6 +59,7 @@ class MatterInDB(MatterBase):
     risk_notes: Optional[str] = None
     assigned_analyst_id: Optional[int] = None
     created_by_id: int
+    target_completion_date: Optional[date] = None
     portal_token: Optional[str] = None
     portal_token_expires: Optional[datetime] = None
     portal_accessed_at: Optional[datetime] = None
@@ -78,6 +81,7 @@ class MatterPublic(BaseModel):
     status: MatterStatus
     risk_rating: RiskRating
     assigned_analyst_id: Optional[int] = None
+    target_completion_date: Optional[date] = None
     created_at: datetime
 
 

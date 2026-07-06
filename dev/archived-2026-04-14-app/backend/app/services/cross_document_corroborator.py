@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -40,6 +41,10 @@ from app.services.document_verification_pipeline import VerificationFlag
 # How big a gap between adjacent statements is "unexplained"? UK bank
 # statements are typically monthly so anything over ~5 weeks merits a flag.
 PERIOD_GAP_DAYS = 35
+
+# Consecutive statements on the same account must chain: statement N's
+# closing balance == statement N+1's opening balance, to the penny.
+BALANCE_CHAIN_TOLERANCE = Decimal("0.01")
 
 # Tokens that should be ignored when checking whether the client name
 # appears in a document — they're meaningless on their own.
@@ -288,6 +293,263 @@ def _check_period_gap(
     )
 
 
+# ---------------------------------------------------------------------------
+# Statement balance extraction helpers (shared with the upload flow)
+# ---------------------------------------------------------------------------
+
+# "Opening balance ... £1,234.56" / "BALANCE BROUGHT FORWARD\n£2,450.00".
+# PDF text extraction often puts the amount on the line AFTER the label, so
+# the separator may include a newline.
+_AMOUNT = r"(-?\s*£?\s*-?[\d,]+\.\d{2})"
+_OPENING_BALANCE_PATTERNS = [
+    re.compile(r"opening\s+balance[^0-9\-]{0,60}?" + _AMOUNT, re.IGNORECASE | re.DOTALL),
+    re.compile(r"balance\s+brought\s+forward[^0-9\-]{0,60}?" + _AMOUNT, re.IGNORECASE | re.DOTALL),
+]
+_CLOSING_BALANCE_PATTERNS = [
+    re.compile(r"closing\s+balance[^0-9\-]{0,60}?" + _AMOUNT, re.IGNORECASE | re.DOTALL),
+    re.compile(r"balance\s+carried\s+forward[^0-9\-]{0,60}?" + _AMOUNT, re.IGNORECASE | re.DOTALL),
+]
+
+# Account numbers anchored to an "Account No/Number:" label — masked
+# ("****5678") or plain ("12345678"). Preferred over the unanchored
+# 8-digit scan in _extract_accounts, which can catch reference numbers.
+_LABELLED_ACCOUNT_RE = re.compile(
+    r"account\s*(?:no|number|num)\.?\s*[:\-]?\s*((?:[*Xx•]\s?){2,}\s?\d{3,8}|\d{8})",
+    re.IGNORECASE,
+)
+
+
+def _parse_money(raw: str) -> Optional[float]:
+    """Parse a captured amount string like '£1,234.56' / '-£123.45'."""
+    cleaned = raw.replace("£", "").replace(",", "").replace(" ", "")
+    negative = cleaned.startswith("-") or cleaned.count("-") > 0
+    cleaned = cleaned.replace("-", "")
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        return None
+    if negative:
+        value = -value
+    return float(value)
+
+
+def extract_balances_from_text(text: str) -> tuple[Optional[float], Optional[float]]:
+    """Best-effort (opening_balance, closing_balance) from statement text.
+    Looks for 'Opening balance' / 'Balance brought forward' and
+    'Closing balance' / 'Balance carried forward' followed by an amount."""
+    if not text:
+        return None, None
+    opening: Optional[float] = None
+    closing: Optional[float] = None
+    for pat in _OPENING_BALANCE_PATTERNS:
+        m = pat.search(text)
+        if m:
+            opening = _parse_money(m.group(1))
+            if opening is not None:
+                break
+    for pat in _CLOSING_BALANCE_PATTERNS:
+        # Take the LAST occurrence — multi-page statements repeat the
+        # carried-forward line per page; the final one is the true close.
+        matches = list(pat.finditer(text))
+        if matches:
+            closing = _parse_money(matches[-1].group(1))
+            if closing is not None:
+                break
+    return opening, closing
+
+
+def derive_balances_from_transactions(transactions) -> tuple[Optional[float], Optional[float]]:
+    """(opening, closing) from parsed transactions (objects with .balance,
+    .amount, .direction — e.g. the statement pipeline's ExtractedTransaction).
+
+    Closing = the last transaction's balance. Opening = the FIRST
+    transaction's balance minus its signed amount — i.e. the balance
+    brought forward, which is what the previous statement's closing
+    balance must equal."""
+    with_balance = [t for t in transactions if getattr(t, "balance", None) is not None]
+    if not with_balance:
+        return None, None
+    first = with_balance[0]
+    try:
+        first_bal = Decimal(str(first.balance))
+        signed = Decimal(str(first.amount or 0))
+        if (first.direction or "").lower() != "credit":
+            signed = -signed
+        opening = float((first_bal - signed).quantize(Decimal("0.01")))
+    except (InvalidOperation, TypeError):
+        opening = None
+    try:
+        closing = float(Decimal(str(with_balance[-1].balance)).quantize(Decimal("0.01")))
+    except (InvalidOperation, TypeError):
+        closing = None
+    return opening, closing
+
+
+def derive_account_identifier(text: str) -> Optional[str]:
+    """Best-effort stable account identifier from statement text.
+
+    Prefers 'sort_code account_number' when exactly one of each is found
+    (multiple hits mean we can't tell which is the statement's own account,
+    so we return None and let the caller fall back to bank grouping).
+    Masked account numbers (****5678) are normalised to their visible
+    digits prefixed with '*'."""
+    if not text:
+        return None
+    accounts = _extract_accounts(text)
+    sort_codes = accounts.get("sort_codes") or []
+
+    # Numbers anchored to an "Account No:" label win over the unanchored
+    # 8-digit scan (which can catch reference/statement numbers). Masked
+    # numbers are normalised to '*' + their visible digits.
+    labelled = sorted({
+        (m.group(1) if m.group(1).isdigit()
+         else "*" + re.sub(r"[^0-9]", "", m.group(1))[-8:])
+        for m in _LABELLED_ACCOUNT_RE.finditer(text)
+    })
+    numbers = labelled if labelled else list(accounts.get("account_numbers") or [])
+
+    account = numbers[0] if len(numbers) == 1 else None
+    sort_code = sort_codes[0] if len(sort_codes) == 1 else None
+    if account and sort_code:
+        return f"{sort_code} {account}"
+    if account:
+        return account
+    if sort_code:
+        return sort_code
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Balance chaining (anti-flatten-and-reprint)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StatementBalanceInfo:
+    """Minimal per-statement record for the balance-chain check. Built
+    from DocumentVerification rows in corroborate(); tests can construct
+    these directly with in-memory data."""
+    verification_id: int
+    filename: str = ""
+    account_identifier: Optional[str] = None
+    bank: Optional[str] = None            # identified template / bank hint fallback
+    period_start: Optional[str] = None    # free-text, parsed with _parse_period
+    created_at: Optional[datetime] = None
+    opening_balance: Optional[float] = None
+    closing_balance: Optional[float] = None
+
+
+def _chain_group_key(s: StatementBalanceInfo) -> str:
+    if s.account_identifier:
+        return f"account:{s.account_identifier}"
+    if s.bank:
+        return f"bank:{s.bank.strip().lower()}"
+    return "unknown"
+
+
+def _chain_sort_key(s: StatementBalanceInfo) -> datetime:
+    return _parse_period(s.period_start) or s.created_at or datetime.min
+
+
+def check_balance_chain(
+    statements: List[StatementBalanceInfo],
+    new_verification_id: int,
+) -> List[VerificationFlag]:
+    """Chain-check the matter's bank statements: within each account group
+    (falling back to identified bank when no account id was extracted),
+    order by period_start (falling back to created_at) and require that
+    each statement's closing balance equals the next statement's opening
+    balance to within £0.01.
+
+    Only the pairs ADJACENT TO THE NEW STATEMENT are flagged — older pairs
+    were checked when their own uploads were corroborated, and re-flagging
+    them on every subsequent upload would duplicate flags."""
+    new_stmt = next((s for s in statements if s.verification_id == new_verification_id), None)
+    if new_stmt is None:
+        return []
+
+    group = [s for s in statements if _chain_group_key(s) == _chain_group_key(new_stmt)]
+    group.sort(key=_chain_sort_key)
+    idx = next(i for i, s in enumerate(group) if s.verification_id == new_verification_id)
+
+    pairs: List[tuple[StatementBalanceInfo, StatementBalanceInfo]] = []
+    if idx > 0:
+        pairs.append((group[idx - 1], group[idx]))
+    if idx < len(group) - 1:
+        pairs.append((group[idx], group[idx + 1]))
+
+    flags: List[VerificationFlag] = []
+    for prev, nxt in pairs:
+        if prev.closing_balance is None or nxt.opening_balance is None:
+            continue  # missing data — no flag either way
+        try:
+            closing = Decimal(str(prev.closing_balance)).quantize(Decimal("0.01"))
+            opening = Decimal(str(nxt.opening_balance)).quantize(Decimal("0.01"))
+        except InvalidOperation:
+            continue
+        details = {
+            "previous_statement": prev.filename,
+            "previous_closing_balance": float(closing),
+            "next_statement": nxt.filename,
+            "next_opening_balance": float(opening),
+            "account_group": _chain_group_key(new_stmt),
+        }
+        if abs(closing - opening) > BALANCE_CHAIN_TOLERANCE:
+            details["difference"] = float(abs(closing - opening))
+            flags.append(VerificationFlag(
+                "cross_document", "BALANCE_CHAIN_MISMATCH", "high",
+                f"Statement balances do not chain: '{prev.filename}' closes at "
+                f"£{closing:,.2f} but the next statement '{nxt.filename}' opens at "
+                f"£{opening:,.2f}. A genuine statement sequence carries the closing "
+                "balance forward — a break can indicate a reprinted or altered statement.",
+                details,
+            ))
+        else:
+            flags.append(VerificationFlag(
+                "cross_document", "BALANCE_CHAIN_OK", "info",
+                f"Balance chain verified: '{prev.filename}' closing balance "
+                f"(£{closing:,.2f}) carries forward into '{nxt.filename}'.",
+                details,
+            ))
+    return flags
+
+
+def _load_balance_chain_statements(db: Session, matter_id: int) -> List[StatementBalanceInfo]:
+    """Load the matter's bank-statement verifications (including the new
+    one) as StatementBalanceInfo records. Column-only query — never drags
+    file_bytes into memory."""
+    rows = (
+        db.query(
+            DocumentVerification.id,
+            DocumentVerification.filename,
+            DocumentVerification.account_identifier,
+            DocumentVerification.identified_bank_template,
+            DocumentVerification.bank_hint,
+            DocumentVerification.period_start,
+            DocumentVerification.created_at,
+            DocumentVerification.opening_balance,
+            DocumentVerification.closing_balance,
+        )
+        .filter(
+            DocumentVerification.matter_id == matter_id,
+            DocumentVerification.file_category == "bank_statement",
+        )
+        .all()
+    )
+    return [
+        StatementBalanceInfo(
+            verification_id=r[0],
+            filename=r[1] or "",
+            account_identifier=r[2],
+            bank=r[3] or r[4],
+            period_start=r[5],
+            created_at=r[6],
+            opening_balance=r[7],
+            closing_balance=r[8],
+        )
+        for r in rows
+    ]
+
+
 def corroborate(
     db: Session,
     matter_id: int,
@@ -333,5 +595,12 @@ def corroborate(
                 "cross-document comparison.",
                 new_accounts,
             ))
+
+        # Balance chaining — statement N's closing balance must equal
+        # statement N+1's opening balance for the same account. Relies on
+        # the opening/closing/account columns the upload flow persisted
+        # on the DocumentVerification rows (including the new one).
+        statements = _load_balance_chain_statements(db, matter_id)
+        flags.extend(check_balance_chain(statements, new_verification_id))
 
     return flags

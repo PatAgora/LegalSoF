@@ -42,6 +42,42 @@ PHASH_MISMATCH_THRESHOLD = 18
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "bank_templates"
 
+# Bank brand keywords for header-band identification. Deliberately
+# scoped to the page-1 header region (see infer_bank_from_header): a
+# whole-document scan misattributes statements that merely mention
+# another bank in a transaction narrative ("TRANSFER FROM HSBC ...").
+_BANK_KEYWORDS: dict = {
+    "HSBC": ["hsbc", "first direct"],
+    "Barclays": ["barclays"],
+    "NatWest": ["natwest", "national westminster"],
+    "Lloyds": ["lloyds"],
+    "Halifax": ["halifax"],
+    "Santander": ["santander"],
+    "Nationwide": ["nationwide"],
+    "TSB": ["tsb"],
+    "Monzo": ["monzo"],
+    "Starling": ["starling"],
+}
+
+
+def infer_bank_from_header(header_text: str) -> Optional[str]:
+    """Identify which known bank a statement CLAIMS to be from, using only
+    the page-1 header band text. Earliest keyword occurrence wins — the
+    brand name leads the header on a genuine (or convincingly faked)
+    statement. Returns None when no known bank is named there, in which
+    case the template check should be skipped (under-flag, never guess)."""
+    if not header_text:
+        return None
+    lowered = header_text.lower()
+    best_bank: Optional[str] = None
+    best_pos: Optional[int] = None
+    for bank, keywords in _BANK_KEYWORDS.items():
+        for kw in keywords:
+            pos = lowered.find(kw)
+            if pos != -1 and (best_pos is None or pos < best_pos):
+                best_bank, best_pos = bank, pos
+    return best_bank
+
 
 def _load_reference(bank: str) -> Optional[dict]:
     if not bank:

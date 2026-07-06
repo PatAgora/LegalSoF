@@ -15,9 +15,38 @@ from datetime import datetime, timedelta, timezone, date
 import logging
 import re
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 logger = logging.getLogger(__name__)
+
+# ── Decimal money helpers ────────────────────────────────────────────
+# All INTERNAL money arithmetic (sums, tolerance windows, threshold and
+# equality comparisons) is done in Decimal to eliminate float
+# accumulation / float-equality hazards. Inputs arrive as floats or
+# strings; OUTPUTS remain plain floats/ints (JSON-serialised results
+# must not contain Decimal) — boundary-convert with _to_f.
+
+_TWO_DP = Decimal('0.01')
+
+
+def _D(x: Any) -> Decimal:
+    """Convert a money value (float / str / int / Decimal / None) to
+    Decimal via Decimal(str(x)) so float artefacts do not leak in.
+    None and unparseable values become Decimal('0') — never raises."""
+    if x is None:
+        return Decimal('0')
+    if isinstance(x, Decimal):
+        return x
+    try:
+        return Decimal(str(x).replace(',', '').strip() or '0')
+    except (InvalidOperation, ValueError):
+        return Decimal('0')
+
+
+def _to_f(d: Any) -> float:
+    """Boundary-convert a Decimal money value back to a float rounded
+    to 2 dp for JSON-serialised result structures."""
+    return float(_D(d).quantize(_TWO_DP, rounding=ROUND_HALF_UP))
 
 class SoFAssessmentEngine:
     """
@@ -476,8 +505,9 @@ class SoFAssessmentEngine:
             r'\s?(?:pounds?|sterling|gbp)\b',
             re.IGNORECASE,
         )
-        mult = {'k': 1e3, 'thousand': 1e3, 'm': 1e6, 'million': 1e6,
-                'bn': 1e9, 'billion': 1e9}
+        mult = {'k': Decimal(1000), 'thousand': Decimal(1000),
+                'm': Decimal(1000000), 'million': Decimal(1000000),
+                'bn': Decimal(1000000000), 'billion': Decimal(1000000000)}
         out: List[Dict[str, Any]] = []
         for m in money_re.finditer(text):
             num = m.group('a') or m.group('b')
@@ -485,15 +515,17 @@ class SoFAssessmentEngine:
                 continue
             suffix = (m.group('am') or m.group('bm') or '').lower()
             try:
-                val = float(num.replace(',', ''))
-            except ValueError:
+                # Decimal, so "£269.28k" → exactly 269280 (float gave
+                # 269280.00000000003).
+                val = Decimal(num.replace(',', ''))
+            except InvalidOperation:
                 continue
             if suffix:
-                val *= mult.get(suffix, 1)
+                val *= mult.get(suffix, Decimal(1))
             # Sub-£500 figures are kept but marked de-minimis — they
             # still surface as claims for the reviewer's awareness, but
             # no documentary evidence is demanded for them.
-            out.append({'amount': val, 'start': m.start(), 'end': m.end(),
+            out.append({'amount': float(val), 'start': m.start(), 'end': m.end(),
                         'raw': m.group(0).strip(),
                         'de_minimis': val < 500})
         return out
@@ -708,7 +740,9 @@ class SoFAssessmentEngine:
         sources = sof_explanation.get('sources', [])
         
         for idx, source in enumerate(sources, start=1):
-            amount = float(source.get('amount', 0))
+            # Via _D so string amounts ("269,280") and None are safe;
+            # the claim still carries a plain float.
+            amount = float(_D(source.get('amount', 0)))
             claim = {
                 "claim_id": idx,
                 "source_type": source.get('source_type', 'unknown'),
@@ -932,7 +966,9 @@ class SoFAssessmentEngine:
         """
         evidence_matches = []
         client_name = str((client_info or {}).get('client_name') or '')
-        tolerance_pct = float(self.settings.get('sof_amount_tolerance_pct', 5.0)) / 100.0
+        # Decimal tolerance fraction — money comparisons below are all
+        # done in Decimal (no float accumulation / equality hazards).
+        tolerance_pct = _D(self.settings.get('sof_amount_tolerance_pct', 5.0)) / Decimal('100')
         date_tol_days = int(self.settings.get('sof_date_tolerance_days', 7))
 
         # Only genuine credits are evidence. direction=='unknown' is
@@ -956,7 +992,7 @@ class SoFAssessmentEngine:
             }
 
         for claim in claims:
-            expected_amount = claim['expected_amount']
+            expected_amount = _D(claim['expected_amount'])
             tolerance = expected_amount * tolerance_pct
             expected_payer = claim.get('expected_payer')
             source_lower = str(claim.get('source_type', '')).lower()
@@ -986,14 +1022,21 @@ class SoFAssessmentEngine:
 
             if expected_amount > 0:
                 for txn in credits:
-                    txn_amount = txn.get('amount', 0)
+                    txn_amount = _D(txn.get('amount', 0))
                     if abs(txn_amount - expected_amount) > tolerance:
                         continue
                     if window:
                         txn_date = self._parse_date_flexible(txn.get('date'))
                         if txn_date and not (window[0] <= txn_date <= window[1]):
                             continue
-                    amount_match = "exact" if txn_amount == expected_amount else "close"
+                    # "Exact" = equal money at 2 dp (quantized Decimal
+                    # equality), not float ==.
+                    amount_match = (
+                        "exact"
+                        if txn_amount.quantize(_TWO_DP, rounding=ROUND_HALF_UP)
+                        == expected_amount.quantize(_TWO_DP, rounding=ROUND_HALF_UP)
+                        else "close"
+                    )
                     counterparty_match = _corroborates(self._txn_payer_text(txn))
                     matches.append(_txn_record(txn, amount_match, counterparty_match, amount_match))
 
@@ -1013,7 +1056,8 @@ class SoFAssessmentEngine:
                     for key, txns in groups.items():
                         if len(txns) < 2:
                             continue
-                        total = sum(t.get('amount', 0) for t in txns)
+                        total = sum((_D(t.get('amount', 0)) for t in txns),
+                                    Decimal('0'))
                         if abs(total - expected_amount) <= tolerance:
                             aggregated = True
                             group_payer = self._txn_payer_text(txns[0])
@@ -1059,20 +1103,17 @@ class SoFAssessmentEngine:
             balance_evidence = None
             if match_quality == "none" and 'saving' in str(
                     claim.get('source_type', '')).lower():
-                expected = float(claim.get('expected_amount', 0) or 0)
-                best_bal, best_acct = 0.0, None
+                expected = _D(claim.get('expected_amount', 0) or 0)
+                best_bal, best_acct = Decimal('0'), None
                 for txn in bank_statements:
-                    try:
-                        bal = float(txn.get('balance') or 0)
-                    except (TypeError, ValueError):
-                        continue
+                    bal = _D(txn.get('balance') or 0)
                     if bal > best_bal:
                         best_bal, best_acct = bal, txn.get('account_id')
-                if expected > 0 and best_bal >= expected * 0.9:
+                if expected > 0 and best_bal >= expected * Decimal('0.9'):
                     match_quality = "balance_evidence"
                     balance_evidence = {
                         "account_id": best_acct,
-                        "max_balance": round(best_bal, 2),
+                        "max_balance": _to_f(best_bal),
                     }
 
             partially_verified = (
@@ -1112,15 +1153,14 @@ class SoFAssessmentEngine:
         the "Funding traced %".
         """
         paths = []
-        try:
-            purchase_amount = float(purchase.get('amount', 0) or 0)
-        except (TypeError, ValueError):
-            purchase_amount = 0.0
+        # Decimal internally; the JSON output keeps plain floats.
+        purchase_amount_d = _D(purchase.get('amount', 0) or 0)
+        purchase_amount = _to_f(purchase_amount_d)
         purchase_date = purchase.get('expected_payment_date')
 
         # Guard: a zero/absent purchase amount makes every percentage
         # meaningless (and previously caused a ZeroDivisionError).
-        if purchase_amount <= 0:
+        if purchase_amount_d <= 0:
             return [{
                 "path_id": 1,
                 "description": "Purchase amount not stated - funding coverage cannot be calculated",
@@ -1144,34 +1184,35 @@ class SoFAssessmentEngine:
             return (t.get('date'), t.get('amount'), t.get('description'))
 
         credits = [t for t in bank_statements if t.get('direction') == 'credit']
-        material_floor = purchase_amount * 0.1
+        material_floor = purchase_amount_d * Decimal('0.1')
         explained_credits = sorted(
             (t for t in credits if _key(t) in explained_keys),
-            key=lambda t: t.get('amount', 0), reverse=True
+            key=lambda t: _D(t.get('amount', 0)), reverse=True
         )
         unexplained_large = [
             t for t in credits
-            if _key(t) not in explained_keys and t.get('amount', 0) > material_floor
+            if _key(t) not in explained_keys and _D(t.get('amount', 0)) > material_floor
         ]
 
         if explained_credits:
             path_steps = []
-            total_traced = 0
+            total_traced = Decimal('0')
 
             for credit in explained_credits[:5]:
+                credit_amount = _D(credit['amount'])
                 path_steps.append(
-                    f"£{credit['amount']:,.2f} received into {credit.get('account_id', 'account')} "
+                    f"£{credit_amount:,.2f} received into {credit.get('account_id', 'account')} "
                     f"on {credit.get('date', 'unknown date')} (matched to a declared source)"
                 )
-                total_traced += credit['amount']
+                total_traced += credit_amount
 
-                if total_traced >= purchase_amount:
+                if total_traced >= purchase_amount_d:
                     break
 
             # Unexplained large credits are disclosed but NOT counted.
             for txn in unexplained_large[:3]:
                 path_steps.append(
-                    f"£{txn['amount']:,.2f} credit on {txn.get('date', 'unknown date')} "
+                    f"£{_D(txn['amount']):,.2f} credit on {txn.get('date', 'unknown date')} "
                     f"is UNEXPLAINED - not counted toward traced funding"
                 )
 
@@ -1180,23 +1221,24 @@ class SoFAssessmentEngine:
                 t for t in bank_statements
                 if t.get('direction') == 'debit' and
                    'transfer' in t.get('description', '').lower() and
-                   t.get('amount', 0) > material_floor
+                   _D(t.get('amount', 0)) > material_floor
             ]
 
             for transfer in transfers[:2]:
                 path_steps.append(
-                    f"£{transfer['amount']:,.2f} transferred from {transfer.get('account_id', 'account')} "
+                    f"£{_D(transfer['amount']):,.2f} transferred from {transfer.get('account_id', 'account')} "
                     f"on {transfer.get('date', 'unknown date')}"
                 )
 
-            # Calculate coverage from EXPLAINED credits only.
-            coverage = min(100, int((total_traced / purchase_amount) * 100))
+            # Calculate coverage from EXPLAINED credits only (Decimal
+            # division — no float drift shaving a true 100% to 99).
+            coverage = min(100, int((total_traced / purchase_amount_d) * 100))
 
             paths.append({
                 "path_id": 1,
                 "description": " → ".join([c.get('account_id', 'Account') for c in explained_credits[:2]]) + " → Purchase",
                 "steps": path_steps,
-                "total_traced": total_traced,
+                "total_traced": _to_f(total_traced),
                 "purchase_amount": purchase_amount,
                 "coverage": coverage,
                 "plausible": coverage >= 80
@@ -1206,7 +1248,7 @@ class SoFAssessmentEngine:
             steps = ["No credits matched to declared source-of-funds claims"]
             for txn in unexplained_large[:3]:
                 steps.append(
-                    f"£{txn['amount']:,.2f} credit on {txn.get('date', 'unknown date')} "
+                    f"£{_D(txn['amount']):,.2f} credit on {txn.get('date', 'unknown date')} "
                     f"is UNEXPLAINED - not counted toward traced funding"
                 )
             paths.append({
@@ -1471,7 +1513,9 @@ class SoFAssessmentEngine:
                     cash_threshold = float(self.settings.get('cfg_cash_threshold_deposit', 7500.0))
                     is_cash = channel == 'cash' or is_cash_deposit or is_cash_withdrawal
 
-                    if is_cash and amount >= cash_threshold:
+                    # Decimal comparison at the threshold boundary; the
+                    # alert payload keeps the plain float amount.
+                    if is_cash and _D(amount) >= _D(cash_threshold):
                         cash_count += 1
                         cash_type = 'deposit' if is_cash_deposit or direction in ('in', 'credit') else 'withdrawal'
                         alert_objects.append({
@@ -1666,30 +1710,30 @@ class SoFAssessmentEngine:
             for txn in evidence['transactions']:
                 explained_amounts.add((txn.get('date'), txn.get('amount'), txn.get('description')))
 
-        large_threshold = float(self.settings.get('sof_large_credit_threshold', 10000.0))
+        large_threshold = _D(self.settings.get('sof_large_credit_threshold', 10000.0))
         for txn in bank_statements:
-            if txn.get('direction') == 'credit' and txn.get('amount', 0) >= large_threshold:
+            if txn.get('direction') == 'credit' and _D(txn.get('amount', 0)) >= large_threshold:
                 if (txn.get('date'), txn.get('amount'), txn.get('description')) not in explained_amounts:
                     red_flags.append({
                         "severity": "HIGH",
                         "source": "SoF_ANALYSIS",
-                        "flag": f"Large unexplained credit of £{txn['amount']:,.2f} on {txn.get('date')} "
+                        "flag": f"Large unexplained credit of £{_D(txn['amount']):,.2f} on {txn.get('date')} "
                                f"in {txn.get('account_id', 'account')}",
                         "transaction_ref": f"{txn.get('account_id')}-{txn.get('date')}"
                     })
 
         # 4. Cash deposits — threshold from cfg_cash_threshold_deposit
         #    (one source of truth with Transaction Review); HIGH severity.
-        cash_threshold = float(self.settings.get('cfg_cash_threshold_deposit', 7500.0))
+        cash_threshold = _D(self.settings.get('cfg_cash_threshold_deposit', 7500.0))
         cash_keywords = ['cash', 'deposit', 'atm deposit']
         for txn in bank_statements:
             desc = txn.get('description', '').lower()
             if txn.get('direction') == 'credit' and any(kw in desc for kw in cash_keywords):
-                if txn.get('amount', 0) >= cash_threshold:
+                if _D(txn.get('amount', 0)) >= cash_threshold:
                     red_flags.append({
                         "severity": "HIGH",
                         "source": "SoF_ANALYSIS",
-                        "flag": f"Cash deposit of £{txn['amount']:,.2f} on {txn.get('date')}",
+                        "flag": f"Cash deposit of £{_D(txn['amount']):,.2f} on {txn.get('date')}",
                         "transaction_ref": f"{txn.get('account_id')}-{txn.get('date')}"
                     })
 
@@ -1697,7 +1741,7 @@ class SoFAssessmentEngine:
         #     neither the client nor matched to any declared claim.
         #     Undeclared third-party funding is an SRA thematic-review
         #     focus and must be surfaced by name.
-        tp_threshold = float(self.settings.get('sof_third_party_min_amount', 1000.0))
+        tp_threshold = _D(self.settings.get('sof_third_party_min_amount', 1000.0))
         # Employment income is by definition paid by a third party
         # (the employer) — routine salary/pension credits are ordinary
         # income, not undeclared third-party funding of the purchase.
@@ -1711,10 +1755,7 @@ class SoFAssessmentEngine:
             for txn in bank_statements:
                 if txn.get('direction') != 'credit':
                     continue
-                try:
-                    amt = float(txn.get('amount', 0) or 0)
-                except (TypeError, ValueError):
-                    continue
+                amt = _D(txn.get('amount', 0) or 0)
                 if amt < tp_threshold:
                     continue
                 if (txn.get('date'), txn.get('amount'), txn.get('description')) in explained_amounts:
@@ -1728,9 +1769,11 @@ class SoFAssessmentEngine:
                 if self._names_match(client_name, payer_text):
                     continue
                 key = (payer or payer_text[:60]).lower()
+                # "total" accumulates in Decimal; it is only ever
+                # rendered into flag strings, never returned raw.
                 entry = by_payer.setdefault(key, {
                     "payer": payer or payer_text[:60],
-                    "count": 0, "total": 0.0,
+                    "count": 0, "total": Decimal('0'),
                     "first_date": txn.get('date'), "last_date": txn.get('date'),
                     "ref": f"{txn.get('account_id')}-{txn.get('date')}",
                 })
@@ -1761,10 +1804,11 @@ class SoFAssessmentEngine:
         unknown_txns = [
             t for t in bank_statements
             if t.get('direction') == 'unknown'
-            and float(t.get('amount', 0) or 0) >= 500
+            and _D(t.get('amount', 0) or 0) >= 500
         ]
         if unknown_txns:
-            unknown_total = sum(float(t.get('amount', 0) or 0) for t in unknown_txns)
+            unknown_total = sum((_D(t.get('amount', 0) or 0) for t in unknown_txns),
+                                Decimal('0'))
             red_flags.append({
                 "severity": "HIGH",
                 "source": "SoF_ANALYSIS",
@@ -1797,7 +1841,7 @@ class SoFAssessmentEngine:
         ]
         material_funds = any(
             t.get('direction') == 'credit'
-            and float(t.get('amount', 0) or 0) >= 500
+            and _D(t.get('amount', 0) or 0) >= 500
             for t in bank_statements
         )
         if material_funds and len(real_claims) < min_claims:
@@ -2269,9 +2313,10 @@ class SoFAssessmentEngine:
                 # claims (previously the first claim's amount was
                 # multiplied by a count — a fabricated figure).
                 unverified_total = sum(
-                    e.get('expected_amount', 0)
-                    for e in evidence_matches
-                    if not e.get('verified')
+                    (_D(e.get('expected_amount', 0))
+                     for e in evidence_matches
+                     if not e.get('verified')),
+                    Decimal('0')
                 )
                 sof_section.append(
                     f"These unverified claims represent material funding gaps. Without supporting evidence, "

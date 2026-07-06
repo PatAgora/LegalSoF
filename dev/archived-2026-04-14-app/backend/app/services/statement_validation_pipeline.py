@@ -22,7 +22,22 @@ import statistics
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
+
+
+# Money arithmetic is done in Decimal internally (floats only at the
+# API/result boundary). 2dp quantum + the penny tolerance unit.
+_TWO_DP = Decimal("0.01")
+
+
+def _dec(x: Any) -> Decimal:
+    """Convert a float/str money value to Decimal safely (via str, so the
+    float's repr — not its binary expansion — is what gets parsed)."""
+    try:
+        return Decimal(str(x))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -434,25 +449,28 @@ class StatementValidationPipeline:
             checks_total += 1
             balance_errors = 0
             transitions = 0
-            prev_balance: Optional[float] = None
-            pending_delta = 0.0
+            drift_pct = _dec(cfg["max_balance_drift_pct"])
+            prev_balance: Optional[Decimal] = None
+            pending_delta = Decimal("0")
             for t in txns:
-                delta = t.amount if t.direction == "credit" else -t.amount
+                delta = _dec(t.amount) if t.direction == "credit" else -_dec(t.amount)
                 if t.balance is None:
                     if prev_balance is not None:
                         pending_delta += delta
                     continue
+                balance = _dec(t.balance).quantize(_TWO_DP)
                 if prev_balance is None:
-                    prev_balance = t.balance
-                    pending_delta = 0.0
+                    prev_balance = balance
+                    pending_delta = Decimal("0")
                     continue
-                expected_balance = prev_balance + pending_delta + delta
+                expected_balance = (prev_balance + pending_delta + delta).quantize(_TWO_DP)
                 transitions += 1
-                tolerance = abs(expected_balance) * cfg["max_balance_drift_pct"] + 0.02  # +2p for rounding
-                if abs(t.balance - expected_balance) > tolerance:
+                # Percentage drift allowance + 2p (two tolerance units) for rounding
+                tolerance = abs(expected_balance) * drift_pct + (_TWO_DP * 2)
+                if abs(balance - expected_balance) > tolerance:
                     balance_errors += 1
-                prev_balance = t.balance
-                pending_delta = 0.0
+                prev_balance = balance
+                pending_delta = Decimal("0")
 
             error_rate = balance_errors / transitions if transitions > 0 else 0
             if error_rate == 0:
@@ -480,16 +498,20 @@ class StatementValidationPipeline:
                 i for i, t in enumerate(reversed(txns)) if t.balance is not None
             )
             span = txns[first_bal_idx:last_bal_idx + 1]
-            total_credits = sum(t.amount for t in span if t.direction == "credit")
-            total_debits = sum(t.amount for t in span if t.direction == "debit")
-            actual_change = txns_with_balance[-1].balance - txns_with_balance[0].balance
+            total_credits = sum((_dec(t.amount) for t in span if t.direction == "credit"),
+                                Decimal("0")).quantize(_TWO_DP)
+            total_debits = sum((_dec(t.amount) for t in span if t.direction == "debit"),
+                               Decimal("0")).quantize(_TWO_DP)
+            actual_change = _dec(txns_with_balance[-1].balance) - _dec(txns_with_balance[0].balance)
             # Account for the first txn itself
             if txns_with_balance[0].direction == "credit":
-                actual_change += txns_with_balance[0].amount
+                actual_change += _dec(txns_with_balance[0].amount)
             else:
-                actual_change -= txns_with_balance[0].amount
-            expected_change = total_credits - total_debits
-            sum_tolerance = max(abs(expected_change) * 0.02, 1.0)  # 2% or £1
+                actual_change -= _dec(txns_with_balance[0].amount)
+            actual_change = actual_change.quantize(_TWO_DP)
+            expected_change = (total_credits - total_debits).quantize(_TWO_DP)
+            # 2% of the expected movement, floored at £1 (100 tolerance units)
+            sum_tolerance = max(abs(expected_change) * Decimal("0.02"), _TWO_DP * 100)
 
             if abs(actual_change - expected_change) <= sum_tolerance:
                 checks_passed += 1
@@ -499,8 +521,8 @@ class StatementValidationPipeline:
                 score -= 20
                 flags.append(Flag("math_check", "SUM_CROSS_CHECK_FAIL", "high",
                                   f"Credit/debit totals (net £{expected_change:,.2f}) do not match balance movement (£{actual_change:,.2f})",
-                                  {"total_credits": total_credits, "total_debits": total_debits,
-                                   "expected_net": expected_change, "actual_net": actual_change}))
+                                  {"total_credits": float(total_credits), "total_debits": float(total_debits),
+                                   "expected_net": float(expected_change), "actual_net": float(actual_change)}))
 
         # 4c. Date continuity check.
         # A date gap is an observation, not an arithmetic failure — moderate

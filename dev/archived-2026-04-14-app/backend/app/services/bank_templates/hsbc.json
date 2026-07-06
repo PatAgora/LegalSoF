@@ -1,0 +1,7 @@
+{
+  "bank": "HSBC",
+  "header_phash": "8fe0e13c0fe01f0f",
+  "added": "2026-07-06",
+  "source_filename": "1 HSBC_Current_Account_Statement_Jun-Sep2023.pdf",
+  "notes": "Demo-derived reference (SOF demo dataset) \u2014 replace with a fingerprint from a real bank statement before production use."
+}

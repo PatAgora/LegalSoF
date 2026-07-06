@@ -4,7 +4,7 @@ Matters API Endpoints
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from pydantic import BaseModel
 
 
@@ -123,6 +123,66 @@ def _safe_load_storage_single(db, matter_id: int) -> Optional[Dict]:
         return None
 
 
+# ── Deadline / ageing helpers ──────────────────────────────────────────
+#
+# Terminal workflow states — a matter in one of these can no longer be
+# "overdue" (the work is finished, for better or worse).
+TERMINAL_STATUSES = (MatterStatus.APPROVED, MatterStatus.REJECTED, MatterStatus.COMPLETED)
+
+
+def _is_overdue(matter) -> bool:
+    """True when the target completion date has passed and the matter is
+    still live (not APPROVED/REJECTED/COMPLETED, not archived)."""
+    return bool(
+        matter.target_completion_date
+        and matter.target_completion_date < date.today()
+        and matter.status not in TERMINAL_STATUSES
+        and not matter.is_archived
+    )
+
+
+def _load_last_status_changes(sync_db) -> Dict[int, datetime]:
+    """One cheap grouped query: matter_id → most recent status change."""
+    from sqlalchemy import func as sa_func
+    try:
+        rows = (
+            sync_db.query(
+                MatterStatusHistory.matter_id,
+                sa_func.max(MatterStatusHistory.changed_at),
+            )
+            .group_by(MatterStatusHistory.matter_id)
+            .all()
+        )
+        return {matter_id: changed_at for matter_id, changed_at in rows}
+    except Exception:
+        return {}
+
+
+def _days_in_current_status(matter, last_changes: Dict[int, datetime]) -> Optional[int]:
+    """Whole days since the last recorded workflow status change.
+
+    Honest labelling: computed from matter_status_history (the audited
+    record of workflow transitions); falls back to created_at for
+    matters whose status has never changed. NOT derived from updated_at,
+    which moves on any edit.
+    """
+    anchor = last_changes.get(matter.id) or matter.created_at
+    if not anchor:
+        return None
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - anchor).days)
+
+
+def _analyst_name_map(sync_db, matters) -> Dict[int, str]:
+    """Batch-load full names for every assigned analyst in one query."""
+    ids = {m.assigned_analyst_id for m in matters if m.assigned_analyst_id}
+    if not ids:
+        return {}
+    users = sync_db.query(User).filter(User.id.in_(ids)).all()
+    return {u.id: (u.full_name or u.email) for u in users}
+
+
 # Request/Response Models
 class StatusUpdateRequest(BaseModel):
     new_status: str
@@ -146,6 +206,8 @@ class CreateMatterRequest(BaseModel):
     risk_level: Optional[str] = "medium"
     description: Optional[str] = None
     status: Optional[str] = "draft"
+    target_completion_date: Optional[date] = None
+    assigned_analyst_id: Optional[int] = None
 
 
 @router.post("/matters")
@@ -182,7 +244,20 @@ async def create_matter(
             'approved': MatterStatus.APPROVED
         }
         status = status_map.get(request.status.lower(), MatterStatus.DRAFT)
-        
+
+        # Optional assignment at creation — the target user must exist
+        # and be active.
+        assigned_analyst = None
+        if request.assigned_analyst_id is not None:
+            assigned_analyst = sync_db.query(User).filter(
+                User.id == request.assigned_analyst_id
+            ).first()
+            if not assigned_analyst or not assigned_analyst.is_active:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assigned analyst not found or inactive",
+                )
+
         # Create the new matter. Transaction value is optional — when
         # not supplied it defaults to 0 (the column is NOT NULL).
         new_matter = Matter(
@@ -194,7 +269,9 @@ async def create_matter(
             status=status,
             risk_rating=risk_rating,
             description=request.description or "Property purchase",
-            created_by_id=current_user.id
+            created_by_id=current_user.id,
+            assigned_analyst_id=assigned_analyst.id if assigned_analyst else None,
+            target_completion_date=request.target_completion_date,
         )
         
         sync_db.add(new_matter)
@@ -214,9 +291,30 @@ async def create_matter(
                 "client": new_matter.client_name,
                 "amount": float(new_matter.target_amount),
                 "risk_rating": new_matter.risk_rating.value,
+                "assigned_analyst_id": new_matter.assigned_analyst_id,
+                "target_completion_date": (
+                    new_matter.target_completion_date.isoformat()
+                    if new_matter.target_completion_date else None
+                ),
             },
         )
         sync_db.add(audit)
+
+        # Audit the initial assignment as its own entry so the trail
+        # reads the same as later (re)assignments.
+        if assigned_analyst:
+            sync_db.add(AuditLog(
+                matter_id=new_matter.id,
+                user_id=current_user.id,
+                action=AuditLogAction.UPDATED,
+                entity_type="matter",
+                entity_id=new_matter.id,
+                description=f"Matter assigned to {assigned_analyst.full_name or assigned_analyst.email}",
+                details={
+                    "previous_assigned_analyst_id": None,
+                    "assigned_analyst_id": assigned_analyst.id,
+                },
+            ))
         sync_db.commit()
 
         return {
@@ -226,9 +324,23 @@ async def create_matter(
             "target_amount": float(new_matter.target_amount),
             "status": new_matter.status.value,
             "risk_rating": new_matter.risk_rating.value,
+            "assigned_analyst_id": new_matter.assigned_analyst_id,
+            "assigned_analyst_name": (
+                (assigned_analyst.full_name or assigned_analyst.email)
+                if assigned_analyst else None
+            ),
+            "target_completion_date": (
+                new_matter.target_completion_date.isoformat()
+                if new_matter.target_completion_date else None
+            ),
             "created_at": new_matter.created_at.isoformat() if new_matter.created_at else None
         }
-    
+
+    except HTTPException:
+        # Validation errors (e.g. bad assignee) must reach the client
+        # as-is, not be masked as a 500 by the blanket handler below.
+        sync_db.rollback()
+        raise
     except Exception:
         sync_db.rollback()
         # Never leak internal error detail to the client — log it server-side.
@@ -245,10 +357,17 @@ async def list_matters(
     limit: int = 100,
     status: Optional[str] = None,
     risk_rating: Optional[str] = None,
+    assigned_to_me: bool = False,
+    overdue: bool = False,
     current_user: User = Depends(require_analyst),
 ):
     """
-    List all matters with optional filtering
+    List all matters with optional filtering.
+
+    - assigned_to_me=true — only matters assigned to the current user.
+    - overdue=true — target_completion_date in the past and the matter
+      still live (not APPROVED/REJECTED/COMPLETED; archived matters are
+      always excluded).
     """
     # Use shared sync DB session for blocking operations
     SessionLocal = get_sync_session()
@@ -265,22 +384,35 @@ async def list_matters(
             query = query.filter(Matter.status == status)
         if risk_rating:
             query = query.filter(Matter.risk_rating == risk_rating)
+        if assigned_to_me:
+            query = query.filter(Matter.assigned_analyst_id == current_user.id)
+        if overdue:
+            query = query.filter(
+                Matter.target_completion_date.isnot(None),
+                Matter.target_completion_date < date.today(),
+                Matter.status.notin_(TERMINAL_STATUSES),
+            )
 
         # Get matters with pagination
         matters = query.offset(skip).limit(limit).all()
-        
+
         # Load SoF assessment storage for completion percentages
         storage = _safe_load_storage_db(sync_db)
-        
+
+        # Batch lookups (one query each) for assignment names and the
+        # most recent workflow status change per matter.
+        analyst_names = _analyst_name_map(sync_db, matters)
+        last_changes = _load_last_status_changes(sync_db)
+
         # Convert to dict format
         result = []
         for matter in matters:
             # Get SoF data for this matter
             sof_data = storage.get(str(matter.id))
-            
+
             # Calculate completion percentage
             completion_percentage = calculate_completion_percentage(matter, sof_data)
-            
+
             result.append({
                 "id": matter.id,
                 "reference_number": matter.reference_number,
@@ -294,11 +426,21 @@ async def list_matters(
                 "status": derive_matter_status(matter, sof_data),
                 "risk_rating": matter.risk_rating.value if matter.risk_rating else "medium",
                 "description": matter.description,
+                "assigned_analyst_id": matter.assigned_analyst_id,
+                "assigned_analyst_name": analyst_names.get(matter.assigned_analyst_id),
+                "target_completion_date": (
+                    matter.target_completion_date.isoformat()
+                    if matter.target_completion_date else None
+                ),
+                "is_overdue": _is_overdue(matter),
+                # Days since the last workflow status change (from
+                # matter_status_history; created_at when never changed).
+                "days_in_current_status": _days_in_current_status(matter, last_changes),
                 "created_at": matter.created_at.isoformat() if matter.created_at else None,
                 "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
                 "completion_percentage": completion_percentage,
             })
-        
+
         return result
     
     finally:
@@ -325,7 +467,15 @@ async def get_matter(
         
         # Calculate completion percentage (this function will be available after workflow implementation)
         completion_percentage = calculate_completion_percentage(matter, sof_data)
-        
+
+        # Assignment + deadline enrichment
+        assigned_analyst_name = None
+        if matter.assigned_analyst_id:
+            analyst = sync_db.query(User).filter(User.id == matter.assigned_analyst_id).first()
+            if analyst:
+                assigned_analyst_name = analyst.full_name or analyst.email
+        last_changes = _load_last_status_changes(sync_db)
+
         return {
             "id": matter.id,
             "reference_number": matter.reference_number,
@@ -357,11 +507,168 @@ async def get_matter(
             "compliance_review_outcome": getattr(matter, 'compliance_review_outcome', None),
             "compliance_review_notes": getattr(matter, 'compliance_review_notes', None),
             "description": matter.description,
+            "assigned_analyst_id": matter.assigned_analyst_id,
+            "assigned_analyst_name": assigned_analyst_name,
+            "target_completion_date": (
+                matter.target_completion_date.isoformat()
+                if matter.target_completion_date else None
+            ),
+            "is_overdue": _is_overdue(matter),
+            "days_in_current_status": _days_in_current_status(matter, last_changes),
             "created_at": matter.created_at.isoformat() if matter.created_at else None,
             "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
             "completion_percentage": completion_percentage,
         }
 
+    finally:
+        sync_db.close()
+
+
+# ── Assignment & deadline endpoints ────────────────────────────────────
+class AssignMatterRequest(BaseModel):
+    assigned_analyst_id: Optional[int] = None   # null → unassign
+
+
+@router.patch("/matters/{matter_id}/assign")
+async def assign_matter(
+    matter_id: int,
+    request: AssignMatterRequest,
+    current_user: User = Depends(require_analyst),
+):
+    """Assign (or unassign) the matter to an analyst.
+
+    Permitted for admins and partners, and for the currently assigned
+    analyst reassigning their own matter. The target user must exist
+    and be active. Writes an audit-trail entry.
+    """
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matter = require_matter_access(matter_id, current_user, sync_db)
+
+        is_privileged = current_user.is_superuser or current_user.role in (
+            UserRole.ADMIN, UserRole.PARTNER,
+        )
+        if not is_privileged and matter.assigned_analyst_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only an admin, a partner, or the currently assigned analyst may reassign this matter",
+            )
+
+        new_analyst = None
+        if request.assigned_analyst_id is not None:
+            new_analyst = sync_db.query(User).filter(
+                User.id == request.assigned_analyst_id
+            ).first()
+            if not new_analyst or not new_analyst.is_active:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assigned analyst not found or inactive",
+                )
+
+        previous_id = matter.assigned_analyst_id
+        matter.assigned_analyst_id = new_analyst.id if new_analyst else None
+        matter.updated_at = datetime.now(timezone.utc)
+
+        new_name = (new_analyst.full_name or new_analyst.email) if new_analyst else None
+        description = (
+            f"Matter assigned to {new_name}" if new_analyst
+            else "Matter unassigned"
+        )
+        sync_db.add(AuditLog(
+            matter_id=matter.id,
+            user_id=current_user.id,
+            action=AuditLogAction.UPDATED,
+            entity_type="matter",
+            entity_id=matter.id,
+            description=description,
+            details={
+                "previous_assigned_analyst_id": previous_id,
+                "assigned_analyst_id": matter.assigned_analyst_id,
+                "assigned_by": current_user.full_name or current_user.email,
+            },
+        ))
+        sync_db.commit()
+        sync_db.refresh(matter)
+
+        return {
+            "id": matter.id,
+            "reference_number": matter.reference_number,
+            "client_name": matter.client_name,
+            "assigned_analyst_id": matter.assigned_analyst_id,
+            "assigned_analyst_name": new_name,
+            "target_completion_date": (
+                matter.target_completion_date.isoformat()
+                if matter.target_completion_date else None
+            ),
+            "is_overdue": _is_overdue(matter),
+            "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
+        }
+    finally:
+        sync_db.close()
+
+
+class TargetDateRequest(BaseModel):
+    target_completion_date: Optional[date] = None   # null → clear
+
+
+@router.patch("/matters/{matter_id}/target-date")
+async def set_target_completion_date(
+    matter_id: int,
+    request: TargetDateRequest,
+    current_user: User = Depends(require_analyst),
+):
+    """Set or clear the matter's target completion date (deadline).
+
+    Any user with access to the matter may set it. Writes an
+    audit-trail entry.
+    """
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matter = require_matter_access(matter_id, current_user, sync_db)
+
+        previous = matter.target_completion_date
+        matter.target_completion_date = request.target_completion_date
+        matter.updated_at = datetime.now(timezone.utc)
+
+        if request.target_completion_date:
+            description = (
+                "Target completion date set to "
+                f"{request.target_completion_date.strftime('%d/%m/%Y')}"
+            )
+        else:
+            description = "Target completion date cleared"
+
+        sync_db.add(AuditLog(
+            matter_id=matter.id,
+            user_id=current_user.id,
+            action=AuditLogAction.UPDATED,
+            entity_type="matter",
+            entity_id=matter.id,
+            description=description,
+            details={
+                "previous_target_completion_date": previous.isoformat() if previous else None,
+                "target_completion_date": (
+                    request.target_completion_date.isoformat()
+                    if request.target_completion_date else None
+                ),
+                "changed_by": current_user.full_name or current_user.email,
+            },
+        ))
+        sync_db.commit()
+        sync_db.refresh(matter)
+
+        return {
+            "id": matter.id,
+            "reference_number": matter.reference_number,
+            "target_completion_date": (
+                matter.target_completion_date.isoformat()
+                if matter.target_completion_date else None
+            ),
+            "is_overdue": _is_overdue(matter),
+            "updated_at": matter.updated_at.isoformat() if matter.updated_at else None,
+        }
     finally:
         sync_db.close()
 

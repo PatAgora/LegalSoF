@@ -1,8 +1,9 @@
 # FastAPI and ASGI
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+fastapi==0.115.14
+starlette==0.46.2
+uvicorn[standard]==0.34.3
 gunicorn==21.2.0
-python-multipart==0.0.6
+python-multipart==0.0.32
 
 # Database
 sqlalchemy==2.0.25
@@ -11,21 +12,21 @@ psycopg2-binary==2.9.9
 asyncpg==0.29.0
 
 # Authentication & Security
-python-jose[cryptography]==3.3.0
+PyJWT[crypto]==2.13.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+bcrypt==4.0.1  # keep <4.1: passlib 1.7.4 crashes on bcrypt>=4.1 (__about__ removed)
 python-dotenv==1.0.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic==2.10.6
+pydantic-settings==2.8.1
 
 # Document Processing
 pdfplumber==0.10.3
-PyMuPDF==1.23.21
+PyMuPDF==1.24.14
 python-docx==1.1.0
 reportlab==4.4.10
 openpyxl==3.1.2
 pytesseract==0.3.10
-Pillow==10.2.0
+Pillow==10.4.0
 imagehash==4.3.1
 pyHanko==0.21.0
 

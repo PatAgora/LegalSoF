@@ -1,0 +1,7 @@
+{
+  "bank": "Santander",
+  "header_phash": "8fb0e048f03dde4b",
+  "added": "2026-07-06",
+  "source_filename": "2 Santander_Savings_Account_Statement_Jan2020-Sep2023.pdf",
+  "notes": "Demo-derived reference (SOF demo dataset) \u2014 replace with a fingerprint from a real bank statement before production use."
+}

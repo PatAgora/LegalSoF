@@ -376,14 +376,24 @@ class DocumentVerificationPipeline:
                 self._reconcile_signature_marker(result)
 
                 # Stage 8e - Bank template visual fingerprint match.
+                # Bank statements only — completion statements / probate
+                # grants legitimately mention banks without using their
+                # statement template. The claimed bank is inferred from the
+                # PAGE-1 HEADER BAND (the same region that gets hashed): a
+                # whole-document keyword scan misattributes statements that
+                # merely mention another bank in a transaction narrative.
                 try:
-                    from app.services.template_fingerprint import check_template_match
-                    bank = getattr(result, "identified_bank_template", None)
-                    # Many call sites don't populate this; pull from signature
-                    # stage result instead if available.
-                    if not bank and result.signature_result:
-                        bank = result.signature_result.get("identified_bank") if isinstance(result.signature_result, dict) else None
-                    result.flags.extend(check_template_match(file_bytes, bank))
+                    from app.services.template_fingerprint import (
+                        check_template_match, infer_bank_from_header,
+                    )
+                    if file_category == "bank_statement" and doc.page_count:
+                        page1 = doc[0]
+                        clip = fitz.Rect(0, 0, page1.rect.width,
+                                         page1.rect.height * 0.25)
+                        header_text = page1.get_text(clip=clip) or ""
+                        bank = infer_bank_from_header(header_text)
+                        if bank:
+                            result.flags.extend(check_template_match(file_bytes, bank))
                 except Exception as exc:
                     result.flags.append(VerificationFlag(
                         "template_fingerprint", "TEMPLATE_CHECK_ERROR", "info",

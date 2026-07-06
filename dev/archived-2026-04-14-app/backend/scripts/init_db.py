@@ -95,6 +95,14 @@ _SCHEMA_STATEMENTS: list[str] = [
     "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'LOGIN'",
     "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'LOGIN_FAILED'",
     "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'LOGOUT'",
+    # Statement balance chaining columns (added 2026-07)
+    "ALTER TABLE document_verifications ADD COLUMN IF NOT EXISTS opening_balance FLOAT",
+    "ALTER TABLE document_verifications ADD COLUMN IF NOT EXISTS closing_balance FLOAT",
+    "ALTER TABLE document_verifications ADD COLUMN IF NOT EXISTS account_identifier VARCHAR(100)",
+    # Matter deadline tracking + assignment lookups (added 2026-07)
+    "ALTER TABLE matters ADD COLUMN IF NOT EXISTS target_completion_date DATE",
+    "CREATE INDEX IF NOT EXISTS ix_matters_assigned_analyst_id ON matters (assigned_analyst_id)",
+    "CREATE INDEX IF NOT EXISTS ix_matters_target_completion_date ON matters (target_completion_date) WHERE target_completion_date IS NOT NULL",
 ]
 
 

@@ -3,7 +3,8 @@ JWT authentication, bcrypt password hashing, and password policy utilities.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError  # noqa: F401 — compat alias (was `from jose import JWTError`)
 import hashlib
 import re
 from passlib.context import CryptContext

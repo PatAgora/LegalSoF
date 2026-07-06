@@ -1120,8 +1120,18 @@ async def upload_sof_files(
             # Best-effort statement period from the document banner —
             # persisted so the corroborator's PERIOD_GAP check has data.
             _period_start, _period_end = (None, None)
+            _opening_bal, _closing_bal, _account_id = (None, None, None)
             if file_category == "bank_statement":
                 _period_start, _period_end = _extract_statement_period(pdf_text)
+                # Balance chaining inputs — opening/closing balances from
+                # the statement banner text and a stable account identifier
+                # (sort code + account number), persisted so consecutive
+                # statements on the same account can be chained.
+                from app.services.cross_document_corroborator import (
+                    extract_balances_from_text, derive_account_identifier,
+                )
+                _opening_bal, _closing_bal = extract_balances_from_text(pdf_text)
+                _account_id = derive_account_identifier(pdf_text)
 
             # Re-check for a concurrent upload of the same file (dedupe
             # race) just before creating the row.
@@ -1155,6 +1165,9 @@ async def upload_sof_files(
                     hidden_content_result=getattr(doc_ver_result, 'hidden_content_result', None),
                     period_start=_period_start,
                     period_end=_period_end,
+                    opening_balance=_opening_bal,
+                    closing_balance=_closing_bal,
+                    account_identifier=_account_id,
                     blocked=(doc_ver_result.verdict == "LikelyTampered"),
                 )
                 db.add(doc_ver_record)
@@ -1277,6 +1290,19 @@ async def upload_sof_files(
             _period_start = min(_txn_dates).strftime('%Y-%m-%d') if _txn_dates else None
             _period_end = max(_txn_dates).strftime('%Y-%m-%d') if _txn_dates else None
 
+            # Balance chaining inputs — opening balance is the first
+            # transaction's balance minus its signed amount (i.e. the
+            # balance brought forward), closing is the last transaction's
+            # balance. Account identifier is regexed from the CSV text.
+            from app.services.cross_document_corroborator import (
+                derive_balances_from_transactions, derive_account_identifier,
+            )
+            _opening_bal, _closing_bal = derive_balances_from_transactions(
+                stmt_result.extracted_transactions
+            )
+            _csv_text_for_ids = file_content_for_verification.decode("utf-8", errors="ignore")
+            _account_id = derive_account_identifier(_csv_text_for_ids)
+
             file_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
             # Re-check for a concurrent upload of the same file (dedupe
             # race) just before creating the row.
@@ -1308,6 +1334,9 @@ async def upload_sof_files(
                     identified_bank_template=stmt_result.identified_bank_template,
                     period_start=_period_start,
                     period_end=_period_end,
+                    opening_balance=_opening_bal,
+                    closing_balance=_closing_bal,
+                    account_identifier=_account_id,
                     blocked=csv_blocked,
                 )
                 db.add(doc_ver_record)

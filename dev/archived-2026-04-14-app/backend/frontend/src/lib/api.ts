@@ -168,6 +168,25 @@ class ApiClient {
     return response.json()
   }
 
+  /**
+   * Complete an MFA-pending login. `mfaToken` is the short-lived token
+   * returned by /auth/login when the account has MFA enabled
+   * ({ mfa_required: true, mfa_token }); on success the backend returns
+   * the same Token shape as a normal login.
+   */
+  async loginMfa(mfaToken: string, totpCode: string) {
+    const response = await fetch(`${API_BASE_URL}/api/v1/auth/login/mfa`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mfa_token: mfaToken, totp_code: totpCode }),
+    })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw { response: { data } }
+    }
+    return response.json()
+  }
+
   async logout() {
     // Best-effort server-side logout; local state is cleared regardless.
     try {

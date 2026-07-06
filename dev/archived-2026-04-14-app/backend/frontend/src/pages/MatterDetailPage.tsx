@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/authStore'
 import MatterStatusBadge from '../components/ui/MatterStatusBadge'
 import { RationaleModal } from '../components/ui/RationaleModal'
 import { showToast } from '../lib/toast'
-import { formatCurrencyWhole, formatDateTime } from '../lib/format'
+import { formatCurrencyWhole, formatDate, formatDateTime } from '../lib/format'
 
 type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
@@ -110,6 +110,7 @@ export default function MatterDetailPage() {
             <p className="mt-2 text-sm text-zinc-500">
               {matter.client_name} - {matter.transaction_type?.replace(/_/g, ' ') || 'Transaction'}
             </p>
+            <MatterMetaRow matter={matter} onSaved={() => refreshMatter()} />
           </div>
         </div>
       </div>
@@ -126,6 +127,212 @@ export default function MatterDetailPage() {
         {activeTab === 'funds-lineage' && <FundsLineageTab matterId={matter.id} />}
         {activeTab === 'verification' && <DocumentVerificationPage matterId={matter.id} />}
         {activeTab === 'audit-trail' && <AuditTrailTab matterId={matter.id} />}
+      </div>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────
+// Assignment + target date meta row (header)
+// ──────────────────────────────────────────
+
+interface PickerUser {
+  id: number
+  full_name: string
+  email: string
+  role: string
+}
+
+function MatterMetaRow({ matter, onSaved }: { matter: any; onSaved: () => void }) {
+  const currentUser = useAuthStore((s) => s.user)
+  const role = String(currentUser?.role || '').toLowerCase()
+  // Mirrors the backend policy on PATCH /matters/{id}/assign: admins
+  // and partners always; otherwise only the currently assigned analyst.
+  const canAssign =
+    role === 'admin' || role === 'partner' ||
+    (currentUser?.id != null && matter.assigned_analyst_id === currentUser.id)
+
+  const [users, setUsers] = useState<PickerUser[]>([])
+  const [editingAssign, setEditingAssign] = useState(false)
+  const [assignValue, setAssignValue] = useState<string>('')
+  const [savingAssign, setSavingAssign] = useState(false)
+  const [editingTarget, setEditingTarget] = useState(false)
+  const [targetValue, setTargetValue] = useState<string>('')
+  const [savingTarget, setSavingTarget] = useState(false)
+
+  useEffect(() => {
+    if (!canAssign) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await authFetch(`${API_BASE_URL}/api/v1/users`)
+        if (r.ok && !cancelled) setUsers(await r.json())
+      } catch {
+        // Non-blocking — the picker simply stays empty.
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canAssign])
+
+  const saveAssignment = async () => {
+    setSavingAssign(true)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          assigned_analyst_id: assignValue ? Number(assignValue) : null,
+        }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        showToast(`Could not update assignment: ${err.detail || r.statusText}`, 'error')
+        return
+      }
+      const d = await r.json()
+      showToast(
+        d.assigned_analyst_name
+          ? `Matter assigned to ${d.assigned_analyst_name}.`
+          : 'Matter unassigned.',
+        'success',
+      )
+      setEditingAssign(false)
+      onSaved()
+    } catch (e: any) {
+      showToast(`Could not update assignment: ${e?.message || 'Unknown error'}`, 'error')
+    } finally {
+      setSavingAssign(false)
+    }
+  }
+
+  const saveTargetDate = async () => {
+    setSavingTarget(true)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/target-date`, {
+        method: 'PATCH',
+        body: JSON.stringify({ target_completion_date: targetValue || null }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        showToast(`Could not update target date: ${err.detail || r.statusText}`, 'error')
+        return
+      }
+      const d = await r.json()
+      showToast(
+        d.target_completion_date
+          ? `Target completion date set to ${formatDate(d.target_completion_date)}.`
+          : 'Target completion date cleared.',
+        'success',
+      )
+      setEditingTarget(false)
+      onSaved()
+    } catch (e: any) {
+      showToast(`Could not update target date: ${e?.message || 'Unknown error'}`, 'error')
+    } finally {
+      setSavingTarget(false)
+    }
+  }
+
+  const inlineButton =
+    'px-2.5 py-1 text-xs font-medium rounded border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 transition-colors'
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
+      {/* Assigned analyst */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Assigned to</span>
+        {editingAssign ? (
+          <span className="inline-flex items-center gap-2">
+            <select
+              value={assignValue}
+              onChange={(e) => setAssignValue(e.target.value)}
+              className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-900 focus:border-zinc-300 focus:ring-2 focus:ring-zinc-200 focus:outline-none"
+            >
+              <option value="">Unassigned</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
+              ))}
+            </select>
+            <button onClick={saveAssignment} disabled={savingAssign} className={inlineButton}>
+              {savingAssign ? 'Saving...' : 'Save'}
+            </button>
+            <button
+              onClick={() => setEditingAssign(false)}
+              disabled={savingAssign}
+              className="text-xs text-zinc-400 hover:text-zinc-600"
+            >
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-2">
+            {matter.assigned_analyst_name ? (
+              <span className="text-zinc-900 font-medium">{matter.assigned_analyst_name}</span>
+            ) : (
+              <span className="text-zinc-400 italic">Unassigned</span>
+            )}
+            {canAssign && (
+              <button
+                onClick={() => {
+                  setAssignValue(matter.assigned_analyst_id ? String(matter.assigned_analyst_id) : '')
+                  setEditingAssign(true)
+                }}
+                className={inlineButton}
+              >
+                {matter.assigned_analyst_id ? 'Reassign' : 'Assign'}
+              </button>
+            )}
+          </span>
+        )}
+      </div>
+
+      {/* Target completion date */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Target date</span>
+        {editingTarget ? (
+          <span className="inline-flex items-center gap-2">
+            <input
+              type="date"
+              value={targetValue}
+              onChange={(e) => setTargetValue(e.target.value)}
+              className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-900 focus:border-zinc-300 focus:ring-2 focus:ring-zinc-200 focus:outline-none"
+            />
+            <button onClick={saveTargetDate} disabled={savingTarget} className={inlineButton}>
+              {savingTarget ? 'Saving...' : 'Save'}
+            </button>
+            <button
+              onClick={() => setEditingTarget(false)}
+              disabled={savingTarget}
+              className="text-xs text-zinc-400 hover:text-zinc-600"
+            >
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-2">
+            {matter.target_completion_date ? (
+              <span className={`tabular-nums ${matter.is_overdue ? 'text-red-700 font-semibold' : 'text-zinc-900 font-medium'}`}>
+                {formatDate(matter.target_completion_date)}
+              </span>
+            ) : (
+              <span className="text-zinc-400 italic">Not set</span>
+            )}
+            {matter.is_overdue && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-50 border border-red-200 text-red-700">
+                Overdue
+              </span>
+            )}
+            <button
+              onClick={() => {
+                setTargetValue(matter.target_completion_date || '')
+                setEditingTarget(true)
+              }}
+              className={inlineButton}
+            >
+              {matter.target_completion_date ? 'Edit' : 'Set date'}
+            </button>
+          </span>
+        )}
       </div>
     </div>
   )

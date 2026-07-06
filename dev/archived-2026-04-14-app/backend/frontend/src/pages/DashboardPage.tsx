@@ -40,6 +40,7 @@ const STATUS_BAR_COLOUR: Record<string, string> = {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null)
+  const [overdueCount, setOverdueCount] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,10 +49,20 @@ export default function DashboardPage() {
     ;(async () => {
       try {
         setLoading(true)
-        const r = await authFetch(`${API_BASE_URL}/api/v1/analytics/dashboard-summary`)
+        const [r, overdueRes] = await Promise.all([
+          authFetch(`${API_BASE_URL}/api/v1/analytics/dashboard-summary`),
+          // Overdue matters — same server-side filter as the Matters
+          // page "Overdue" tab. Best-effort: a failure leaves the count
+          // at 0 without blocking the dashboard.
+          authFetch(`${API_BASE_URL}/api/v1/matters?overdue=true&limit=1000`).catch(() => null),
+        ])
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         const payload = await r.json()
         if (!cancelled) setData(payload)
+        if (overdueRes && overdueRes.ok) {
+          const overdueMatters = await overdueRes.json()
+          if (!cancelled && Array.isArray(overdueMatters)) setOverdueCount(overdueMatters.length)
+        }
       } catch (e: any) {
         if (!cancelled) setError(e.message || 'Failed to load dashboard')
       } finally {
@@ -95,10 +106,16 @@ export default function DashboardPage() {
 
       {/* Topline strip */}
       <Card>
-        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-zinc-100">
+        <div className="grid grid-cols-2 md:grid-cols-5 divide-x divide-zinc-100">
           <Stat label="Total matters" value={data.total_matters} to="/matters" />
           <Stat label="Documents verified" value={data.total_documents_verified} />
           <Stat label="Active reviews" value={activeReviews} />
+          <Stat
+            label="Overdue matters"
+            value={overdueCount}
+            to="/matters?view=overdue"
+            tone={overdueCount > 0 ? 'danger' : 'normal'}
+          />
           <Stat
             label="Blocked"
             value={data.matters_with_blocking_issues}

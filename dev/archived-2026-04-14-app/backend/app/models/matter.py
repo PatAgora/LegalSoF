@@ -1,7 +1,7 @@
 """
 Matter (case) model - the core entity for SoF reviews.
 """
-from sqlalchemy import Column, Integer, String, DateTime, Enum as SQLEnum, Numeric, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, Date, DateTime, Enum as SQLEnum, Numeric, ForeignKey, Text, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -81,6 +81,12 @@ class Matter(Base):
     # Assignment
     assigned_analyst_id = Column(Integer, ForeignKey("users.id"))
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Deadline / ageing tracking — date the SoF review should be
+    # completed by. A matter is "overdue" when this date is in the past
+    # and the matter is not in a terminal state (APPROVED / REJECTED /
+    # COMPLETED) or archived.
+    target_completion_date = Column(Date, nullable=True)
     
     # Portal
     portal_token = Column(String(500), unique=True, index=True)

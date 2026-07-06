@@ -50,6 +50,11 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def _client_ip(request: Request) -> Optional[str]:
     """Client IP for audit rows — first X-Forwarded-For hop (the app sits
     behind nginx), falling back to the direct peer address."""
@@ -447,6 +452,67 @@ async def logout(
     logger.info("user_logged_out", user_id=current_user.id, email=current_user.email)
 
     return {"message": "logged out"}
+
+
+@router.post("/change-password")
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    body: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Change the current user's password.
+
+    Requires the current password. Returns 400 (not 401) on a wrong
+    current password so the frontend's authFetch does not treat it as
+    an expired session and eject the user.
+    """
+    if not verify_password(body.current_password, current_user.hashed_password):
+        db.add(_auth_audit(
+            request,
+            AuditLogAction.UPDATED,
+            f"Rejected password change for {current_user.email}: current password incorrect",
+            user_id=current_user.id,
+            details={"event": "password_change_rejected", "reason": "bad_current_password"},
+        ))
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    valid, message = validate_password_policy(body.new_password)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message,
+        )
+
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from the current password",
+        )
+
+    new_hash = get_password_hash(body.new_password)
+    await db.execute(
+        update(User).where(User.id == current_user.id).values(hashed_password=new_hash)
+    )
+    # AuditLogAction has no PASSWORD_CHANGED member — record as UPDATED
+    # with an explicit description and structured details.
+    db.add(_auth_audit(
+        request,
+        AuditLogAction.UPDATED,
+        f"User {current_user.email} changed their password",
+        user_id=current_user.id,
+        details={"event": "password_changed"},
+    ))
+    await db.commit()
+
+    logger.info("password_changed", user_id=current_user.id, email=current_user.email)
+
+    return {"message": "Password changed successfully"}
 
 
 @router.get("/me", response_model=UserInDB)

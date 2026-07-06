@@ -1,0 +1,7 @@
+{
+  "bank": "Barclays",
+  "header_phash": "bfc56a907ac0912f",
+  "added": "2026-07-06",
+  "source_filename": "Demo_Barclays_Statement.pdf",
+  "notes": "Demo-derived reference (SOF demo dataset) \u2014 replace with a fingerprint from a real bank statement before production use."
+}

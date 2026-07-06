@@ -4,6 +4,7 @@ import MattersPage from './pages/MattersPage'
 import MatterDetailPage from './pages/MatterDetailPage'
 import LoginPage from './pages/LoginPage'
 import ConfigurationPage from './pages/ConfigurationPage'
+import SettingsPage from './pages/SettingsPage'
 import ComplianceDashboardPage from './pages/ComplianceDashboardPage'
 import ComplianceMattersPage from './pages/ComplianceMattersPage'
 import RCADashboardPage from './pages/RCADashboardPage'
@@ -27,6 +28,7 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="matters" element={<MattersPage />} />
           <Route path="matters/:id" element={<MatterDetailPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="configuration" element={<AdminRoute><ConfigurationPage /></AdminRoute>} />
           <Route path="compliance" element={<AdminRoute><ComplianceDashboardPage /></AdminRoute>} />
           <Route path="compliance/matters" element={<AdminRoute><ComplianceMattersPage /></AdminRoute>} />

@@ -74,6 +74,14 @@ class DocumentVerification(Base):
     period_start = Column(String(20))
     period_end = Column(String(20))
 
+    # Statement balance chaining (anti-flatten-and-reprint). Persisted at
+    # upload so consecutive statements on the same account can be chained:
+    # statement N's closing balance must equal statement N+1's opening
+    # balance. All nullable — best-effort extraction.
+    opening_balance = Column(Float, nullable=True)
+    closing_balance = Column(Float, nullable=True)
+    account_identifier = Column(String(100), nullable=True)
+
     # Separate pipeline scores for combining
     structural_pipeline_score = Column(Float)
     statement_pipeline_score = Column(Float)
@@ -150,6 +158,10 @@ class DocumentVerification(Base):
             "bank_hint": self.bank_hint,
             "period_start": self.period_start,
             "period_end": self.period_end,
+            # Statement balance chaining
+            "opening_balance": self.opening_balance,
+            "closing_balance": self.closing_balance,
+            "account_identifier": self.account_identifier,
             # Separate pipeline scores
             "structural_pipeline_score": self.structural_pipeline_score,
             "statement_pipeline_score": self.statement_pipeline_score,
