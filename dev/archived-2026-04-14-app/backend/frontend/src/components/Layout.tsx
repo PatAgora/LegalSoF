@@ -21,6 +21,8 @@ interface NotificationItem {
 const NAV_LINKS: { href: string; label: string; adminOnly?: boolean }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/matters', label: 'Matters' },
+  { href: '/firm-risk-assessment', label: 'Firm Risk', adminOnly: true },
+  { href: '/mlro', label: 'MLRO', adminOnly: true },
   { href: '/configuration', label: 'Configuration', adminOnly: true },
 ]
 

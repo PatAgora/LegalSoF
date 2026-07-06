@@ -9,6 +9,11 @@ import ComplianceDashboardPage from './pages/ComplianceDashboardPage'
 import ComplianceMattersPage from './pages/ComplianceMattersPage'
 import RCADashboardPage from './pages/RCADashboardPage'
 import PortalUploadPage from './pages/PortalUploadPage'
+import FirmRiskAssessmentPage from './pages/FirmRiskAssessmentPage'
+import MatterRiskAssessmentPage from './pages/MatterRiskAssessmentPage'
+import KybPage from './pages/KybPage'
+import EidvPage from './pages/EidvPage'
+import MlroPage from './pages/MlroPage'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
@@ -31,6 +36,11 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="matters" element={<MattersPage />} />
           <Route path="matters/:id" element={<MatterDetailPage />} />
+          <Route path="matters/:matterId/risk-assessment" element={<MatterRiskAssessmentPage />} />
+          <Route path="matters/:matterId/kyb" element={<KybPage />} />
+          <Route path="matters/:matterId/eidv" element={<EidvPage />} />
+          <Route path="mlro" element={<AdminRoute><MlroPage /></AdminRoute>} />
+          <Route path="firm-risk-assessment" element={<AdminRoute><FirmRiskAssessmentPage /></AdminRoute>} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="configuration" element={<AdminRoute><ConfigurationPage /></AdminRoute>} />
           <Route path="compliance" element={<AdminRoute><ComplianceDashboardPage /></AdminRoute>} />

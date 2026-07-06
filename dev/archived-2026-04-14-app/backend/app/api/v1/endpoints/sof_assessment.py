@@ -2013,6 +2013,41 @@ async def run_sof_assessment(
     # Verify matter exists
     matter = require_matter_access(matter_id, current_user, db)
 
+    # DAML freeze: while a SAR consent request is pending (or a moratorium
+    # is running) the matter must not progress. Generic wording — the
+    # detailed reason must never reach the client team (tipping-off).
+    from app.api.v1.endpoints.mlro import is_matter_frozen
+    if is_matter_frozen(db, matter_id):
+        raise HTTPException(
+            status_code=409,
+            detail="This matter is subject to a compliance hold and cannot "
+                   "progress at present. Contact your compliance team.",
+        )
+
+    # CMRA gate: reg 28(12)-(13) — a completed client AND matter risk
+    # assessment must exist before the SoF assessment runs. Toggle via
+    # the sof_require_cmra config key (default on).
+    from app.api.v1.endpoints.risk_assessments import matter_has_completed_cmra
+    from app.models.transaction import TransactionConfig
+    _cmra_cfg = (
+        db.query(TransactionConfig)
+        .filter(TransactionConfig.key == "sof_require_cmra")
+        .first()
+    )
+    require_cmra = (
+        str(_cmra_cfg.value).strip().lower() in ("true", "1", "yes")
+        if _cmra_cfg is not None else True
+    )
+    if require_cmra and not matter_has_completed_cmra(db, matter_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Client and matter risk assessments must be completed "
+                   "before running the SoF assessment (Regulation 28(12)). "
+                   "Open the Risk assessment page for this matter to "
+                   "complete them, or an administrator can disable this "
+                   "gate via the sof_require_cmra configuration key.",
+        )
+
     # Get assessment data from DB
     storage = _db_load_storage(db, matter_id)
     if storage is None:

@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     auth, transactions, sof_assessment, matters,
     statement_validation, mfa, audit, notifications,
     document_verification, analytics, users, client_portal,
+    screening, risk_assessments, kyb, eidv, mlro,
 )
 
 api_router = APIRouter()
@@ -23,3 +24,8 @@ api_router.include_router(document_verification.router, tags=["document-verifica
 api_router.include_router(analytics.router, tags=["analytics"])
 api_router.include_router(users.router, tags=["users"])
 api_router.include_router(client_portal.router, tags=["client-portal"])
+api_router.include_router(screening.router, tags=["screening"])
+api_router.include_router(risk_assessments.router, tags=["risk-assessments"])
+api_router.include_router(kyb.router, tags=["kyb"])
+api_router.include_router(eidv.router, tags=["eidv"])
+api_router.include_router(mlro.router, tags=["mlro"])

@@ -23,6 +23,21 @@ from app.models.document_verification import (
 )
 from app.models.portal import ClientUploadToken
 
+from app.models.screening import (
+    SanctionsDataset, SanctionsEntry, ScreeningCheck, ScreeningHit,
+    ScreeningSubjectType, ScreeningCheckStatus, HitAdjudicationStatus,
+)
+from app.models.risk_assessment import (
+    FirmRiskAssessment, ClientMatterRiskAssessment,
+    FirmRAStatus, CMRAStatus, CMRAType, RiskLevel,
+)
+from app.models.kyb import KybCheck
+from app.models.eidv import EidvCheck
+from app.models.mlro import (
+    InternalReport, InternalReportStatus, SarRecord, DamlStatus,
+    TrainingRecord, PolicyDocument, PolicyStatus,
+)
+
 __all__ = [
     # User
     "User",
@@ -84,4 +99,15 @@ __all__ = [
     "VerificationVerdict",
     # Client Portal
     "ClientUploadToken",
+    # Screening
+    "SanctionsDataset", "SanctionsEntry", "ScreeningCheck", "ScreeningHit",
+    "ScreeningSubjectType", "ScreeningCheckStatus", "HitAdjudicationStatus",
+    # Risk assessments
+    "FirmRiskAssessment", "ClientMatterRiskAssessment",
+    "FirmRAStatus", "CMRAStatus", "CMRAType", "RiskLevel",
+    # KYB / E-IDV
+    "KybCheck", "EidvCheck",
+    # MLRO
+    "InternalReport", "InternalReportStatus", "SarRecord", "DamlStatus",
+    "TrainingRecord", "PolicyDocument", "PolicyStatus",
 ]

@@ -189,6 +189,24 @@ def seed_transaction_config(engine):
              'Incoming credits at or above this GBP amount that cannot be matched to a declared source-of-funds claim are flagged as large unexplained credits, and do not count towards the "funding traced" percentage. Lower it for higher-risk clients.'),
             ('sof_third_party_min_amount', _t(2500.0, 1000.0, 500.0), 'tiered_float',
              'Incoming credits at or above this GBP amount from a payer who is neither the client nor a declared source (e.g. an undeclared relative or company) raise a Third-Party Funds flag. The SRA thematic review expects undeclared third-party funding to be identified and evidenced.'),
+            ('sof_require_cmra', 'true', 'bool',
+             'When ON (recommended), the Source of Funds assessment cannot be run on a matter until a completed client risk assessment AND matter risk assessment exist (Regulation 28(12)-(13)). Turn OFF only during a transition period while historical matters are being back-filled with risk assessments.'),
+
+            # ── Client & Matter Risk Assessments ──────────────────────
+            ('cmra_weight_client', _t(0.30, 0.30, 0.30), 'tiered_float',
+             'Weight given to the CLIENT risk factor set when computing the overall client/matter risk rating. All five weights should sum to 1.0.'),
+            ('cmra_weight_service_matter', _t(0.25, 0.25, 0.25), 'tiered_float',
+             'Weight given to the SERVICE/MATTER risk factor set (matter type, retainer shape) in the overall risk rating.'),
+            ('cmra_weight_geography', _t(0.20, 0.20, 0.20), 'tiered_float',
+             'Weight given to the GEOGRAPHY risk factor set (client location, funds origin, property location) in the overall risk rating.'),
+            ('cmra_weight_delivery_channel', _t(0.15, 0.15, 0.15), 'tiered_float',
+             'Weight given to the DELIVERY CHANNEL risk factor set (face-to-face vs remote, intermediated) in the overall risk rating.'),
+            ('cmra_weight_sector_product', _t(0.10, 0.10, 0.10), 'tiered_float',
+             'Weight given to the SECTOR/PRODUCT risk factor set in the overall risk rating.'),
+            ('cmra_medium_threshold', _t(1.60, 1.60, 1.60), 'tiered_float',
+             'Weighted risk score (1.0-3.0) at or above which the overall rating becomes MEDIUM. Any single factor scored 3 forces at least medium regardless.'),
+            ('cmra_high_threshold', _t(2.40, 2.40, 2.40), 'tiered_float',
+             'Weighted risk score (1.0-3.0) at or above which the overall rating becomes HIGH, triggering enhanced due diligence.'),
 
             # ── Document Verification ─────────────────────────────────
             ('dv_score_verified_min', _t(65, 75, 85), 'tiered_int',

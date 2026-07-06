@@ -1,9 +1,11 @@
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import TransactionList from '../components/TransactionReview/TransactionList'
 import SoFAssessment from '../components/SoFAssessment/SoFAssessment'
 import FundsLineage from '../components/FundsLineage/FundsLineage'
 import DocumentVerificationPage from '../components/DocumentVerification/DocumentVerificationPage'
+import ScreeningPanel from '../components/Screening/ScreeningPanel'
+import ReportSuspicionButton from '../components/Mlro/ReportSuspicionButton'
 import { API_BASE_URL, authFetch } from '../lib/api'
 import { useCurrentMatter } from '../stores/currentMatterStore'
 import { useAuthStore } from '../stores/authStore'
@@ -13,10 +15,10 @@ import { RationaleModal } from '../components/ui/RationaleModal'
 import { showToast } from '../lib/toast'
 import { formatCurrencyWhole, formatDate, formatDateTime } from '../lib/format'
 
-type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
+type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'screening' | 'audit-trail'
 
 const VALID_TABS: TabType[] = [
-  'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'audit-trail',
+  'sof-assessment', 'transactions', 'funds-lineage', 'verification', 'screening', 'audit-trail',
 ]
 
 export default function MatterDetailPage() {
@@ -114,7 +116,11 @@ export default function MatterDetailPage() {
             </p>
             <MatterMetaRow matter={matter} onSaved={() => refreshMatter()} />
           </div>
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 flex items-center gap-2">
+            <ReportSuspicionButton
+              matterId={matter.id}
+              matterReference={matter.reference_number}
+            />
             <button
               onClick={() => setShowClientLinksModal(true)}
               className="px-3.5 py-2 text-sm font-medium rounded border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors"
@@ -122,6 +128,27 @@ export default function MatterDetailPage() {
               Request client documents
             </button>
           </div>
+        </div>
+        {/* Compliance quick-links: the AML workflow steps for this matter. */}
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-3">
+          <Link
+            to={`/matters/${matter.id}/risk-assessment`}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 transition-colors"
+          >
+            Risk assessment
+          </Link>
+          <Link
+            to={`/matters/${matter.id}/eidv`}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 transition-colors"
+          >
+            Identity verification
+          </Link>
+          <Link
+            to={`/matters/${matter.id}/kyb`}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 transition-colors"
+          >
+            Company checks (KYB)
+          </Link>
         </div>
       </div>
 
@@ -138,10 +165,19 @@ export default function MatterDetailPage() {
 
       {/* Tab Content - sidebar drives `?tab=`; no in-page tab bar. */}
       <div className="min-h-[600px]">
-        {activeTab === 'sof-assessment' && <SoFAssessment matterId={matter.id} />}
+        {activeTab === 'sof-assessment' && (
+          <div className="space-y-6">
+            {/* PEP/sanctions screening is strict-liability and applies to every
+                matter regardless of risk, so it sits prominently above the
+                risk-based SoF assessment. Also reachable via ?tab=screening. */}
+            <ScreeningPanel matterId={matter.id} clientName={matter.client_name} />
+            <SoFAssessment matterId={matter.id} />
+          </div>
+        )}
         {activeTab === 'transactions' && <TransactionReviewTab matterId={matter.id} />}
         {activeTab === 'funds-lineage' && <FundsLineageTab matterId={matter.id} />}
         {activeTab === 'verification' && <DocumentVerificationPage matterId={matter.id} />}
+        {activeTab === 'screening' && <ScreeningPanel matterId={matter.id} clientName={matter.client_name} />}
         {activeTab === 'audit-trail' && <AuditTrailTab matterId={matter.id} />}
       </div>
     </div>
