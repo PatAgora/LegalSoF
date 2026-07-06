@@ -49,3 +49,7 @@ docker-compose.override.yml
 
 # Claude Code local config
 .claude/
+
+# Local reference snapshot of the separate cdd-app codebase — NEVER commit
+# to this (public-remote) repo. Work on it is local-only by instruction.
+cdd-app-main/
