@@ -8,5 +8,6 @@ export { default as Modal } from './Modal';
 export { Table, Thead, Tbody, Tr, Th, Td } from './Table';
 export { default as EmptyState } from './EmptyState';
 export { default as Alert } from './Alert';
+export { RationaleModal, ConfirmModal } from './RationaleModal';
 export { default as Spinner } from './Spinner';
 export { default as FileUploader } from './FileUploader';

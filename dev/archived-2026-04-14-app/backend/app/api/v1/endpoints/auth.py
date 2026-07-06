@@ -1,21 +1,24 @@
 """
 Authentication endpoints with account lockout, MFA enforcement, and password rehashing.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from typing import Optional
 
+from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.user import User
+from app.models.audit import AuditLog, AuditLogAction
 from app.schemas.user import LoginRequest, Token, UserCreate, UserPublic, UserInDB
 from app.core.security import (
     verify_password,
     get_password_hash,
     create_access_token,
     create_refresh_token,
+    decode_token,
     needs_rehash,
     validate_password_policy,
 )
@@ -41,6 +44,56 @@ class MFARequiredResponse(BaseModel):
 class MFALoginRequest(BaseModel):
     mfa_token: str
     totp_code: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    """Client IP for audit rows — first X-Forwarded-For hop (the app sits
+    behind nginx), falling back to the direct peer address."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:45]
+    return request.client.host if request.client else None
+
+
+def _auth_audit(
+    request: Request,
+    action: AuditLogAction,
+    description: str,
+    user_id: Optional[int] = None,
+    details: Optional[dict] = None,
+) -> AuditLog:
+    """Build an authentication audit row with request context attached."""
+    return AuditLog(
+        user_id=user_id,
+        action=action,
+        entity_type="user",
+        entity_id=user_id,
+        description=description,
+        details=details,
+        ip_address=_client_ip(request),
+        user_agent=(request.headers.get("User-Agent") or "")[:500] or None,
+    )
+
+
+def _lockout_remaining_minutes(user: User, now: datetime) -> int:
+    """Minutes of lockout remaining, or 0 if not locked.
+
+    locked_until is a timezone-aware column (DateTime(timezone=True)) —
+    compare aware-to-aware, guarding against any legacy naive rows by
+    assuming UTC for them.
+    """
+    locked_until = user.locked_until
+    if not locked_until:
+        return 0
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
+    if locked_until <= now:
+        return 0
+    return int((locked_until - now).total_seconds() // 60) + 1
 
 
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
@@ -95,11 +148,15 @@ async def register(
 
 
 @router.post("/login")
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     login_request: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Login and get access token with account lockout and MFA enforcement."""
+    now = datetime.now(timezone.utc)
+
     # Find user
     result = await db.execute(
         select(User).where(User.email == login_request.email)
@@ -110,6 +167,13 @@ async def login(
         # Timing-safe: run bcrypt even if user not found to prevent enumeration
         verify_password("dummy-password", _DUMMY_HASH)
         logger.warning("login_failed", email=login_request.email, reason="user_not_found")
+        db.add(_auth_audit(
+            request,
+            AuditLogAction.LOGIN_FAILED,
+            f"Failed login attempt for unknown email {login_request.email}",
+            details={"email": login_request.email, "reason": "user_not_found"},
+        ))
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -117,8 +181,8 @@ async def login(
         )
 
     # Check account lockout
-    if user.locked_until and user.locked_until.replace(tzinfo=None) > datetime.now(timezone.utc).replace(tzinfo=None):
-        remaining = int((user.locked_until.replace(tzinfo=None) - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds() // 60) + 1
+    remaining = _lockout_remaining_minutes(user, now)
+    if remaining:
         logger.warning("login_blocked_lockout", email=login_request.email)
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
@@ -132,12 +196,19 @@ async def login(
         update_values: dict = {"failed_login_attempts": new_attempts}
 
         if new_attempts >= MAX_FAILED_ATTEMPTS:
-            update_values["locked_until"] = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+            update_values["locked_until"] = now + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
             logger.warning("account_locked", email=login_request.email, attempts=new_attempts)
 
         await db.execute(
             update(User).where(User.id == user.id).values(**update_values)
         )
+        db.add(_auth_audit(
+            request,
+            AuditLogAction.LOGIN_FAILED,
+            f"Failed login attempt for {user.email} (attempt {new_attempts})",
+            user_id=user.id,
+            details={"reason": "bad_password", "attempts": new_attempts},
+        ))
         await db.commit()
 
         logger.warning("login_failed", email=login_request.email, attempts=new_attempts)
@@ -166,21 +237,29 @@ async def login(
         update(User)
         .where(User.id == user.id)
         .values(
-            last_login=datetime.now(timezone.utc),
+            last_login=now,
             failed_login_attempts=0,
             locked_until=None,
         )
     )
-    await db.commit()
 
     # Check if MFA is enabled — require TOTP verification
     if user.mfa_enabled and user.totp_secret:
+        await db.commit()
         # Issue a short-lived MFA-pending token (not a full access token)
         mfa_token = create_access_token(
             data={"sub": str(user.id), "mfa_pending": True},
             expires_delta=timedelta(minutes=5),
         )
         return MFARequiredResponse(mfa_required=True, mfa_token=mfa_token)
+
+    db.add(_auth_audit(
+        request,
+        AuditLogAction.LOGIN,
+        f"User {user.email} logged in",
+        user_id=user.id,
+    ))
+    await db.commit()
 
     # No MFA — issue full tokens
     access_token = create_access_token(data={"sub": str(user.id)})
@@ -196,13 +275,16 @@ async def login(
 
 
 @router.post("/login/mfa", response_model=Token)
+@limiter.limit("10/minute")
 async def login_mfa(
+    request: Request,
     mfa_request: MFALoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Complete MFA login by verifying TOTP code."""
-    from app.core.security import decode_token
     from app.services.totp_service import verify_totp
+
+    now = datetime.now(timezone.utc)
 
     # Decode the MFA-pending token
     payload = decode_token(mfa_request.mfa_token)
@@ -232,13 +314,44 @@ async def login_mfa(
             detail="Invalid MFA configuration",
         )
 
+    # Re-check account state — it may have changed since the MFA-pending
+    # token was issued.
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+    remaining = _lockout_remaining_minutes(user, now)
+    if remaining:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Account locked due to too many failed attempts. Try again in {remaining} minutes.",
+        )
+
     # Verify TOTP code
     if not verify_totp(user.totp_secret, mfa_request.totp_code):
         logger.warning("mfa_verification_failed", user_id=user.id)
+        db.add(_auth_audit(
+            request,
+            AuditLogAction.LOGIN_FAILED,
+            f"Failed MFA verification for {user.email}",
+            user_id=user.id,
+            details={"reason": "bad_totp"},
+        ))
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid TOTP code",
         )
+
+    db.add(_auth_audit(
+        request,
+        AuditLogAction.LOGIN,
+        f"User {user.email} logged in (MFA)",
+        user_id=user.id,
+        details={"mfa": True},
+    ))
+    await db.commit()
 
     # Issue full tokens
     access_token = create_access_token(data={"sub": str(user.id)})
@@ -251,6 +364,89 @@ async def login_mfa(
         refresh_token=refresh_token,
         token_type="bearer",
     )
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_tokens(
+    body: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a valid refresh token for a new access + refresh token pair.
+
+    The refresh token is rotated on every call.
+    """
+    payload = decode_token(body.refresh_token)
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    result = await db.execute(
+        select(User).where(User.id == int(user_id))
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+    if _lockout_remaining_minutes(user, datetime.now(timezone.utc)):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Account is locked",
+        )
+
+    access_token = create_access_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+
+    return Token(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Record a logout for the audit trail.
+
+    NOTE: JWTs are stateless — true server-side revocation would require
+    a token denylist, which is out of scope here. Clients must discard
+    their tokens on logout.
+    """
+    db.add(_auth_audit(
+        request,
+        AuditLogAction.LOGOUT,
+        f"User {current_user.email} logged out",
+        user_id=current_user.id,
+    ))
+    await db.commit()
+
+    logger.info("user_logged_out", user_id=current_user.id, email=current_user.email)
+
+    return {"message": "logged out"}
 
 
 @router.get("/me", response_model=UserInDB)

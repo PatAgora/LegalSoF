@@ -14,9 +14,8 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.db.session import get_sync_db
-from app.api.dependencies.auth import require_analyst, require_admin
+from app.api.dependencies.auth import require_analyst, require_admin, require_matter_access
 from app.models.user import User
-from app.models import Matter
 from app.models.statement_validation import (
     StatementValidation, StatementValidationFlag, StatementValidationTransaction,
     ValidationStatus, FlagSeverity,
@@ -40,9 +39,7 @@ router = APIRouter()
     tags=["statement-validation"],
 )
 def list_validations(matter_id: int, current_user: User = Depends(require_analyst), db: Session = Depends(get_sync_db)):
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(404, "Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     validations = (
         db.query(StatementValidation)
@@ -63,6 +60,7 @@ def list_validations(matter_id: int, current_user: User = Depends(require_analys
     tags=["statement-validation"],
 )
 def get_validation(matter_id: int, validation_id: int, current_user: User = Depends(require_analyst), db: Session = Depends(get_sync_db)):
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(StatementValidation)
         .filter(StatementValidation.id == validation_id, StatementValidation.matter_id == matter_id)
@@ -89,6 +87,7 @@ def admin_override(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_sync_db),
 ):
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(StatementValidation)
         .filter(StatementValidation.id == validation_id, StatementValidation.matter_id == matter_id)
@@ -96,11 +95,19 @@ def admin_override(
     )
     if not v:
         raise HTTPException(404, "Validation not found")
+    if not v.blocked:
+        raise HTTPException(409, "Validation is not blocked — nothing to override")
+
+    # Actor is ALWAYS the authenticated admin — the client-supplied
+    # admin_user field is kept for backward compatibility but never
+    # trusted for identity. (Statement validations have no separate
+    # propose step; the flow is single-step and admin-only.)
+    approver = current_user.full_name or current_user.email
 
     previous_status = v.status.value if v.status else "unknown"
 
     v.admin_override = True
-    v.admin_override_by = body.admin_user
+    v.admin_override_by = approver
     v.admin_override_rationale = body.rationale
     v.admin_override_at = datetime.now(timezone.utc)
     v.blocked = False  # unblock
@@ -108,6 +115,7 @@ def admin_override(
     # Audit log
     audit = AuditLog(
         matter_id=matter_id,
+        user_id=current_user.id,
         action=AuditLogAction.APPROVED,
         entity_type="statement_validation",
         entity_id=validation_id,
@@ -115,7 +123,7 @@ def admin_override(
         details={
             "validation_id": validation_id,
             "previous_status": previous_status,
-            "admin_user": body.admin_user,
+            "admin_user": approver,
             "rationale": body.rationale,
         },
     )
@@ -126,10 +134,10 @@ def admin_override(
         validation_id=validation_id,
         previous_status=previous_status,
         admin_override=True,
-        admin_override_by=body.admin_user,
+        admin_override_by=approver,
         admin_override_rationale=body.rationale,
         blocked=False,
-        message=f"Validation #{validation_id} has been overridden by {body.admin_user}. Downstream processing unblocked.",
+        message=f"Validation #{validation_id} has been overridden by {approver}. Downstream processing unblocked.",
     )
 
 
@@ -143,9 +151,7 @@ def admin_override(
     tags=["statement-validation"],
 )
 def get_validation_summary(matter_id: int, current_user: User = Depends(require_analyst), db: Session = Depends(get_sync_db)):
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(404, "Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     validations = (
         db.query(StatementValidation)

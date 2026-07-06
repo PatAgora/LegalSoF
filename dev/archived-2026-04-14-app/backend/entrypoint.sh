@@ -23,7 +23,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
     REDACTED=$(printf '%s' "$DATABASE_URL" | sed -E 's#(://[^:]+:)[^@]+(@)#\1***\2#')
     echo "      DATABASE_URL     = $REDACTED"
 fi
-echo "      SECRET_KEY set   = $([ -n "${SECRET_KEY:-}" ] && echo yes || echo 'no (insecure default will be used)')"
+echo "      SECRET_KEY set   = $([ -n "${SECRET_KEY:-}" ] && echo yes || echo NO)"
 echo "      Python version   = $(python --version 2>&1)"
 echo "      Working dir      = $(pwd)"
 
@@ -35,6 +35,12 @@ if [ -z "${DATABASE_URL:-}" ]; then
     echo "      [MISSING] DATABASE_URL is not set." >&2
     echo "                In Railway → service → Variables, add:" >&2
     echo "                    DATABASE_URL = \${{Postgres.DATABASE_URL}}" >&2
+    missing=1
+fi
+if [ -z "${SECRET_KEY:-}" ]; then
+    echo "      [MISSING] SECRET_KEY is not set — refusing to start with the" >&2
+    echo "                insecure built-in default. Generate one with:" >&2
+    echo "                    python -c \"import secrets; print(secrets.token_urlsafe(48))\"" >&2
     missing=1
 fi
 if [ "${missing}" -ne 0 ]; then

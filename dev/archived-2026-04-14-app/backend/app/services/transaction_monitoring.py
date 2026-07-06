@@ -1,6 +1,8 @@
 """
 Transaction monitoring service - AML alert generation engine.
-Implements 7 built-in rules for detecting suspicious transactions.
+Implements 9 built-in rules for detecting suspicious transactions
+(country risk, cash, outlier, velocity, narrative keywords,
+structuring, round-number credits).
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple
@@ -8,6 +10,21 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.transaction import Transaction, TransactionAlert, CountryRisk, TransactionConfig
 import json
+import logging
+import re
+import statistics
+
+logger = logging.getLogger(__name__)
+
+# Severity ladder used when escalating merged alerts.
+_SEVERITY_ORDER = ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+
+# Narrative patterns indicating a cash credit even when the parser did
+# not populate the `channel` field (parsers generally never set it).
+_CASH_CREDIT_NARRATIVE = re.compile(
+    r'\bcash\b.*\b(deposit|paid in|lodgement)\b|counter credit',
+    re.IGNORECASE,
+)
 
 
 class TransactionMonitoringService:
@@ -37,9 +54,16 @@ class TransactionMonitoringService:
         out: Dict[str, any] = {}
         for key, (value, value_type) in self._raw_config.items():
             try:
-                out[key] = resolve_value(value, value_type, tier)
-            except Exception:
-                out[key] = value
+                out[key] = resolve_value(value, value_type, tier, key=key)
+            except Exception as exc:
+                # Leave the key unset so callers' .get(key, default)
+                # falls back to the documented built-in default rather
+                # than an unusable raw value.
+                logger.warning(
+                    "Config key %r could not be resolved (%s: %s); "
+                    "the built-in default will apply",
+                    key, type(exc).__name__, exc,
+                )
         return out
     
     def _load_country_risks(self) -> Dict[str, dict]:
@@ -118,7 +142,19 @@ class TransactionMonitoringService:
                 alert = self._check_unusual_narrative(txn, matter_id)
                 if alert:
                     txn_alerts.append(alert)
-            
+
+            # Structuring detection (tr_structuring_window_days /
+            # tr_structuring_band_pct) — deposits deliberately split to
+            # stay under the cash reporting threshold.
+            alert = self._check_structuring(txn, matter_id, transactions)
+            if alert:
+                txn_alerts.append(alert)
+
+            # Round-number credit detection (tr_round_number_alert_amount).
+            alert = self._check_round_number(txn, matter_id)
+            if alert:
+                txn_alerts.append(alert)
+
             # Merge alerts for same transaction
             if txn_alerts:
                 merged_alert = self._merge_transaction_alerts(txn_alerts)
@@ -181,11 +217,21 @@ class TransactionMonitoringService:
         
         return None
     
+    def _is_cash_credit(self, txn: Transaction) -> bool:
+        """Cash indicator for a credit: the `channel` field when the
+        parser sets it, otherwise a narrative match (parsers generally
+        never populate `channel`, so channel-only detection fails open)."""
+        if txn.channel and 'cash' in txn.channel.lower():
+            return True
+        if txn.direction == 'in' and txn.narrative and _CASH_CREDIT_NARRATIVE.search(txn.narrative):
+            return True
+        return False
+
     def _check_cash_deposit(self, txn: Transaction, matter_id: int) -> TransactionAlert:
         """Rule 3: Check for large cash deposits"""
         threshold = self.config.get('cfg_cash_threshold_deposit', 7500.0)
-        
-        if txn.direction == 'in' and txn.channel and 'cash' in txn.channel.lower():
+
+        if txn.direction == 'in' and self._is_cash_credit(txn):
             if txn.base_amount >= threshold:
                 excess = txn.base_amount - threshold
                 
@@ -235,9 +281,8 @@ class TransactionMonitoringService:
         if len(same_direction) < 3:
             return None
         
-        same_direction.sort()
-        median = same_direction[len(same_direction) // 2]
-        
+        median = statistics.median(same_direction)
+
         if median == 0:
             return None
         
@@ -259,13 +304,15 @@ class TransactionMonitoringService:
         velocity_days = self.config.get('cfg_velocity_days', 7)
         velocity_count = self.config.get('cfg_velocity_count', 5)
         
-        # Count transactions in window
+        # Count transactions in a strict N-day window ending at this
+        # transaction. The lower bound is EXCLUSIVE — an inclusive
+        # bound on both ends would span N+1 days.
         window_start = txn.txn_date - timedelta(days=velocity_days)
         window_end = txn.txn_date
-        
+
         txns_in_window = [
-            t for t in all_txns 
-            if window_start <= t.txn_date <= window_end and t.direction == txn.direction
+            t for t in all_txns
+            if window_start < t.txn_date <= window_end and t.direction == txn.direction
         ]
         
         if len(txns_in_window) >= velocity_count:
@@ -306,39 +353,124 @@ class TransactionMonitoringService:
         
         return None
     
+    def _check_structuring(self, txn: Transaction, matter_id: int, all_txns: List[Transaction]) -> TransactionAlert:
+        """Structuring detection: three or more credits inside the
+        configured window, each sitting just below the cash reporting
+        threshold (within the configured band of it), together summing
+        above the threshold — the classic pattern of deposits split
+        deliberately to stay under the reporting line."""
+        window_days = self.config.get('tr_structuring_window_days', 3)
+        band_pct = self.config.get('tr_structuring_band_pct', 20.0)
+        threshold = self.config.get('cfg_cash_threshold_deposit', 7500.0)
+
+        if txn.direction != 'in' or not threshold or threshold <= 0:
+            return None
+
+        band_floor = threshold * (1.0 - float(band_pct) / 100.0)
+
+        def _is_candidate(t: Transaction) -> bool:
+            return (
+                t.direction == 'in'
+                and t.base_amount < threshold
+                and t.base_amount >= band_floor
+            )
+
+        if not _is_candidate(txn):
+            return None
+
+        window_start = txn.txn_date - timedelta(days=window_days)
+        candidates = [
+            t for t in all_txns
+            if window_start < t.txn_date <= txn.txn_date and _is_candidate(t)
+        ]
+
+        if len(candidates) >= 3:
+            total = sum(t.base_amount for t in candidates)
+            if total > threshold:
+                return TransactionAlert(
+                    matter_id=matter_id,
+                    txn_id=txn.id,
+                    customer_id=txn.customer_id,
+                    score=80,
+                    severity='HIGH',
+                    reasons=[
+                        f"Possible structuring: {len(candidates)} credits within {window_days} days, "
+                        f"each just below the £{threshold:,.2f} threshold (within {band_pct:.0f}%), "
+                        f"totalling £{total:,.2f}"
+                    ],
+                    rule_tags=['STRUCTURING_PATTERN']
+                )
+
+        return None
+
+    def _check_round_number(self, txn: Transaction, matter_id: int) -> TransactionAlert:
+        """Round-number credits at or above the configured amount
+        (exact multiples of £1,000) — a possible sign of staged or
+        structured payments."""
+        min_amount = self.config.get('tr_round_number_alert_amount', 5000.0)
+
+        if txn.direction != 'in' or not min_amount or min_amount <= 0:
+            return None
+
+        amount = txn.base_amount
+        if amount >= min_amount and amount > 0 and amount % 1000 == 0:
+            return TransactionAlert(
+                matter_id=matter_id,
+                txn_id=txn.id,
+                customer_id=txn.customer_id,
+                score=50,
+                severity='MEDIUM',
+                reasons=[f"Round-number credit of £{amount:,.2f} (multiple of £1,000) at or above £{min_amount:,.2f}"],
+                rule_tags=['ROUND_NUMBER']
+            )
+
+        return None
+
     def _merge_transaction_alerts(self, alerts: List[TransactionAlert]) -> TransactionAlert:
-        """Merge multiple alerts for the same transaction"""
+        """Merge multiple alerts for the same transaction.
+
+        Accumulation escalates: the merged score is the max plus 5 for
+        every additional triggered rule (capped at 100), and the
+        severity bumps one level when three or more rules fired."""
         if len(alerts) == 1:
             return alerts[0]
-        
+
         # Combine reasons and tags
         all_reasons = []
         all_tags = []
         max_score = 0
-        
+
         for alert in alerts:
             all_reasons.extend(alert.reasons)
             all_tags.extend(alert.rule_tags)
             max_score = max(max_score, alert.score)
-        
-        # Determine severity from max score
-        if max_score >= 90:
+
+        # Escalate on accumulation: max + 5 per extra rule, capped.
+        merged_score = min(100, max_score + 5 * (len(alerts) - 1))
+
+        # Determine severity from merged score
+        if merged_score >= 90:
             severity = 'CRITICAL'
-        elif max_score >= 70:
+        elif merged_score >= 70:
             severity = 'HIGH'
-        elif max_score >= 45:
+        elif merged_score >= 45:
             severity = 'MEDIUM'
-        elif max_score >= 25:
+        elif merged_score >= 25:
             severity = 'LOW'
         else:
             severity = 'INFO'
-        
+
+        # Three or more rules on one transaction bumps severity a level.
+        if len(alerts) >= 3:
+            idx = _SEVERITY_ORDER.index(severity)
+            severity = _SEVERITY_ORDER[min(idx + 1, len(_SEVERITY_ORDER) - 1)]
+
         # Create merged alert
         return TransactionAlert(
             matter_id=alerts[0].matter_id,
             txn_id=alerts[0].txn_id,
             customer_id=alerts[0].customer_id,
-            score=max_score,
+            score=merged_score,
             severity=severity,
             reasons=all_reasons,
             rule_tags=all_tags

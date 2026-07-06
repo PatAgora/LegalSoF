@@ -5,14 +5,13 @@ Provides:
 - GET /matters/{matter_id}/audit-trail      - chronological audit log entries for a matter
 - GET /matters/{matter_id}/status-history    - all status transitions for a matter
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List
 
 from app.db.session import get_sync_db
-from app.api.dependencies.auth import require_analyst
+from app.api.dependencies.auth import require_analyst, require_matter_access
 from app.models.user import User
-from app.models import Matter
 from app.models.audit import AuditLog
 from app.models.status_history import MatterStatusHistory
 
@@ -26,9 +25,7 @@ def get_audit_trail(
     db: Session = Depends(get_sync_db),
 ):
     """Return the full audit trail for a matter, oldest first."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     logs = (
         db.query(AuditLog)
@@ -62,9 +59,7 @@ def get_status_history(
     db: Session = Depends(get_sync_db),
 ):
     """Return all status transitions for a matter, oldest first."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     entries = (
         db.query(MatterStatusHistory)

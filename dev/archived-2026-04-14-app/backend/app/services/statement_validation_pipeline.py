@@ -204,13 +204,15 @@ class StatementValidationPipeline:
         -------
         ValidationResult with score, status, flags and optionally extracted txns.
         """
-        if config:
-            self.cfg = {**self.cfg, **config}
+        # Per-call config merge. Never assign onto self.cfg — this class is
+        # used as a module singleton and mutating it would leak one call's
+        # overrides into every subsequent validation.
+        cfg = {**self.cfg, **(config or {})}
 
         result = ValidationResult()
 
         # Stage 1 – File Integrity
-        self._stage_file_integrity(file_bytes, result)
+        self._stage_file_integrity(file_bytes, result, cfg)
 
         # Determine file content for downstream stages
         text_content = self._extract_text(file_bytes, result.mime_type)
@@ -222,13 +224,13 @@ class StatementValidationPipeline:
         self._stage_transaction_extraction(file_bytes, text_content, result)
 
         # Stage 4 – Math Checks
-        self._stage_math_checks(result, period_start, period_end)
+        self._stage_math_checks(result, period_start, period_end, cfg)
 
         # Stage 5 – Anomaly Checks
-        self._stage_anomaly_checks(result, period_start, period_end)
+        self._stage_anomaly_checks(result, period_start, period_end, cfg)
 
         # Stage 6 – Authenticity Scoring
-        self._stage_scoring(result)
+        self._stage_scoring(result, cfg)
 
         return result
 
@@ -236,7 +238,8 @@ class StatementValidationPipeline:
     # STAGE 1 – File Integrity
     # ------------------------------------------------------------------
 
-    def _stage_file_integrity(self, file_bytes: bytes, result: ValidationResult):
+    def _stage_file_integrity(self, file_bytes: bytes, result: ValidationResult, cfg: Optional[Dict[str, Any]] = None):
+        cfg = cfg or self.cfg
         flags: List[Flag] = []
         score = 100.0
 
@@ -250,10 +253,10 @@ class StatementValidationPipeline:
         result.mime_type = mime
 
         # Size check
-        max_bytes = self.cfg["max_file_size_mb"] * 1024 * 1024
+        max_bytes = cfg["max_file_size_mb"] * 1024 * 1024
         if len(file_bytes) > max_bytes:
             flags.append(Flag("file_integrity", "FILE_TOO_LARGE", "high",
-                              f"File size {len(file_bytes)} exceeds {self.cfg['max_file_size_mb']}MB limit"))
+                              f"File size {len(file_bytes)} exceeds {cfg['max_file_size_mb']}MB limit"))
             score -= 30
         if len(file_bytes) < 100:
             flags.append(Flag("file_integrity", "FILE_TOO_SMALL", "critical",
@@ -403,7 +406,8 @@ class StatementValidationPipeline:
     # STAGE 4 – Math Checks
     # ------------------------------------------------------------------
 
-    def _stage_math_checks(self, result: ValidationResult, period_start: Optional[str], period_end: Optional[str]):
+    def _stage_math_checks(self, result: ValidationResult, period_start: Optional[str], period_end: Optional[str], cfg: Optional[Dict[str, Any]] = None):
+        cfg = cfg or self.cfg
         flags: List[Flag] = []
         txns = result.extracted_transactions
         score = 100.0
@@ -420,25 +424,37 @@ class StatementValidationPipeline:
         checks_passed = 0
         checks_total = 0
 
-        # 4a. Running balance verification
+        # 4a. Running balance verification.
+        # Walk the FULL transaction list in order: balance-less rows between
+        # two balance-bearing rows contribute their signed amounts to the
+        # expected movement, so a statement that only shows balances on some
+        # rows (common in exports) still reconciles correctly.
         txns_with_balance = [t for t in txns if t.balance is not None]
         if len(txns_with_balance) >= 2:
             checks_total += 1
             balance_errors = 0
-            for i in range(1, len(txns_with_balance)):
-                prev = txns_with_balance[i - 1]
-                curr = txns_with_balance[i]
-                expected_balance = prev.balance
-                if curr.direction == "credit":
-                    expected_balance += curr.amount
-                else:
-                    expected_balance -= curr.amount
-
-                tolerance = abs(expected_balance) * self.cfg["max_balance_drift_pct"] + 0.02  # +2p for rounding
-                if abs(curr.balance - expected_balance) > tolerance:
+            transitions = 0
+            prev_balance: Optional[float] = None
+            pending_delta = 0.0
+            for t in txns:
+                delta = t.amount if t.direction == "credit" else -t.amount
+                if t.balance is None:
+                    if prev_balance is not None:
+                        pending_delta += delta
+                    continue
+                if prev_balance is None:
+                    prev_balance = t.balance
+                    pending_delta = 0.0
+                    continue
+                expected_balance = prev_balance + pending_delta + delta
+                transitions += 1
+                tolerance = abs(expected_balance) * cfg["max_balance_drift_pct"] + 0.02  # +2p for rounding
+                if abs(t.balance - expected_balance) > tolerance:
                     balance_errors += 1
+                prev_balance = t.balance
+                pending_delta = 0.0
 
-            error_rate = balance_errors / (len(txns_with_balance) - 1) if len(txns_with_balance) > 1 else 0
+            error_rate = balance_errors / transitions if transitions > 0 else 0
             if error_rate == 0:
                 checks_passed += 1
                 flags.append(Flag("math_check", "BALANCE_OK", "info",
@@ -447,17 +463,25 @@ class StatementValidationPipeline:
                 checks_passed += 1
                 score -= 5
                 flags.append(Flag("math_check", "BALANCE_MINOR_ERRORS", "low",
-                                  f"Running balance has minor discrepancies in {balance_errors} of {len(txns_with_balance)-1} transitions"))
+                                  f"Running balance has minor discrepancies in {balance_errors} of {transitions} transitions"))
             else:
                 score -= 30
                 flags.append(Flag("math_check", "BALANCE_ERRORS", "high",
-                                  f"Running balance failed: {balance_errors} errors in {len(txns_with_balance)-1} transitions ({error_rate:.0%})"))
+                                  f"Running balance failed: {balance_errors} errors in {transitions} transitions ({error_rate:.0%})"))
 
-        # 4b. Sum cross-check (total credits vs total debits vs balance change)
+        # 4b. Sum cross-check (total credits vs total debits vs balance change).
+        # Totals are computed over the SAME rows the balance movement spans:
+        # from the first balance-bearing row to the last, including any
+        # balance-less rows in between (their amounts move the balance too).
         if txns_with_balance and len(txns_with_balance) >= 2:
             checks_total += 1
-            total_credits = sum(t.amount for t in txns if t.direction == "credit")
-            total_debits = sum(t.amount for t in txns if t.direction == "debit")
+            first_bal_idx = next(i for i, t in enumerate(txns) if t.balance is not None)
+            last_bal_idx = len(txns) - 1 - next(
+                i for i, t in enumerate(reversed(txns)) if t.balance is not None
+            )
+            span = txns[first_bal_idx:last_bal_idx + 1]
+            total_credits = sum(t.amount for t in span if t.direction == "credit")
+            total_debits = sum(t.amount for t in span if t.direction == "debit")
             actual_change = txns_with_balance[-1].balance - txns_with_balance[0].balance
             # Account for the first txn itself
             if txns_with_balance[0].direction == "credit":
@@ -478,10 +502,15 @@ class StatementValidationPipeline:
                                   {"total_credits": total_credits, "total_debits": total_debits,
                                    "expected_net": expected_change, "actual_net": actual_change}))
 
-        # 4c. Date continuity check
-        checks_total += 1
+        # 4c. Date continuity check.
+        # A date gap is an observation, not an arithmetic failure — moderate
+        # gaps (36-90 days) keep their low-severity flag but still count as
+        # a PASSED check so they cannot fail the binary CSV verdict. Only a
+        # very large (>90 day) gap fails the check. When no dates parse at
+        # all, the check is excluded from checks_total entirely.
         dates = self._parse_txn_dates(txns)
         if dates and len(dates) >= 2:
+            checks_total += 1
             sorted_dates = sorted(dates)
             max_gap_days = max(
                 (sorted_dates[i + 1] - sorted_dates[i]).days
@@ -492,6 +521,7 @@ class StatementValidationPipeline:
                 flags.append(Flag("math_check", "DATE_CONTINUITY_OK", "info",
                                   f"Transaction dates are continuous (max gap: {max_gap_days} days)"))
             elif max_gap_days <= 90:
+                checks_passed += 1
                 score -= 5
                 flags.append(Flag("math_check", "DATE_GAP_MODERATE", "low",
                                   f"Gap of {max_gap_days} days found between transactions"))
@@ -499,8 +529,10 @@ class StatementValidationPipeline:
                 score -= 15
                 flags.append(Flag("math_check", "DATE_GAP_LARGE", "medium",
                                   f"Large gap of {max_gap_days} days found between transactions"))
-        elif dates:
-            checks_passed += 1  # only 1 date, can't check gap
+        elif not dates:
+            flags.append(Flag("math_check", "DATES_UNPARSEABLE", "info",
+                              "Transaction dates could not be parsed — date continuity check skipped"))
+        # A single parseable date: nothing to gap-check; excluded from checks_total.
 
         result.math_check_score = max(score, 0.0)
         result.math_check_result = {
@@ -514,7 +546,8 @@ class StatementValidationPipeline:
     # STAGE 5 – Anomaly Checks
     # ------------------------------------------------------------------
 
-    def _stage_anomaly_checks(self, result: ValidationResult, period_start: Optional[str], period_end: Optional[str]):
+    def _stage_anomaly_checks(self, result: ValidationResult, period_start: Optional[str], period_end: Optional[str], cfg: Optional[Dict[str, Any]] = None):
+        cfg = cfg or self.cfg
         flags: List[Flag] = []
         txns = result.extracted_transactions
         score = 100.0
@@ -537,7 +570,7 @@ class StatementValidationPipeline:
         duplicates = sum(c - 1 for c in sig_counts.values() if c > 1)
         dup_pct = duplicates / len(txns) if txns else 0
 
-        if dup_pct > self.cfg["max_duplicate_pct"]:
+        if dup_pct > cfg["max_duplicate_pct"]:
             flags.append(Flag("anomaly_check", "HIGH_DUPLICATE_RATE", "high",
                               f"{duplicates} duplicate rows ({dup_pct:.0%}) — potential fabrication indicator",
                               {"duplicate_count": duplicates, "total_rows": len(txns)}))
@@ -552,7 +585,7 @@ class StatementValidationPipeline:
         round_count = sum(1 for a in amounts if a == round(a, 0) and a >= 10)
         round_pct = round_count / len(amounts) if amounts else 0
 
-        if round_pct > self.cfg["max_round_number_pct"]:
+        if round_pct > cfg["max_round_number_pct"]:
             flags.append(Flag("anomaly_check", "ROUND_NUMBER_BIAS", "medium",
                               f"{round_pct:.0%} of transactions are round numbers — unusual for genuine statements",
                               {"round_count": round_count, "total": len(amounts)}))
@@ -624,8 +657,8 @@ class StatementValidationPipeline:
     # STAGE 6 – Scoring & Classification
     # ------------------------------------------------------------------
 
-    def _stage_scoring(self, result: ValidationResult):
-        w = self.cfg
+    def _stage_scoring(self, result: ValidationResult, cfg: Optional[Dict[str, Any]] = None):
+        w = cfg or self.cfg
         weighted_score = (
             result.file_integrity_score * w["weight_file_integrity"] +
             result.template_match_score * w["weight_template_match"] +
@@ -642,7 +675,9 @@ class StatementValidationPipeline:
 
         if critical_flags or result.authenticity_score < w["review_threshold"]:
             result.status = "HighRisk"
-        elif high_flags or result.authenticity_score < w["trusted_threshold"]:
+        elif len(high_flags) >= 2 or result.authenticity_score < w["trusted_threshold"]:
+            # >=2 high flags (spec rule) — a single high flag alone does
+            # not force Review status.
             result.status = "Review"
         else:
             result.status = "Trusted"
@@ -901,7 +936,10 @@ class StatementValidationPipeline:
     def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
             return None
-        for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d %b %Y", "%d %B %Y",
+        # ISO timestamps first — Monzo/Starling exports use
+        # "YYYY-MM-DD HH:MM:SS" / "YYYY-MM-DDTHH:MM:SS".
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
+                    "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d %b %Y", "%d %B %Y",
                     "%d.%m.%Y", "%d/%m/%y", "%d-%m-%y"]:
             try:
                 return datetime.strptime(date_str.strip(), fmt)

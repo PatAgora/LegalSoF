@@ -11,12 +11,13 @@ import csv
 import io
 import re
 import hashlib
-import uuid
 from datetime import datetime
 from decimal import Decimal
 import pdfplumber
 import fitz  # PyMuPDF
 from fastapi import UploadFile
+
+from app.services.amount_parser import parse_amount, parse_date, detect_currency
 
 
 class FileProcessor:
@@ -25,7 +26,7 @@ class FileProcessor:
     Supports: JSON (client info), CSV (bank statements), PDF (statements + docs),
               Images/Screenshots (PNG, JPG, etc.)
     """
-    
+
     def __init__(self):
         self.supported_types = {
             'json': ['application/json', 'text/json'],
@@ -36,14 +37,55 @@ class FileProcessor:
                       'application/vnd.ms-excel']
         }
 
-    def _generate_transaction_id(self, account_id: str = "", date: str = "", amount: float = 0, file_hash: str = None) -> str:
+    def _generate_transaction_id(self, account_id: str = "", date: str = "", amount: float = 0,
+                                 description: str = "", balance: Optional[float] = None,
+                                 occurrence_index: int = 0) -> str:
         """
-        Generate a unique, stateless transaction ID using UUID.
-        Format: TXN-{uuid_hex_short}
+        Generate a CONTENT-DERIVED transaction ID (A14).
 
-        Thread-safe: no mutable instance state is used.
+        sha256 over (account_id, date, amount, normalised description,
+        balance, occurrence_index), truncated. Re-uploading the same
+        statement therefore yields the SAME IDs (stable, idempotent), while
+        legitimate identical rows on the same statement get distinct IDs via
+        occurrence_index (their position among identical tuples).
+
+        Format: TXN-{sha256_hex[:16].upper()}
         """
-        return f"TXN-{uuid.uuid4().hex[:12].upper()}"
+        norm_desc = ' '.join(str(description or '').split()).lower()[:100]
+        try:
+            amount_part = f"{float(amount):.2f}"
+        except (TypeError, ValueError):
+            amount_part = str(amount)
+        balance_part = '' if balance is None else f"{float(balance):.2f}"
+        payload = f"{account_id}|{date}|{amount_part}|{norm_desc}|{balance_part}|{occurrence_index}"
+        digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+        return f"TXN-{digest[:16].upper()}"
+
+    def _assign_transaction_ids(self, transactions: List[Dict], account_fallback: str = 'Unknown') -> None:
+        """Assign stable content-derived IDs to transactions lacking one.
+
+        occurrence_index counts identical (account, date, amount, desc,
+        balance) tuples so genuine same-day duplicates still get distinct,
+        stable IDs.
+        """
+        occurrence_counter: Dict[tuple, int] = {}
+        for txn in transactions:
+            if txn.get('id'):
+                continue
+            account_id = txn.get('account_id') or account_fallback
+            date_val = txn.get('date', '')
+            amount_val = txn.get('amount', 0)
+            desc_val = txn.get('description', '')
+            balance_val = txn.get('balance')
+            key = (account_id, date_val, amount_val,
+                   ' '.join(str(desc_val or '').split()).lower()[:100],
+                   balance_val)
+            idx = occurrence_counter.get(key, 0)
+            occurrence_counter[key] = idx + 1
+            txn['id'] = self._generate_transaction_id(
+                account_id, date_val, amount_val, desc_val, balance_val, idx
+            )
+            txn['transaction_id'] = txn['id']
     
     def _get_file_hash(self, content: bytes) -> str:
         """Generate a short hash of file content for ID generation"""
@@ -62,7 +104,18 @@ class FileProcessor:
             # Try as bank statement first, fall back to document
             result = self.process_pdf_bank_statement(content)
             if not result['success']:
+                statement_error = result.get('error', 'unknown parsing error')
                 result = self.process_pdf_document(content)
+                # A16: don't silently retry as a supporting document — record
+                # a warning that flows back so the UI/report can surface it.
+                if result.get('success'):
+                    warning = ("Bank statement could not be parsed as transactions; "
+                               f"treated as supporting document (reason: {statement_error})")
+                    result.setdefault('metadata', {})
+                    result['metadata'].setdefault('parse_warnings', []).append(warning)
+                    if isinstance(result.get('data'), dict):
+                        result['data'].setdefault('parse_warnings', []).append(warning)
+                    print(f"⚠️ {warning}")
             return result
         elif file_type == 'pdf_document':
             print(f"📄 Processing as supporting document: {filename}")
@@ -128,6 +181,14 @@ class FileProcessor:
                     ),
                 }
 
+            # ---- Content validation (A18) ----
+            # An empty content_type must NOT bypass validation: check the
+            # extension AND the magic bytes, and reject when the claimed
+            # type contradicts what the bytes actually are.
+            valid, validation_error = self._validate_content_signature(content, filename, content_type)
+            if not valid:
+                return {"success": False, "error": validation_error}
+
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(
                 None,  # default ThreadPoolExecutor
@@ -146,6 +207,79 @@ class FileProcessor:
                 "error": f"File processing error: {str(e)}"
             }
     
+    # ------------------------------------------------------------------
+    # Content signature validation (A18)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _detect_magic_category(content: bytes) -> Optional[str]:
+        """Classify content by magic bytes: pdf / zip / ole / image / text / None."""
+        if not content:
+            return None
+        if content[:4] == b'%PDF':
+            return 'pdf'
+        if content[:4] == b'PK\x03\x04':
+            return 'zip'  # XLSX / ODS / DOCX containers
+        if content[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+            return 'ole'  # legacy .xls / .doc
+        if (content[:8] == b'\x89PNG\r\n\x1a\n' or content[:2] == b'\xff\xd8'
+                or content[:4] == b'GIF8' or content[:2] == b'BM'
+                or content[:4] in (b'II*\x00', b'MM\x00*')
+                or (content[:4] == b'RIFF' and content[8:12] == b'WEBP')):
+            return 'image'
+        # Text detection on the first 1KB: try utf-8, then latin-1 with a
+        # printable-character sanity check (latin-1 decodes any bytes).
+        head = content[:1024]
+        for encoding in ('utf-8', 'latin-1'):
+            try:
+                decoded = head.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            printable = sum(1 for ch in decoded if ch.isprintable() or ch in '\r\n\t')
+            if decoded and printable / len(decoded) >= 0.9:
+                return 'text'
+            break
+        return None
+
+    def _validate_content_signature(self, content: bytes, filename: str, content_type: str) -> Tuple[bool, str]:
+        """Validate that the claimed file type (extension / MIME) matches the
+        actual magic bytes. Rejects contradictions (A18)."""
+        magic = self._detect_magic_category(content)
+
+        # What does the caller claim this file is?
+        ext = (filename.rsplit('.', 1)[-1].lower() if '.' in (filename or '') else '')
+        claimed = None
+        if ext == 'pdf' or 'pdf' in (content_type or ''):
+            claimed = 'pdf'
+        elif ext in ('xlsx', 'ods') or 'spreadsheetml' in (content_type or ''):
+            claimed = 'zip'
+        elif ext == 'xls' or (content_type or '') == 'application/vnd.ms-excel':
+            claimed = 'ole_or_zip'
+        elif ext in ('png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff') or 'image' in (content_type or ''):
+            claimed = 'image'
+        elif ext in ('csv', 'txt', 'json', 'tsv') or any(
+                t in (content_type or '') for t in ('csv', 'json', 'text')):
+            claimed = 'text'
+
+        if claimed is None or magic is None:
+            # Nothing verifiable to contradict — allow (parser will re-detect).
+            return True, ''
+
+        allowed = {
+            'pdf': {'pdf'},
+            'zip': {'zip'},
+            'ole_or_zip': {'ole', 'zip'},
+            'image': {'image'},
+            'text': {'text'},
+        }[claimed]
+
+        if magic not in allowed:
+            return False, (
+                f"File content does not match its declared type: claimed "
+                f"'{ext or content_type or 'unknown'}' but the file signature "
+                f"is '{magic}'. Upload rejected."
+            )
+        return True, ''
+
     def process_auto(self, content: bytes, filename: str, content_type: str) -> Dict[str, Any]:
         """
         Auto-detect file type and process accordingly using enhanced parser.
@@ -153,26 +287,14 @@ class FileProcessor:
         """
         try:
             from app.services.enhanced_universal_parser import enhanced_universal_parser
-            
-            # Generate file hash for unique transaction IDs
-            file_hash = self._get_file_hash(content)
-            # file_hash used for dedup, no mutable counter state needed
-            
+
             print(f"\n🔄 Auto-detecting file type for: {filename}")
             result = enhanced_universal_parser.parse(content, filename=filename, content_type=content_type)
-            
+
             if result['success'] and result['transactions']:
-                # Add transaction IDs
-                for txn in result['transactions']:
-                    if not txn.get('id'):
-                        txn['id'] = self._generate_transaction_id(
-                            txn.get('account_id', 'Unknown'),
-                            txn.get('date', ''),
-                            txn.get('amount', 0),
-                            file_hash
-                        )
-                        txn['transaction_id'] = txn['id']
-                
+                # Add stable, content-derived transaction IDs (A14)
+                self._assign_transaction_ids(result['transactions'], 'Unknown')
+
                 print(f"✅ Auto-detection succeeded: {len(result['transactions'])} transactions with unique IDs")
                 return {
                     "success": True,
@@ -202,26 +324,14 @@ class FileProcessor:
         """
         try:
             from app.services.enhanced_universal_parser import enhanced_universal_parser
-            
-            # Generate file hash for unique transaction IDs
-            file_hash = self._get_file_hash(content)
-            # file_hash used for dedup, no mutable counter state needed
-            
+
             print(f"\n🖼️ Processing image: {filename}")
             result = enhanced_universal_parser.parse(content, filename=filename, content_type='image/png')
-            
+
             if result['success'] and result['transactions']:
-                # Add transaction IDs
-                for txn in result['transactions']:
-                    if not txn.get('id'):
-                        txn['id'] = self._generate_transaction_id(
-                            txn.get('account_id', 'Image_Statement'),
-                            txn.get('date', ''),
-                            txn.get('amount', 0),
-                            file_hash
-                        )
-                        txn['transaction_id'] = txn['id']
-                
+                # Add stable, content-derived transaction IDs (A14)
+                self._assign_transaction_ids(result['transactions'], 'Image_Statement')
+
                 print(f"✅ Image OCR extracted {len(result['transactions'])} transactions with unique IDs")
                 print(f"   Preprocessing variants tried: {result['metadata'].get('preprocessing_variants_tried', 0)}")
                 return {
@@ -251,26 +361,14 @@ class FileProcessor:
         """
         try:
             from app.services.enhanced_universal_parser import enhanced_universal_parser
-            
-            # Generate file hash for unique transaction IDs
-            file_hash = self._get_file_hash(content)
-            # file_hash used for dedup, no mutable counter state needed
-            
+
             print("\n📊 Processing Excel file")
             result = enhanced_universal_parser.parse(content, filename='statement.xlsx', content_type='application/vnd.ms-excel')
-            
+
             if result['success'] and result['transactions']:
-                # Add transaction IDs
-                for txn in result['transactions']:
-                    if not txn.get('id'):
-                        txn['id'] = self._generate_transaction_id(
-                            txn.get('account_id', 'Excel_Statement'),
-                            txn.get('date', ''),
-                            txn.get('amount', 0),
-                            file_hash
-                        )
-                        txn['transaction_id'] = txn['id']
-                
+                # Add stable, content-derived transaction IDs (A14)
+                self._assign_transaction_ids(result['transactions'], 'Excel_Statement')
+
                 print(f"✅ Excel parser extracted {len(result['transactions'])} transactions with unique IDs")
                 return {
                     "success": True,
@@ -375,12 +473,9 @@ class FileProcessor:
         Falls back to enhanced universal parser for non-standard formats.
         """
         try:
-            # Generate file hash for unique transaction IDs
-            file_hash = self._get_file_hash(content)
-            
             # First try legacy parsing which respects column names directly
             print("\n📋 Processing CSV - trying direct column parsing first...")
-            legacy_result = self._legacy_csv_parse(content, file_hash)
+            legacy_result = self._legacy_csv_parse(content)
             
             if legacy_result['success']:
                 txn_count = len(legacy_result.get('data', {}).get('bank_statements', []))
@@ -398,18 +493,11 @@ class FileProcessor:
             from app.services.enhanced_universal_parser import enhanced_universal_parser
             
             result = enhanced_universal_parser.parse(content, filename='statement.csv', content_type='text/csv')
-            
+
             if result['success'] and result['transactions']:
-                # Add transaction IDs to enhanced parser results
-                for txn in result['transactions']:
-                    if not txn.get('id'):
-                        txn['id'] = self._generate_transaction_id(
-                            txn.get('account_id', 'Unknown'),
-                            txn.get('date', ''),
-                            txn.get('amount', 0),
-                            file_hash
-                        )
-                
+                # Add stable, content-derived transaction IDs (A14)
+                self._assign_transaction_ids(result['transactions'], 'Unknown')
+
                 print(f"✅ Enhanced CSV parser extracted {len(result['transactions'])} transactions")
                 print(f"   Columns detected: {result['metadata'].get('columns_detected', {})}")
                 return {
@@ -435,25 +523,18 @@ class FileProcessor:
                 "error": f"CSV processing error: {str(e)}"
             }
     
-    def _legacy_csv_parse(self, content: bytes, file_hash: str = None) -> Dict[str, Any]:
+    def _legacy_csv_parse(self, content: bytes) -> Dict[str, Any]:
         """
         Legacy CSV parsing for backwards compatibility.
         Expected columns: account_id, date, amount, currency, direction, description
         Optional: counterparty_name, balance
-        
-        Now generates unique transaction IDs for each row.
+
+        Transaction IDs are content-derived (A14): stable across re-uploads.
         """
         try:
             decoded = content.decode('utf-8')
             reader = csv.DictReader(io.StringIO(decoded))
-            
-            # Generate file hash if not provided
-            if not file_hash:
-                file_hash = self._get_file_hash(content)
-            
-            # Reset counter for this file
-            # file_hash used for dedup, no mutable counter state needed
-            
+
             # Check required columns
             required_cols = ['date', 'amount', 'direction', 'description']
             if not reader.fieldnames:
@@ -475,26 +556,43 @@ class FileProcessor:
             
             # Parse transactions
             transactions = []
+            rejected_rows = 0
+            rejected_samples: List[str] = []
+
+            def _reject(row_num, row, reason):
+                nonlocal rejected_rows
+                rejected_rows += 1
+                if len(rejected_samples) < 5:
+                    rejected_samples.append(f"row {row_num} ({reason}): " +
+                                            ' | '.join(str(v) for v in row.values())[:200])
+                print(f"⚠️ Legacy CSV parser: Skipped row {row_num}: {reason}")
+
             for row_num, row in enumerate(reader, start=2):
                 try:
-                    # Parse amount
-                    amount_str = row['amount'].replace('£', '').replace(',', '').replace('$', '').strip()
-                    amount = float(amount_str)
-                    
-                    # Parse date (try multiple formats)
+                    # Parse amount via the shared helper (handles £/,/CR/DR/parens)
+                    amount_raw = row['amount']
+                    amount = parse_amount(amount_raw)
+                    if amount is None:
+                        _reject(row_num, row, f"unparseable amount '{amount_raw}'")
+                        continue
+
+                    # Parse date (A6: None on failure — skip AND count the row)
                     date_str = row['date'].strip()
                     parsed_date = self._parse_date(date_str)
-                    
+                    if not parsed_date:
+                        _reject(row_num, row, f"unparseable date '{date_str}'")
+                        continue
+
                     # Direction (credit/debit) - READ DIRECTLY FROM COLUMN
                     direction = row['direction'].lower().strip()
                     if direction not in ['credit', 'debit']:
-                        # Try to infer from amount
+                        # Try to infer from amount sign
                         if amount > 0:
                             direction = 'credit'
                         else:
                             direction = 'debit'
-                            amount = abs(amount)
-                    
+                    amount = abs(amount)
+
                     # Get account_id - READ DIRECTLY FROM COLUMN
                     account_id = row.get('account_id', 'Unknown')
                     
@@ -520,32 +618,35 @@ class FileProcessor:
                             channel = row[col_name].strip()
                             break
                     
-                    # Generate unique transaction ID
-                    txn_id = self._generate_transaction_id(account_id, parsed_date, amount, file_hash)
-                    
+                    # A4: balance parsed via shared helper (strips £ etc.
+                    # instead of raising ValueError and killing the row)
+                    balance = parse_amount(row['balance']) if row.get('balance') else None
+
                     transactions.append({
-                        "id": txn_id,
-                        "transaction_id": txn_id,  # Duplicate for compatibility
                         "account_id": account_id,
                         "date": parsed_date,
                         "amount": amount,
-                        "currency": row.get('currency', 'GBP'),
+                        # A17: fall back to the symbol in the amount cell
+                        "currency": row.get('currency') or detect_currency(amount_raw, 'GBP'),
                         "direction": direction,
                         "description": row['description'].strip(),
                         "counterparty_name": row.get('counterparty_name', ''),
-                        "balance": float(row['balance'].replace(',', '')) if row.get('balance') else None,
+                        "balance": float(balance) if balance is not None else None,
                         "country_iso2": country_iso2,
                         "channel": channel
                     })
-                    
+
                     # Log first few transactions for debugging
                     if row_num <= 4:
-                        print(f"   Row {row_num}: {txn_id} | {parsed_date} | {direction} | £{amount} | {account_id[:30]}... | Country: {country_iso2 or 'N/A'}")
-                
+                        print(f"   Row {row_num}: {parsed_date} | {direction} | £{amount} | {account_id[:30]}... | Country: {country_iso2 or 'N/A'}")
+
                 except Exception as e:
-                    # Skip malformed rows but log warning
-                    print(f"⚠️ Legacy CSV parser: Skipped row {row_num} due to error: {str(e)}")
+                    # Skip malformed rows, but COUNT them (silent-row-loss fix)
+                    _reject(row_num, row, str(e))
                     continue
+
+            # Assign stable, content-derived transaction IDs (A14)
+            self._assign_transaction_ids(transactions, 'Unknown')
             
             if not transactions:
                 print("❌ Legacy CSV parser: No valid transactions found in CSV")
@@ -555,23 +656,30 @@ class FileProcessor:
                 }
             
             print(f"✅ Legacy CSV parser: Successfully parsed {len(transactions)} transactions with unique IDs")
-            
+            if rejected_rows:
+                print(f"   ⚠️ Parsed {len(transactions)} of {len(transactions) + rejected_rows} rows "
+                      f"({rejected_rows} rejected)")
+
             # Log unique account IDs found
             unique_accounts = set(t['account_id'] for t in transactions)
             print(f"   Unique accounts found: {unique_accounts}")
-            
+
             # Log direction breakdown
             credits = sum(1 for t in transactions if t['direction'] == 'credit')
             debits = sum(1 for t in transactions if t['direction'] == 'debit')
             print(f"   Direction breakdown: {credits} credits, {debits} debits")
-            
+
             return {
                 "success": True,
                 "data": {
                     "bank_statements": transactions,
                     "transaction_count": len(transactions)
                 },
-                "file_type": "csv"
+                "file_type": "csv",
+                "metadata": {
+                    "rejected_row_count": rejected_rows,
+                    "rejected_row_samples": rejected_samples,
+                }
             }
         
         except Exception as e:
@@ -591,35 +699,24 @@ class FileProcessor:
         - Encrypted PDFs (with detection)
         - AI fallback for really difficult documents
         
-        Now generates unique transaction IDs for each transaction.
+        Transaction IDs are content-derived (A14): stable across re-uploads.
         """
-        # Generate file hash for unique transaction IDs
-        file_hash = self._get_file_hash(content)
-
         # Use the enhanced universal parser
         try:
             from app.services.enhanced_universal_parser import enhanced_universal_parser
-            
+
             print("\n🌐 Using Enhanced Universal Financial Parser")
             result = enhanced_universal_parser.parse(content, filename='statement.pdf', content_type='application/pdf')
-            
+
             if result['success'] and result['transactions']:
                 # Debug: Show account info from first transaction
                 first_txn = result['transactions'][0]
                 print(f"   🏦 Account detected: {first_txn.get('account_id', 'N/A')} ({first_txn.get('account_type', 'N/A')}) at {first_txn.get('bank_name', 'N/A')}")
                 print(f"   📋 Account info in metadata: {result['metadata'].get('account_info', {})}")
-                
-                # Add transaction IDs to each transaction
-                for txn in result['transactions']:
-                    if not txn.get('id'):
-                        txn['id'] = self._generate_transaction_id(
-                            txn.get('account_id', 'PDF_Statement'),
-                            txn.get('date', ''),
-                            txn.get('amount', 0),
-                            file_hash
-                        )
-                        txn['transaction_id'] = txn['id']  # Duplicate for compatibility
-                
+
+                # Add stable, content-derived transaction IDs (A14)
+                self._assign_transaction_ids(result['transactions'], 'PDF_Statement')
+
                 print(f"✅ Enhanced parser extracted {len(result['transactions'])} transactions with unique IDs")
                 print(f"   Extraction method: {result['metadata'].get('extraction_method', 'Unknown')}")
                 print(f"   Strategies tried: {result['metadata'].get('strategies_tried', [])}")
@@ -658,8 +755,15 @@ class FileProcessor:
                 "pages_processed": 0,
                 "tables_found": 0,
                 "text_lines_checked": 0,
-                "transactions_extracted": 0
+                "transactions_extracted": 0,
+                "rejected_row_count": 0,
+                "rejected_row_samples": [],
             }
+
+            def _reject_pdf_row(raw, reason):
+                debug_info["rejected_row_count"] += 1
+                if len(debug_info["rejected_row_samples"]) < 5:
+                    debug_info["rejected_row_samples"].append(f"({reason}) {str(raw)[:200]}")
             
             with pdfplumber.open(io.BytesIO(content)) as pdf:
                 for page_num, page in enumerate(pdf.pages, 1):
@@ -702,11 +806,9 @@ class FileProcessor:
                                 if desc_idx is not None and desc_idx < len(row):
                                     description = str(row[desc_idx]).strip()
                                 if balance_idx is not None and balance_idx < len(row):
-                                    balance_str = str(row[balance_idx]).replace('£', '').replace(',', '').strip()
-                                    try:
-                                        balance = float(balance_str)
-                                    except:
-                                        pass
+                                    # A4: shared parser strips £ etc. instead of
+                                    # raising ValueError and killing the row
+                                    balance = parse_amount(str(row[balance_idx]))
                                 
                                 # FALLBACK: Scan all cells for date and amount patterns
                                 if not date_str or not amount_str:
@@ -730,44 +832,48 @@ class FileProcessor:
                                 if date_str.lower() in ['none', 'null', ''] or amount_str.lower() in ['none', 'null', '']:
                                     continue
                                 
-                                # Parse date
+                                # Parse date (A6: shared parser, ISO output, None on failure)
                                 parsed_date = self._parse_date(date_str)
                                 if not parsed_date:
+                                    _reject_pdf_row(row, f"unparseable date '{date_str}'")
                                     continue
-                                
-                                # Parse amount
-                                clean_amount = amount_str.replace('£', '').replace('$', '').replace('€', '').replace(',', '').strip()
-                                
-                                # Handle negative/debit indicators
-                                direction = 'credit'
-                                if '-' in clean_amount or '(' in clean_amount or 'DR' in amount_str.upper():
+
+                                # Parse amount via the shared helper (A9: sign
+                                # comes from the amount cell itself; DR/CR only
+                                # as whole suffix tokens, so 'DR SMITH' in the
+                                # description can no longer flip a row)
+                                amount_val = parse_amount(amount_str)
+                                if amount_val is None:
+                                    _reject_pdf_row(row, f"unparseable amount '{amount_str}'")
+                                    continue
+
+                                if amount_val < 0 or '(' in amount_str:
                                     direction = 'debit'
-                                    clean_amount = clean_amount.replace('-', '').replace('(', '').replace(')', '').strip()
-                                
-                                try:
-                                    amount = abs(float(clean_amount))
-                                except:
-                                    continue
-                                
-                                # Generate unique transaction ID
-                                txn_id = self._generate_transaction_id("PDF_Statement", parsed_date, amount, file_hash)
-                                
+                                elif re.search(r'\bCR\b', amount_str, re.IGNORECASE):
+                                    direction = 'credit'
+                                elif re.search(r'\bDR\b', amount_str, re.IGNORECASE):
+                                    direction = 'debit'
+                                else:
+                                    # A10: no evidence — needs review, never
+                                    # a fabricated credit
+                                    direction = 'unknown'
+                                amount = abs(amount_val)
+
                                 transactions.append({
-                                    "id": txn_id,
-                                    "transaction_id": txn_id,
                                     "account_id": "PDF_Statement",
                                     "date": parsed_date,
                                     "amount": amount,
-                                    "currency": "GBP",
+                                    "currency": detect_currency(amount_str, 'GBP'),  # A17
                                     "direction": direction,
                                     "description": description[:500] if description else "N/A",
                                     "counterparty_name": "",
                                     "balance": balance
                                 })
                                 debug_info["transactions_extracted"] += 1
-                            
+
                             except Exception as e:
-                                # Skip malformed rows silently
+                                # Skip malformed rows, but COUNT them
+                                _reject_pdf_row(row, str(e))
                                 continue
                     
                     # METHOD 2: If no tables or few transactions, try text extraction
@@ -790,47 +896,67 @@ class FileProcessor:
                                     try:
                                         date_str = date_match.group()
                                         amount_str = amount_match.group()
-                                        
+
                                         # Extract description (text between date and amount)
                                         desc_start = date_match.end()
                                         desc_end = amount_match.start()
                                         description = line[desc_start:desc_end].strip()
-                                        
+
                                         parsed_date = self._parse_date(date_str)
                                         if not parsed_date:
+                                            _reject_pdf_row(line, f"unparseable date '{date_str}'")
                                             continue
-                                        
-                                        clean_amount = amount_str.replace('£', '').replace('$', '').replace('€', '').replace(',', '').strip()
-                                        direction = 'debit' if '-' in line[:amount_match.start()] or 'DR' in line else 'credit'
-                                        clean_amount = clean_amount.replace('-', '').replace('(', '').replace(')', '')
-                                        
-                                        amount = abs(float(clean_amount))
-                                        
-                                        # Check if this transaction already exists (avoid duplicates)
+
+                                        amount_val = parse_amount(amount_str)
+                                        if amount_val is None:
+                                            _reject_pdf_row(line, f"unparseable amount '{amount_str}'")
+                                            continue
+                                        amount = abs(amount_val)
+
+                                        # A9: a minus only counts when IMMEDIATELY
+                                        # adjacent to the amount (hyphenated dates/
+                                        # descriptions used to make everything a
+                                        # debit); DR/CR only as whole tokens NEAR
+                                        # the amount (so 'DR SMITH' elsewhere in
+                                        # the line no longer flips direction).
+                                        near_amount = line[max(0, amount_match.start() - 12):
+                                                           min(len(line), amount_match.end() + 12)]
+                                        char_before = line[amount_match.start() - 1] if amount_match.start() > 0 else ''
+                                        if amount_val < 0 or char_before == '-' or amount_str.startswith('-'):
+                                            direction = 'debit'
+                                        elif re.search(r'\bDR\b', near_amount):
+                                            direction = 'debit'
+                                        elif re.search(r'\bCR\b', near_amount):
+                                            direction = 'credit'
+                                        else:
+                                            # A10: no evidence — needs review
+                                            direction = 'unknown'
+
+                                        # A13: dedup must also compare description
+                                        # (and balance) so legitimate same-day,
+                                        # same-amount transactions survive.
                                         duplicate = any(
-                                            t['date'] == parsed_date and abs(t['amount'] - amount) < 0.01 
+                                            t['date'] == parsed_date
+                                            and abs(t['amount'] - amount) < 0.01
+                                            and (t.get('description') or '')[:50] == (description or '')[:50]
                                             for t in transactions
                                         )
-                                        
+
                                         if not duplicate:
-                                            # Generate unique transaction ID
-                                            txn_id = self._generate_transaction_id("PDF_Statement", parsed_date, amount, file_hash)
-                                            
                                             transactions.append({
-                                                "id": txn_id,
-                                                "transaction_id": txn_id,
                                                 "account_id": "PDF_Statement",
                                                 "date": parsed_date,
                                                 "amount": amount,
-                                                "currency": "GBP",
+                                                "currency": detect_currency(amount_str, 'GBP'),  # A17
                                                 "direction": direction,
                                                 "description": description[:500] if description else "Transaction",
                                                 "counterparty_name": "",
                                                 "balance": None
                                             })
                                             debug_info["transactions_extracted"] += 1
-                                    
-                                    except Exception:
+
+                                    except Exception as e:
+                                        _reject_pdf_row(line, str(e))
                                         continue
             
             if not transactions:
@@ -838,16 +964,29 @@ class FileProcessor:
                     "success": False,
                     "error": f"No transaction data could be extracted from PDF. Debug: {debug_info}"
                 }
-            
+
+            # Assign stable, content-derived transaction IDs (A14)
+            self._assign_transaction_ids(transactions, 'PDF_Statement')
+
             print(f"✅ Legacy PDF parser: Extracted {len(transactions)} transactions with unique IDs")
-            
+            if debug_info["rejected_row_count"]:
+                total = len(transactions) + debug_info["rejected_row_count"]
+                print(f"   ⚠️ Parsed {len(transactions)} of {total} candidate rows "
+                      f"({debug_info['rejected_row_count']} rejected)")
+
             return {
                 "success": True,
                 "data": {
                     "bank_statements": transactions,
                     "transaction_count": len(transactions)
                 },
-                "file_type": "pdf_statement"
+                "file_type": "pdf_statement",
+                "metadata": {
+                    "rejected_row_count": debug_info["rejected_row_count"],
+                    "rejected_row_samples": debug_info["rejected_row_samples"],
+                    "unknown_direction_count": sum(
+                        1 for t in transactions if t.get('direction') == 'unknown'),
+                }
             }
         
         except Exception as e:
@@ -898,33 +1037,17 @@ class FileProcessor:
                 "error": f"PDF document processing error: {str(e)}"
             }
     
-    def _parse_date(self, date_str: str) -> str:
+    def _parse_date(self, date_str: str) -> Optional[str]:
         """
-        Parse date string to ISO format (YYYY-MM-DD)
-        Handles multiple common formats
+        Parse date string to ISO format (YYYY-MM-DD) via the shared helper.
+
+        A6: returns None on failure — NEVER the input string — so callers'
+        `if not parsed_date` checks actually fire and the row is skipped
+        (and counted). Output is standardised to ISO YYYY-MM-DD everywhere
+        (the assessment engine expects ISO).
+        A8: two-digit years supported (pivot: <70 -> 2000s).
         """
-        date_str = date_str.strip()
-        
-        # Common formats
-        formats = [
-            '%Y-%m-%d',      # 2024-01-15
-            '%d/%m/%Y',      # 15/01/2024
-            '%d-%m-%Y',      # 15-01-2024
-            '%m/%d/%Y',      # 01/15/2024
-            '%d %b %Y',      # 15 Jan 2024
-            '%d %B %Y',      # 15 January 2024
-            '%Y%m%d',        # 20240115
-        ]
-        
-        for fmt in formats:
-            try:
-                dt = datetime.strptime(date_str, fmt)
-                return dt.strftime('%d/%m/%Y')  # UK format
-            except ValueError:
-                continue
-        
-        # If all fail, return original (will be caught upstream)
-        return date_str
+        return parse_date(date_str)
     
     def _find_column_index(self, header: List[str], keywords: List[str]) -> Optional[int]:
         """
@@ -945,16 +1068,19 @@ class FileProcessor:
         Order matters! 'estate' in probate can match property docs mentioning 'real estate'
         """
         text_lower = text.lower()
-        
+
         # Check in order of specificity (most specific first)
-        # Share Purchase Agreement - check FIRST (very specific)
-        if any(kw in text_lower for kw in ['share purchase agreement', 'spa', 'business sale', 'acquisition agreement', 'share transfer', 'sale of shares']):
-            return 'Share Purchase Agreement'
-        
-        # Property completion - check AFTER share purchase (can have similar keywords)
+        # A15: completion-statement keywords are checked BEFORE the SPA
+        # shortlist, and 'spa' must be a whole word (r'\bspa\b') so that
+        # "spacious"/"Spain" no longer classify a document as an SPA.
         completion_keywords = ['completion statement', 'completion date', 'contract price', 'net proceeds', 'property sale proceeds', 'vendor', 'purchaser', 'title number', 'land registry', 'completion accounts', 'property purchase']
         if any(kw in text_lower for kw in completion_keywords):
             return 'completion statement'
+
+        # Share Purchase Agreement
+        if any(kw in text_lower for kw in ['share purchase agreement', 'business sale', 'acquisition agreement', 'share transfer', 'sale of shares']) \
+                or re.search(r'\bspa\b', text_lower):
+            return 'Share Purchase Agreement'
         
         # Probate - check AFTER completion (be more specific with keywords)
         probate_keywords = ['grant of probate', 'letters of administration', 'probate registry', 'grant in respect of', 'deceased estate', 'estate of the late', 'executor', 'beneficiary distribution', 'probate reference', 'date of death']

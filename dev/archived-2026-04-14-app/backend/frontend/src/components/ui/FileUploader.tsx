@@ -27,7 +27,7 @@
 //
 // The caller decides what to do with the parsed JSON response.
 import { useCallback, useRef, useState } from 'react'
-import { authFetch } from '../../lib/api'
+import { getAccessToken, refreshTokens } from '../../lib/api'
 import StatusChip from './StatusChip'
 import Alert from './Alert'
 
@@ -92,7 +92,7 @@ export default function FileUploader({
     return null
   }, [accept, maxSizeMb])
 
-  const startUpload = useCallback((file: File) => {
+  const startUpload = useCallback((file: File, isRetryAfterRefresh = false) => {
     const err = validate(file)
     if (err) {
       setState({ file, status: 'error', progress: 0, response: null, error: err })
@@ -105,7 +105,7 @@ export default function FileUploader({
     // real upload progress - fetch doesn't expose progress events.
     const xhr = new XMLHttpRequest()
     xhr.open('POST', uploadUrl)
-    const token = localStorage.getItem('access_token')
+    const token = getAccessToken()
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 
     xhr.upload.addEventListener('progress', (e) => {
@@ -115,11 +115,22 @@ export default function FileUploader({
     })
 
     xhr.addEventListener('load', () => {
-      // 401 - token expired; fall back to authFetch so it can refresh
-      // / kick to login. Re-run as a fetch-based request.
+      // 401 - access token expired. Try one token refresh, then retry
+      // the upload once with the new token. The staged file stays in
+      // state, so if the refresh fails the user can retry after
+      // signing in again - nothing is lost.
       if (xhr.status === 401) {
-        authFetch(uploadUrl).catch(() => {})
-        setState((prev) => prev ? { ...prev, status: 'error', error: 'Authentication expired. Reload and try again.' } : prev)
+        if (!isRetryAfterRefresh) {
+          refreshTokens().then((ok) => {
+            if (ok) {
+              startUpload(file, true)
+            } else {
+              setState((prev) => prev ? { ...prev, status: 'error', error: 'Session expired — sign in again to upload. Your file is still staged; use Try again after signing in.' } : prev)
+            }
+          })
+        } else {
+          setState((prev) => prev ? { ...prev, status: 'error', error: 'Session expired — sign in again to upload. Your file is still staged; use Try again after signing in.' } : prev)
+        }
         return
       }
       let body: any = null
@@ -258,6 +269,15 @@ export default function FileUploader({
         <div className="mt-2">
           <Alert variant="error" title="Upload failed">
             {state.error}
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => startUpload(state.file)}
+                className="text-xs font-semibold text-zinc-900 underline underline-offset-2 hover:text-zinc-700"
+              >
+                Try again
+              </button>
+            </div>
           </Alert>
         </div>
       )}

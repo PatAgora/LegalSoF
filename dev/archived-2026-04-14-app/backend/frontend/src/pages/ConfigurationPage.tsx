@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE_URL, authFetch } from '../lib/api';
+import { ConfirmModal } from '../components/ui/RationaleModal';
 
 // One row from the backend transaction_config table.
 interface ConfigItem {
@@ -87,32 +88,6 @@ function labelFor(key: string): string {
   return parts.join(' ');
 }
 
-function parseValue(raw: string, type: ConfigItem['type']): string | number | boolean | any {
-  if (raw == null) return raw;
-  if (type === 'int') {
-    const v = parseInt(raw, 10);
-    return isNaN(v) ? 0 : v;
-  }
-  if (type === 'float') {
-    const v = parseFloat(raw);
-    return isNaN(v) ? 0 : v;
-  }
-  if (type === 'bool') return raw === 'true' || raw === '1';
-  if (type === 'json') {
-    try { return JSON.parse(raw); } catch { return raw; }
-  }
-  return raw;
-}
-
-function serialiseValue(value: any, type: ConfigItem['type']): string {
-  if (type === 'bool') return value ? 'true' : 'false';
-  if (type === 'json') {
-    if (typeof value === 'string') return value; // user has typed raw JSON
-    return JSON.stringify(value);
-  }
-  return String(value ?? '');
-}
-
 export default function ConfigurationPage() {
   const [config, setConfig] = useState<ConfigMap>({});
   const [draft, setDraft] = useState<Record<string, string>>({}); // raw string per key for the input
@@ -121,6 +96,7 @@ export default function ConfigurationPage() {
   const [reseeding, setReseeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
   const loadConfig = async () => {
     setLoading(true);
@@ -159,10 +135,7 @@ export default function ConfigurationPage() {
   // stay intact. Used when a section comes back empty because the seed
   // never ran on a deploy.
   const onRestoreDefaults = async () => {
-    if (!confirm(
-      'Backfill missing settings from the catalogue defaults? '
-      + 'Existing values are not changed - only missing rows are inserted.',
-    )) return;
+    setShowRestoreConfirm(false);
     setReseeding(true);
     try {
       const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config/reseed`, {
@@ -274,7 +247,7 @@ export default function ConfigurationPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onRestoreDefaults}
+              onClick={() => setShowRestoreConfirm(true)}
               disabled={reseeding}
               title="Backfill any missing settings from the catalogue defaults. Existing values are preserved."
               className={`px-3 py-2 text-sm font-medium rounded border transition-colors whitespace-nowrap ${
@@ -343,12 +316,20 @@ export default function ConfigurationPage() {
                   <span className={`text-xs font-semibold tracking-wide ${moduleOn ? 'text-green-700' : 'text-zinc-400'}`}>
                     {moduleOn ? 'ON' : 'OFF'}
                   </span>
-                  {/* Switch */}
+                  {/* Switch - keyboard operable (Enter / Space) */}
                   <span
                     role="switch"
                     aria-checked={moduleOn}
+                    aria-label={`${section.title} module ${moduleOn ? 'on' : 'off'}`}
+                    tabIndex={0}
                     onClick={() => enabledKey && setDraft((prev) => ({ ...prev, [enabledKey]: moduleOn ? 'false' : 'true' }))}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                        e.preventDefault();
+                        if (enabledKey) setDraft((prev) => ({ ...prev, [enabledKey]: moduleOn ? 'false' : 'true' }));
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-1 ${
                       moduleOn ? 'bg-green-500' : 'bg-zinc-300'
                     } ${enabledDirty ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}
                   >
@@ -560,6 +541,15 @@ export default function ConfigurationPage() {
           </div>
         </section>
       )}
+
+      <ConfirmModal
+        isOpen={showRestoreConfirm}
+        title="Restore defaults"
+        message="Backfill missing settings from the catalogue defaults? Existing values are not changed - only missing rows are inserted."
+        confirmLabel="Restore defaults"
+        onConfirm={onRestoreDefaults}
+        onClose={() => setShowRestoreConfirm(false)}
+      />
     </div>
   );
 }

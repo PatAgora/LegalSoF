@@ -4,10 +4,12 @@ Authentication dependencies for protected routes.
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.db.session import get_db
 from app.models.user import User, UserRole
+from app.models.matter import Matter
 from app.core.security import decode_token
 from app.schemas.user import TokenData
 
@@ -93,3 +95,36 @@ def require_role(*roles: UserRole):
 require_analyst = require_role(UserRole.ANALYST, UserRole.PARTNER, UserRole.ADMIN)
 require_partner = require_role(UserRole.PARTNER, UserRole.ADMIN)
 require_admin = require_role(UserRole.ADMIN)
+
+
+def require_matter_access(matter_id: int, current_user: User, db: Session) -> Matter:
+    """Matter-level authorisation check for matter-scoped endpoints.
+
+    Policy:
+      - ADMIN and PARTNER (and superusers) may access any matter.
+      - ANALYST may access a matter if it is unassigned
+        (assigned_analyst_id is None), assigned to them, or created by
+        them. Unassigned matters remain open to all analysts so existing
+        data keeps working; enforcement tightens once assignment is used.
+
+    Raises 404 if the matter does not exist, 403 if access is not
+    permitted. Returns the Matter on success.
+    """
+    matter = db.query(Matter).filter(Matter.id == matter_id).first()
+    if not matter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matter not found")
+
+    if current_user.is_superuser or current_user.role in (UserRole.ADMIN, UserRole.PARTNER):
+        return matter
+
+    if (
+        matter.assigned_analyst_id is None
+        or matter.assigned_analyst_id == current_user.id
+        or matter.created_by_id == current_user.id
+    ):
+        return matter
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have access to this matter",
+    )

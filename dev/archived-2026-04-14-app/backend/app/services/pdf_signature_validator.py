@@ -40,13 +40,15 @@ def validate_pdf_signature(file_bytes: bytes) -> List[VerificationFlag]:
     sig_field_count = 0
     try:
         import fitz
+        # PyMuPDF widget-type constant: signature fields are type 6
+        # (PDF_WIDGET_TYPE_SIGNATURE), NOT 4 (4 is ListBox).
+        sig_widget_type = getattr(fitz, "PDF_WIDGET_TYPE_SIGNATURE", 6)
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         try:
             for page in doc:
                 widgets = page.widgets() or []
                 for w in widgets:
-                    # field_type 4 = signature in PyMuPDF
-                    if getattr(w, "field_type", None) == 4 or getattr(w, "field_type_string", "") == "Signature":
+                    if getattr(w, "field_type", None) == sig_widget_type or getattr(w, "field_type_string", "") == "Signature":
                         sig_field_count += 1
                         # A signature field is only "signed" if it has a value
                         if getattr(w, "field_value", None):

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { API_BASE_URL, authFetch } from '../lib/api'
+import { formatDate } from '../lib/format'
 import { Card, Spinner, Alert } from '../components/ui'
 import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
 
@@ -159,7 +160,7 @@ export default function DashboardPage() {
                     </td>
                     <td className="px-6 py-3 text-zinc-700">{m.risk_rating || '-'}</td>
                     <td className="px-6 py-3 text-zinc-500 tabular-nums">
-                      {m.created_at ? new Date(m.created_at).toLocaleDateString() : '-'}
+                      {formatDate(m.created_at)}
                     </td>
                   </tr>
                 ))}

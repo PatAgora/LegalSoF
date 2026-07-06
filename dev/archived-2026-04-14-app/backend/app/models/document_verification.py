@@ -7,10 +7,10 @@ Tables:
 """
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, Text, Boolean,
-    Float, JSON, LargeBinary, Enum as SQLEnum
+    Float, JSON, LargeBinary, Enum as SQLEnum, case
 )
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 import enum
 
 from app.db.base import Base
@@ -39,8 +39,9 @@ class DocumentVerification(Base):
     # Raw file bytes — kept in the database so documents survive a
     # container redeploy (the upload directory on the host is
     # ephemeral). The serve endpoint falls back to this when the
-    # on-disk copy is missing.
-    file_bytes = Column(LargeBinary, nullable=True)
+    # on-disk copy is missing. Deferred so list/summary queries do not
+    # drag every raw upload into memory; access dv.file_bytes to load.
+    file_bytes = deferred(Column(LargeBinary, nullable=True))
 
     # Pipeline results
     authenticity_score = Column(Float, nullable=False, default=0.0)
@@ -100,11 +101,14 @@ class DocumentVerification(Base):
 
     # Relationships
     matter = relationship("Matter", backref="document_verifications")
+    # Flags ordered most-severe first. severity is a string column, so a
+    # plain severity.desc() sorted ALPHABETICALLY (critical last); the
+    # CASE rank below yields critical, high, medium, low, info.
     flags = relationship(
         "DocumentVerificationFlag",
         back_populates="verification",
         cascade="all, delete-orphan",
-        order_by="DocumentVerificationFlag.severity.desc()"
+        order_by=lambda: _flag_severity_rank()
     )
     transactions = relationship(
         "DocumentVerificationTransaction",
@@ -204,6 +208,21 @@ class DocumentVerificationFlag(Base):
 
     def __repr__(self):
         return f"<DocVerFlag {self.code} [{self.severity}]>"
+
+
+def _flag_severity_rank():
+    """Ordering expression for DocumentVerification.flags: critical first,
+    then high, medium, low, info; stable by id within a severity."""
+    return [
+        case(
+            (DocumentVerificationFlag.severity == "critical", 0),
+            (DocumentVerificationFlag.severity == "high", 1),
+            (DocumentVerificationFlag.severity == "medium", 2),
+            (DocumentVerificationFlag.severity == "low", 3),
+            else_=4,
+        ),
+        DocumentVerificationFlag.id,
+    ]
 
 
 class DocumentVerificationTransaction(Base):

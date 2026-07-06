@@ -185,6 +185,10 @@ def seed_transaction_config(engine):
              'A lower confidence bar used in borderline situations — when a document partially supports a claim but not perfectly. Match confidence at or above this value still earns a partial pass; below it the claim goes to manual review.'),
             ('sof_min_claims_required', _t(1, 1, 1), 'tiered_int',
              'The minimum number of source-of-funds claims the client must declare and successfully evidence before the matter can reach a Sufficient verdict. Raise it for higher-risk clients if you require multiple independent sources.'),
+            ('sof_large_credit_threshold', _t(15000.0, 10000.0, 5000.0), 'tiered_float',
+             'Incoming credits at or above this GBP amount that cannot be matched to a declared source-of-funds claim are flagged as large unexplained credits, and do not count towards the "funding traced" percentage. Lower it for higher-risk clients.'),
+            ('sof_third_party_min_amount', _t(2500.0, 1000.0, 500.0), 'tiered_float',
+             'Incoming credits at or above this GBP amount from a payer who is neither the client nor a declared source (e.g. an undeclared relative or company) raise a Third-Party Funds flag. The SRA thematic review expects undeclared third-party funding to be identified and evidenced.'),
 
             # ── Document Verification ─────────────────────────────────
             ('dv_score_verified_min', _t(65, 75, 85), 'tiered_int',

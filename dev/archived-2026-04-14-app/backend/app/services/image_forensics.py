@@ -55,7 +55,7 @@ def run_image_forensics(file_bytes: bytes) -> List[VerificationFlag]:
 
     try:
         import fitz
-        from PIL import Image, ImageChops
+        from PIL import Image, ImageChops, ImageStat
     except ImportError as exc:
         flags.append(VerificationFlag(
             "image_forensics", "IMAGE_FORENSICS_UNAVAILABLE", "info",
@@ -81,6 +81,7 @@ def run_image_forensics(file_bytes: bytes) -> List[VerificationFlag]:
 
     try:
         ela_findings: List[Dict[str, Any]] = []
+        ela_skipped_non_jpeg = 0
         phashes: List[Dict[str, Any]] = []
         quant_table_sigs: List[Tuple[int, str]] = []  # (page, sig)
 
@@ -107,6 +108,19 @@ def run_image_forensics(file_bytes: bytes) -> List[VerificationFlag]:
                 except Exception:
                     continue
 
+                # Original stream inspection — ELA and quant tables only
+                # make sense for images that were JPEG-encoded inside the
+                # PDF. PyMuPDF exposes the raw stream via extract_image().
+                raw = None
+                raw_ext = ""
+                try:
+                    raw = doc.extract_image(xref)
+                    raw_ext = (raw or {}).get("ext", "").lower()
+                except Exception:
+                    raw = None
+
+                is_jpeg_stream = raw_ext in {"jpg", "jpeg"}
+
                 # --- pHash ---
                 if have_imagehash:
                     try:
@@ -121,34 +135,37 @@ def run_image_forensics(file_bytes: bytes) -> List[VerificationFlag]:
                         pass
 
                 # --- ELA ---
-                try:
-                    buf = io.BytesIO()
-                    pil.save(buf, "JPEG", quality=90)
-                    recompressed = Image.open(io.BytesIO(buf.getvalue()))
-                    diff = ImageChops.difference(pil, recompressed)
-                    # Compute mean luminance of the diff. Big-canvas images
-                    # dilute the signal, so we crop dark borders out.
-                    bbox = diff.getbbox()
-                    crop = diff.crop(bbox) if bbox else diff
-                    extrema = crop.convert("L").getextrema()
-                    # Use the upper-bound brightness; mean is too soft on
-                    # localized tampering.
-                    mean_brightness = sum(extrema) / 2 if isinstance(extrema, tuple) else 0
-                    ela_findings.append({
-                        "page": page_idx + 1,
-                        "xref": xref,
-                        "ela_mean": round(mean_brightness, 2),
-                    })
-                except Exception:
-                    pass
+                # Only meaningful for images whose ORIGINAL stream is JPEG
+                # (DCTDecode). Running ELA on a PNG re-render measures our
+                # own re-compression noise, not tampering — skip those.
+                if not is_jpeg_stream:
+                    ela_skipped_non_jpeg += 1
+                else:
+                    try:
+                        jpeg_pil = Image.open(io.BytesIO(raw["image"])).convert("RGB")
+                        buf = io.BytesIO()
+                        jpeg_pil.save(buf, "JPEG", quality=90)
+                        recompressed = Image.open(io.BytesIO(buf.getvalue()))
+                        diff = ImageChops.difference(jpeg_pil, recompressed)
+                        # Compute mean luminance of the diff. Big-canvas images
+                        # dilute the signal, so we crop dark borders out.
+                        bbox = diff.getbbox()
+                        crop = diff.crop(bbox) if bbox else diff
+                        # True mean brightness of the diff (the old
+                        # sum(extrema)/2 was the min/max midpoint, which
+                        # fired on virtually every scan).
+                        mean_brightness = ImageStat.Stat(crop.convert("L")).mean[0]
+                        ela_findings.append({
+                            "page": page_idx + 1,
+                            "xref": xref,
+                            "ela_mean": round(mean_brightness, 2),
+                        })
+                    except Exception:
+                        pass
 
                 # --- JPEG quantisation-table signature ---
-                # tobytes() above gave us PNG; for quant-tables we need to
-                # examine the *raw stream* if it's JPEG-encoded inside the
-                # PDF. PyMuPDF exposes that as extract_image()["image"].
                 try:
-                    raw = doc.extract_image(xref)
-                    if raw and raw.get("ext", "").lower() in {"jpg", "jpeg", "jpx"}:
+                    if is_jpeg_stream:
                         jpil = Image.open(io.BytesIO(raw["image"]))
                         qt = getattr(jpil, "quantization", None)
                         if qt:
@@ -175,23 +192,39 @@ def run_image_forensics(file_bytes: bytes) -> List[VerificationFlag]:
                     "page_numbers": [p - 1 for p in pages],  # 0-indexed for the UI highlighter
                 },
             ))
+        if ela_skipped_non_jpeg:
+            flags.append(VerificationFlag(
+                "image_forensics", "IMAGE_ELA_SKIPPED_NON_JPEG", "info",
+                f"ELA skipped for {ela_skipped_non_jpeg} image(s) whose "
+                "original stream is not JPEG (ELA is only meaningful for "
+                "JPEG-encoded images).",
+                {"skipped_count": ela_skipped_non_jpeg},
+            ))
 
         # --- Quant table mismatch flag ---
-        if len(quant_table_sigs) >= 2:
-            distinct_sigs = {sig for _, sig in quant_table_sigs}
-            if len(distinct_sigs) > 1:
-                flags.append(VerificationFlag(
-                    "image_forensics", "IMAGE_QUANT_TABLE_MIXED", "high",
-                    f"Document contains {len(distinct_sigs)} different JPEG "
-                    "compression profiles across its embedded images. Genuine "
-                    "statements export with a single profile — this is a "
-                    "strong indicator of image splicing.",
-                    {
-                        "distinct_signatures": len(distinct_sigs),
-                        "total_images": len(quant_table_sigs),
-                        "by_page": [{"page": p, "sig": s} for p, s in quant_table_sigs],
-                    },
-                ))
+        # Different tables across the WHOLE document are common in genuine
+        # PDFs (logo exported by one tool, content by another), so only
+        # flag when >=2 JPEGs on the SAME page carry different tables.
+        sigs_by_page: Dict[int, set] = {}
+        for p, s in quant_table_sigs:
+            sigs_by_page.setdefault(p, set()).add(s)
+        mixed_pages = sorted(
+            p for p, sigs in sigs_by_page.items()
+            if len(sigs) > 1
+        )
+        if mixed_pages:
+            flags.append(VerificationFlag(
+                "image_forensics", "IMAGE_QUANT_TABLE_MIXED", "medium",
+                f"Page(s) {', '.join(map(str, mixed_pages))} contain JPEG "
+                "images with different compression profiles on the same "
+                "page — a possible image-splicing indicator.",
+                {
+                    "mixed_pages": mixed_pages,
+                    "total_images": len(quant_table_sigs),
+                    "by_page": [{"page": p, "sig": s} for p, s in quant_table_sigs],
+                    "page_numbers": [p - 1 for p in mixed_pages],
+                },
+            ))
 
         # --- pHash info flag (no severity — just data for downstream) ---
         if phashes:

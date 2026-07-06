@@ -11,10 +11,13 @@ Transaction Review for comprehensive AML assessment.
 """
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
+import logging
 import re
 import json
 from decimal import Decimal
+
+logger = logging.getLogger(__name__)
 
 class SoFAssessmentEngine:
     """
@@ -42,6 +45,13 @@ class SoFAssessmentEngine:
             'sof_date_tolerance_days':        7,
             'sof_confidence_threshold':       0.999,
             'sof_partial_confidence_threshold': 0.99,
+            'sof_min_claims_required':        1,
+            'sof_large_credit_threshold':     10000.0,
+            'sof_third_party_min_amount':     1000.0,
+            # Shared with Transaction Review — ONE source of truth for
+            # cash thresholds (tiered in the seed catalogue).
+            'cfg_cash_threshold_deposit':     7500.0,
+            'tr_critical_alerts_block':       True,
         }
         try:
             from app.models.transaction import TransactionConfig
@@ -67,9 +77,16 @@ class SoFAssessmentEngine:
             out = dict(defaults)
             for row in rows:
                 try:
-                    out[row.key] = resolve_value(row.value, row.value_type, tier)
-                except Exception:
-                    pass  # keep default on a parse miss
+                    out[row.key] = resolve_value(
+                        row.value, row.value_type, tier,
+                        default=defaults.get(row.key), key=row.key,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "SoF config key %r could not be resolved (%s: %s); "
+                        "keeping built-in default %r",
+                        row.key, type(exc).__name__, exc, defaults.get(row.key),
+                    )
             return out
         except Exception:
             self.risk_tier = 'medium'
@@ -156,14 +173,19 @@ class SoFAssessmentEngine:
             from app.services.sof_evidence_checklist import required_evidence
             _tier = getattr(self, 'risk_tier', 'medium')
             for _c in claims:
-                _c['expected_evidence'] = required_evidence(
-                    _c.get('source_type', ''), _tier
-                )
+                if _c.get('de_minimis'):
+                    # De-minimis (sub-£500) claims: noted for awareness,
+                    # no documentary evidence demanded.
+                    _c['expected_evidence'] = []
+                else:
+                    _c['expected_evidence'] = required_evidence(
+                        _c.get('source_type', ''), _tier
+                    )
         except Exception as _exc:
             print(f"[evidence-checklist] skipped: {_exc}")
 
         # Step 2: Find evidence in bank statements
-        evidence_matches = self.match_evidence(claims, bank_statements)
+        evidence_matches = self.match_evidence(claims, bank_statements, client_info=client_info)
 
         print(f"✅ Found {len(evidence_matches)} evidence matches")
         
@@ -253,11 +275,13 @@ class SoFAssessmentEngine:
                     'review_reason': 'Supporting documents required'
                 }
         
-        # Step 3: Trace funding paths
+        # Step 3: Trace funding paths (only claim-matched/explained
+        # credits count toward the traced percentage)
         funding_paths = self.trace_funding_paths(
-            bank_statements, 
-            purchase, 
-            claims
+            bank_statements,
+            purchase,
+            claims,
+            evidence_matches=evidence_matches
         )
         
         # Step 4: Check date alignment
@@ -276,9 +300,10 @@ class SoFAssessmentEngine:
             claims,
             evidence_matches,
             flags or {},
-            transaction_review_data
+            transaction_review_data,
+            client_info=client_info
         )
-        
+
         # Step 7: Make overall decision
         outcome = self.make_decision(
             risk_rating,
@@ -288,7 +313,8 @@ class SoFAssessmentEngine:
             red_flags,
             transaction_review_data,
             client_info=client_info,
-            purchase=purchase
+            purchase=purchase,
+            bank_statements=bank_statements
         )
         
         # Step 8: Generate next actions
@@ -363,31 +389,69 @@ class SoFAssessmentEngine:
                            r'donat\w+ to me']),
         ('Pension',       [r'\bpension\b', r'(?:tax[- ]free |retirement )?lump sum',
                            r'drawdown', r'annuity']),
-        ('Compensation',  [r'compensation', r'\bsettlement\b', r'\bdamages\b',
+        # "settlement" alone is a false-positive trap ("settlement
+        # statement", "completion/settlement date") — require a payment/
+        # compensation sense.
+        ('Compensation',  [r'compensation', r'settlement (?:payment|sum|award|figure|monies|agreement)',
+                           r'compensation settlement', r'\bdamages\b',
                            r'redundancy']),
         ('Insurance',     [r'insurance (?:payout|claim|settlement)', r'life insurance',
                            r'(?:policy|endowment)(?: has)? matured',
                            r'matured (?:policy|endowment)', r'\bendowment\b']),
         ('Lottery',       [r'lottery', r'winnings', r'premium bond', r'jackpot']),
-        ('Loan',          [r'\bmortgage\b', r'remortgage', r'bridging (?:finance|loan)',
-                           r'credit facility', r'\bloan\b', r'borrowed']),
-        ('Investment',    [r'investment\w*', r'\bshares\b', r'\bstocks\b', r'dividend\w*',
-                           r'\bportfolio\b', r'mutual fund', r'\bbonds\b', r'crypto\w*',
-                           r'\bisa\b']),
+        ('Gambling Winnings', [r'gambling winnings', r'\bcasino\b', r'\bbetting\b',
+                           r'bookmaker\w*', r'\bbet365\b', r'william hill',
+                           r'paddy power', r'ladbrokes', r'\bbetfair\b',
+                           r'poker winnings']),
+        ('Crypto',        [r'\bbitcoin\b', r'\bethereum\b', r'\bcrypto(?:currenc\w+|asset\w*)?\b',
+                           r'\bcoinbase\b', r'\bbinance\b', r'\bkraken\b', r'\bbtc\b']),
+        # A loan/mortgage is only a SOURCE of funds when money is
+        # COMING IN — "redemption of the mortgage" / "repaid the loan"
+        # must not create a Loan claim. Bare "mortgage" is therefore
+        # replaced by incoming-sense phrasings, and every Loan hit is
+        # additionally screened against _KEYWORD_NEGATIVE_CONTEXT.
+        ('Loan',          [r'mortgage (?:advance|offer|funds|drawdown|completion monies)',
+                           r'(?:new|taking out (?:a )?|took out (?:a )?|obtained (?:a )?|secured (?:a )?)mortgage',
+                           r'mortgage of £?[\d,]+', r'fund\w* (?:by|with|through) (?:a |the )?mortgage',
+                           r'remortgage', r'bridging (?:finance|loan)',
+                           r'credit facility', r'loan (?:from|of|advance)\b',
+                           r'\bloan\b', r'\bborrowed\b']),
+        # "aunt Isa" must not trigger the ISA pattern — require a
+        # financial-product context around "isa".
+        ('Investment',    [r'investment\w*', r'\bshares\b', r'\bstocks\b',
+                           r'\bportfolio\b', r'mutual fund', r'\bbonds\b',
+                           r'cash isa', r'stocks and shares isa',
+                           r'isa (?:account|transfer|savings|balance|allowance|maturity)',
+                           r'\bisas\b']),
+        ('Dividend',      [r'\bdividends?\b', r'dividend income',
+                           r'distribution from (?:the |my |our |a )?company']),
         ('Salary',        [r'\bsalary\b', r'\bwages\b', r'employment income', r'\bbonus\b',
                            r'\bearnings\b', r'remuneration', r'paid by my employer']),
         ('Savings',       [r'savings', r'\bsaved\b', r'accumulated', r'set aside',
                            r'put aside', r'put away', r'nest egg']),
     ]
 
+    # Hits for these families are discarded when the surrounding text
+    # shows the money is going OUT (repaying / redeeming a debt), not
+    # coming in as a source of funds.
+    _KEYWORD_NEGATIVE_CONTEXT = {
+        'Loan': re.compile(
+            r'repai(?:d|r|ment)|repay|redemption|redeem\w*|paying off|paid off|'
+            r'pay off|discharg\w+|clear(?:ed|ing)? (?:the |my |our )?(?:mortgage|loan)|'
+            r'settl\w+ (?:of )?(?:the |my |our )?(?:mortgage|loan)',
+            re.IGNORECASE,
+        ),
+    }
+
     # Phrases that, when they precede an amount, mean "this is the net /
     # actual figure that reached the client" — preferred over a gross
-    # headline price for the same source.
+    # headline price for the same source. ONLY explicit netting
+    # phrasing qualifies: loose words like "received" or "totalling"
+    # previously caused the smallest figure to be picked wrongly.
     _NET_PHRASES = [
-        'net proceeds', 'net of', 'net amount', 'net figure', 'proceeds of',
-        'proceeds from', 'received', 'totalling', 'totaling', 'amounting to',
-        'after deduct', 'after fees', 'after the mortgage', 'after redemption',
-        'left with', 'remaining',
+        'net proceeds', 'net of', 'net amount', 'net figure',
+        'after deduct', 'after deductions', 'after fees', 'after tax',
+        'after the mortgage', 'after redemption',
     ]
 
     _UK_BANKS = ['barclays', 'hsbc', 'lloyds', 'natwest', 'santander', 'nationwide',
@@ -426,12 +490,12 @@ class SoFAssessmentEngine:
                 continue
             if suffix:
                 val *= mult.get(suffix, 1)
-            # Sub-£500 figures are almost always fees / noise, not a
-            # source of funds for a property-scale matter.
-            if val < 500:
-                continue
+            # Sub-£500 figures are kept but marked de-minimis — they
+            # still surface as claims for the reviewer's awareness, but
+            # no documentary evidence is demanded for them.
             out.append({'amount': val, 'start': m.start(), 'end': m.end(),
-                        'raw': m.group(0).strip()})
+                        'raw': m.group(0).strip(),
+                        'de_minimis': val < 500})
         return out
 
     def extract_claims_smart(
@@ -504,8 +568,16 @@ class SoFAssessmentEngine:
         # Patterns are regexes so natural phrasing variants all match.
         kw_hits: List[Tuple[str, int]] = []
         for source_type, patterns in self._SOURCE_PATTERNS:
+            neg = self._KEYWORD_NEGATIVE_CONTEXT.get(source_type)
             for pat in patterns:
                 for m in re.finditer(pat, lower):
+                    # Negative-context guard: e.g. "redemption of the
+                    # mortgage" / "repaid the loan" is money going OUT,
+                    # not a source of funds — drop the hit.
+                    if neg is not None:
+                        window = lower[max(0, m.start() - 60):m.end() + 60]
+                        if neg.search(window):
+                            continue
                     kw_hits.append((source_type, (m.start() + m.end()) // 2))
 
         # Sentence/clause spans. An amount must pair with a keyword in
@@ -595,6 +667,8 @@ class SoFAssessmentEngine:
                 "expected_account": expected_account,
                 "claim_text": chosen['raw'],
                 "description": ctx,
+                "de_minimis": bool(chosen.get('de_minimis')),
+                "extraction_method": "regex",
             })
             claim_id += 1
 
@@ -615,6 +689,8 @@ class SoFAssessmentEngine:
                 "expected_payer": None,
                 "expected_account": None,
                 "claim_text": "Source not clearly specified in explanation",
+                "de_minimis": False,
+                "extraction_method": "regex",
             })
 
         print(f"✅ parse_sof_claims extracted {len(claims)} claim(s) from free text")
@@ -632,16 +708,22 @@ class SoFAssessmentEngine:
         sources = sof_explanation.get('sources', [])
         
         for idx, source in enumerate(sources, start=1):
+            amount = float(source.get('amount', 0))
             claim = {
                 "claim_id": idx,
                 "source_type": source.get('source_type', 'unknown'),
-                "expected_amount": float(source.get('amount', 0)),
+                "expected_amount": amount,
                 "currency": source.get('currency', 'GBP'),
                 "description": source.get('description', ''),
                 "expected_date_range": {},
                 "expected_payer": None,
                 "expected_account": None,
-                "claim_text": source.get('description', '')
+                "claim_text": source.get('description', ''),
+                # Provenance: 'ai' when the source came from the LLM
+                # extractor, otherwise structured client input.
+                "extraction_method": source.get('extraction_method', 'structured'),
+                # Sub-£500 sources are noted but no evidence is demanded.
+                "de_minimis": 0 < amount < 500,
             }
             
             # Extract type-specific fields
@@ -758,138 +840,333 @@ class SoFAssessmentEngine:
         
         return None
     
+    # Titles stripped before comparing person names.
+    _NAME_TITLES = {'mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'professor',
+                    'sir', 'dame', 'lady', 'lord', 'mx', 'rev', 'master'}
+
+    def _name_tokens(self, name: Any) -> List[str]:
+        """Normalise a name (or narrative text) into comparison tokens:
+        casefolded, punctuation stripped, titles removed."""
+        if not name:
+            return []
+        tokens = re.findall(r"[a-z][a-z'\-]*", str(name).casefold())
+        return [t for t in tokens if t not in self._NAME_TITLES]
+
+    def _names_match(self, claimed: Any, candidate: Any) -> bool:
+        """Fuzzy person/entity name match.
+
+        Handles "A LEE" vs "Ann Lee" (surname + initial), token-set
+        containment ("Ann Lee" inside "FPI GIFT FROM ANN LEE"), and a
+        two-token overlap fallback."""
+        ta, tb = self._name_tokens(claimed), self._name_tokens(candidate)
+        if not ta or not tb:
+            return False
+        sa, sb = set(ta), set(tb)
+        if sa <= sb or sb <= sa:
+            return True
+        # Surname + forename/initial match ("a lee" ~ "ann lee").
+        if ta[-1] == tb[-1]:
+            fa, fb = ta[:-1], tb[:-1]
+            if not fa or not fb:
+                return True
+            for x in fa:
+                for y in fb:
+                    if x == y:
+                        return True
+                    if (len(x) == 1 or len(y) == 1) and x[0] == y[0]:
+                        return True
+        return len(sa & sb) >= 2
+
+    def _txn_payer_text(self, txn: Dict[str, Any]) -> str:
+        """Best-available payer text for a transaction: counterparty
+        field(s) plus the narrative description."""
+        parts = [txn.get('counterparty_name'), txn.get('counterparty'),
+                 txn.get('description')]
+        return ' '.join(str(p) for p in parts if p)
+
+    def _parse_date_flexible(self, value: Any) -> Optional[date]:
+        """Parse an ISO / UK / 'Month YYYY' date string to a date object.
+        Returns None (never raises) when unparseable."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        s = str(value).strip()
+        if not s:
+            return None
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+            try:
+                return datetime.strptime(s[:10], fmt).date()
+            except ValueError:
+                pass
+        for fmt in ('%B %Y', '%b %Y'):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                pass
+        try:
+            return datetime.fromisoformat(s).date()
+        except (ValueError, TypeError):
+            return None
+
     def match_evidence(
         self,
         claims: List[Dict[str, Any]],
-        bank_statements: List[Dict[str, Any]]
+        bank_statements: List[Dict[str, Any]],
+        client_info: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Find evidence in bank statements supporting each claim
+        Find evidence in bank statements supporting each claim.
+
+        A claim is only fully VERIFIED when a matching credit's payer
+        corroborates the claimed source (gift from X → payer ≈ X;
+        savings → payer ≈ the client). Amount-only matches are honest
+        partials (match_quality='amount_only'). match_quality is
+        'exact' per-transaction only for exact amounts, 'close' when
+        merely within tolerance. Multiple same-payer credits summing to
+        the declared amount count as an 'aggregated' match (e.g. a
+        salary paid monthly). AI-extracted transactions may corroborate
+        but never auto-verify.
         """
         evidence_matches = []
-        
+        client_name = str((client_info or {}).get('client_name') or '')
+        tolerance_pct = float(self.settings.get('sof_amount_tolerance_pct', 5.0)) / 100.0
+        date_tol_days = int(self.settings.get('sof_date_tolerance_days', 7))
+
+        # Only genuine credits are evidence. direction=='unknown' is
+        # NEVER counted as credit evidence — those rows need review.
+        credits = [t for t in bank_statements if t.get('direction') == 'credit']
+
+        def _txn_record(txn, amount_match, counterparty_match, quality):
+            return {
+                "account_id": txn.get('account_id'),
+                "date": txn.get('date'),
+                "amount": txn.get('amount'),
+                "currency": txn.get('currency', 'GBP'),
+                "direction": txn.get('direction'),
+                "description": txn.get('description'),
+                "counterparty": txn.get('counterparty_name') or txn.get('counterparty'),
+                "balance": txn.get('balance'),
+                "match_quality": quality,
+                "amount_match": amount_match,
+                "counterparty_match": counterparty_match,
+                "ai_extracted": txn.get('source') == 'ai_extracted',
+            }
+
         for claim in claims:
-            matches = []
             expected_amount = claim['expected_amount']
-            # Tolerance comes from the Configuration page
-            # (sof_amount_tolerance_pct, default 5%).
-            tolerance_pct = float(self.settings.get('sof_amount_tolerance_pct', 5.0)) / 100.0
             tolerance = expected_amount * tolerance_pct
-            
-            # Filter to credit transactions
-            credits = [t for t in bank_statements if t.get('direction') == 'credit']
-            
-            for txn in credits:
-                txn_amount = txn.get('amount', 0)
-                
-                # Check amount match (within tolerance)
-                if abs(txn_amount - expected_amount) <= tolerance:
-                    match_quality = "exact" if txn_amount == expected_amount else "approximate"
-                    
-                    # Check counterparty match if specified
-                    counterparty_match = False
-                    if claim.get('expected_payer'):
-                        payer_lower = claim['expected_payer'].lower()
-                        desc_lower = txn.get('description', '').lower()
-                        counterparty_lower = txn.get('counterparty_name', '').lower()
-                        
-                        if payer_lower in desc_lower or payer_lower in counterparty_lower:
-                            counterparty_match = True
-                            match_quality = "strong"
-                    
-                    matches.append({
-                        "account_id": txn.get('account_id'),
-                        "date": txn.get('date'),
-                        "amount": txn.get('amount'),
-                        "currency": txn.get('currency', 'GBP'),
-                        "direction": txn.get('direction'),
-                        "description": txn.get('description'),
-                        "counterparty": txn.get('counterparty_name'),
-                        "balance": txn.get('balance'),
-                        "match_quality": match_quality,
-                        "counterparty_match": counterparty_match
-                    })
-            
+            expected_payer = claim.get('expected_payer')
+            source_lower = str(claim.get('source_type', '')).lower()
+            # Own-funds sources: corroboration = the payer is the
+            # client themself (transfer from their own account).
+            own_funds_source = any(k in source_lower for k in ('savings', 'isa'))
+
+            # Claim date window ± sof_date_tolerance_days: a credit
+            # outside the window is not evidence for this claim.
+            rng = claim.get('expected_date_range') or {}
+            start_d = self._parse_date_flexible(rng.get('start'))
+            end_d = self._parse_date_flexible(rng.get('end'))
+            window = None
+            if start_d or end_d:
+                tol = timedelta(days=date_tol_days)
+                window = ((start_d or end_d) - tol, (end_d or start_d) + tol)
+
+            def _corroborates(payer_text: str) -> bool:
+                if expected_payer and self._names_match(expected_payer, payer_text):
+                    return True
+                if own_funds_source and client_name and self._names_match(client_name, payer_text):
+                    return True
+                return False
+
+            matches: List[Dict[str, Any]] = []
+            aggregated = False
+
+            if expected_amount > 0:
+                for txn in credits:
+                    txn_amount = txn.get('amount', 0)
+                    if abs(txn_amount - expected_amount) > tolerance:
+                        continue
+                    if window:
+                        txn_date = self._parse_date_flexible(txn.get('date'))
+                        if txn_date and not (window[0] <= txn_date <= window[1]):
+                            continue
+                    amount_match = "exact" if txn_amount == expected_amount else "close"
+                    counterparty_match = _corroborates(self._txn_payer_text(txn))
+                    matches.append(_txn_record(txn, amount_match, counterparty_match, amount_match))
+
+                # Aggregation (conservative): >=2 credits from the SAME
+                # normalised payer summing to within tolerance of the
+                # declared amount (e.g. recurring salary credits).
+                if not matches:
+                    groups: Dict[Tuple[str, ...], List[Dict[str, Any]]] = {}
+                    for txn in credits:
+                        key = tuple(self._name_tokens(
+                            txn.get('counterparty_name') or txn.get('counterparty')
+                            or txn.get('description') or ''
+                        ))
+                        if not key:
+                            continue
+                        groups.setdefault(key, []).append(txn)
+                    for key, txns in groups.items():
+                        if len(txns) < 2:
+                            continue
+                        total = sum(t.get('amount', 0) for t in txns)
+                        if abs(total - expected_amount) <= tolerance:
+                            aggregated = True
+                            group_payer = self._txn_payer_text(txns[0])
+                            group_corroborates = _corroborates(group_payer)
+                            for txn in txns:
+                                matches.append(_txn_record(
+                                    txn, "aggregated", group_corroborates, "aggregated"
+                                ))
+                            break
+
+            # ── Claim-level verdict ──────────────────────────────────
+            # AI-extracted transactions may corroborate but never
+            # auto-verify a claim: verification counts only non-AI rows.
+            non_ai = [m for m in matches if not m['ai_extracted']]
+            corroborated = any(m['counterparty_match'] for m in non_ai)
+            ai_only = bool(matches) and not non_ai
+
+            if aggregated:
+                match_quality = "aggregated"
+                # An aggregated same-payer pattern verifies when the
+                # payer matches the claimed source — or when no payer
+                # was claimed, the recurrence itself corroborates.
+                group_ok = any(m['counterparty_match'] for m in non_ai) or (
+                    not expected_payer and not own_funds_source and bool(non_ai)
+                )
+                verified = group_ok
+            elif corroborated:
+                match_quality = "corroborated"
+                verified = True
+            elif matches:
+                match_quality = "amount_only"
+                verified = False
+            else:
+                match_quality = "none"
+                verified = False
+
+            partially_verified = bool(matches) and not verified
+
             evidence_matches.append({
                 "claim_id": claim['claim_id'],
                 "claim_source": claim.get('source_type', 'Unknown'),
                 "expected_amount": claim.get('expected_amount', 0),
-                "match_quality": "strong" if any(m['match_quality'] == 'strong' for m in matches) else 
-                                "exact" if matches else "none",
+                "match_quality": match_quality,
                 "transactions": matches,
-                "verified": len(matches) > 0,
+                "verified": verified,
+                "partially_verified": partially_verified,
+                "ai_only_evidence": ai_only,
+                "requires_confirmation": partially_verified or ai_only,
                 "document_verified": False,  # Initialize to False, will be set to True if docs verify
                 "document_verification": None  # Will be populated if docs are provided
             })
-        
+
         return evidence_matches
     
     def trace_funding_paths(
         self,
         bank_statements: List[Dict[str, Any]],
         purchase: Dict[str, Any],
-        claims: List[Dict[str, Any]]
+        claims: List[Dict[str, Any]],
+        evidence_matches: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Attempt to trace funds from sources to purchase payment
+        Attempt to trace funds from sources to purchase payment.
+
+        Only credits that are matched to a declared claim (i.e.
+        explained) count toward total_traced — an unexplained large
+        credit is a red flag, not traced funding, and must not inflate
+        the "Funding traced %".
         """
         paths = []
-        purchase_amount = purchase.get('amount', 0)
+        try:
+            purchase_amount = float(purchase.get('amount', 0) or 0)
+        except (TypeError, ValueError):
+            purchase_amount = 0.0
         purchase_date = purchase.get('expected_payment_date')
-        
-        # Group transactions by account
-        accounts = {}
-        for txn in bank_statements:
-            acc_id = txn.get('account_id', 'Unknown')
-            if acc_id not in accounts:
-                accounts[acc_id] = []
-            accounts[acc_id].append(txn)
-        
-        # Sort each account by date
-        for acc_id in accounts:
-            accounts[acc_id].sort(key=lambda x: x.get('date', ''))
-        
-        # Simple heuristic: find large credits, then check if balance/transfers support purchase
-        large_credits = [
-            t for t in bank_statements 
-            if t.get('direction') == 'credit' and t.get('amount', 0) > purchase_amount * 0.1
+
+        # Guard: a zero/absent purchase amount makes every percentage
+        # meaningless (and previously caused a ZeroDivisionError).
+        if purchase_amount <= 0:
+            return [{
+                "path_id": 1,
+                "description": "Purchase amount not stated - funding coverage cannot be calculated",
+                "steps": ["Purchase amount not stated; percentage tracing skipped"],
+                "total_traced": 0,
+                "purchase_amount": purchase_amount,
+                "coverage": 0,
+                "plausible": False
+            }]
+
+        # Credits explained by a claim match (any evidence match —
+        # corroborated, amount-only or aggregated — ties the credit to
+        # a DECLARED source). Keyed with description so two distinct
+        # same-day equal credits stay distinct.
+        explained_keys = set()
+        for ev in (evidence_matches or []):
+            for m in ev.get('transactions', []):
+                explained_keys.add((m.get('date'), m.get('amount'), m.get('description')))
+
+        def _key(t):
+            return (t.get('date'), t.get('amount'), t.get('description'))
+
+        credits = [t for t in bank_statements if t.get('direction') == 'credit']
+        material_floor = purchase_amount * 0.1
+        explained_credits = sorted(
+            (t for t in credits if _key(t) in explained_keys),
+            key=lambda t: t.get('amount', 0), reverse=True
+        )
+        unexplained_large = [
+            t for t in credits
+            if _key(t) not in explained_keys and t.get('amount', 0) > material_floor
         ]
-        
-        if large_credits:
-            # Build a plausible path
+
+        if explained_credits:
             path_steps = []
             total_traced = 0
-            
-            for credit in large_credits[:3]:  # Top 3 credits
+
+            for credit in explained_credits[:5]:
                 path_steps.append(
                     f"£{credit['amount']:,.2f} received into {credit.get('account_id', 'account')} "
-                    f"on {credit.get('date', 'unknown date')}"
+                    f"on {credit.get('date', 'unknown date')} (matched to a declared source)"
                 )
                 total_traced += credit['amount']
-                
+
                 if total_traced >= purchase_amount:
                     break
-            
+
+            # Unexplained large credits are disclosed but NOT counted.
+            for txn in unexplained_large[:3]:
+                path_steps.append(
+                    f"£{txn['amount']:,.2f} credit on {txn.get('date', 'unknown date')} "
+                    f"is UNEXPLAINED - not counted toward traced funding"
+                )
+
             # Check for transfers between accounts
             transfers = [
                 t for t in bank_statements
-                if t.get('direction') == 'debit' and 
+                if t.get('direction') == 'debit' and
                    'transfer' in t.get('description', '').lower() and
-                   t.get('amount', 0) > purchase_amount * 0.1
+                   t.get('amount', 0) > material_floor
             ]
-            
+
             for transfer in transfers[:2]:
                 path_steps.append(
                     f"£{transfer['amount']:,.2f} transferred from {transfer.get('account_id', 'account')} "
                     f"on {transfer.get('date', 'unknown date')}"
                 )
-            
-            # Calculate coverage
+
+            # Calculate coverage from EXPLAINED credits only.
             coverage = min(100, int((total_traced / purchase_amount) * 100))
-            
+
             paths.append({
                 "path_id": 1,
-                "description": " → ".join([c.get('account_id', 'Account') for c in large_credits[:2]]) + " → Purchase",
+                "description": " → ".join([c.get('account_id', 'Account') for c in explained_credits[:2]]) + " → Purchase",
                 "steps": path_steps,
                 "total_traced": total_traced,
                 "purchase_amount": purchase_amount,
@@ -897,17 +1174,23 @@ class SoFAssessmentEngine:
                 "plausible": coverage >= 80
             })
         else:
-            # No clear path
+            # No explained credits — unexplained ones do not count.
+            steps = ["No credits matched to declared source-of-funds claims"]
+            for txn in unexplained_large[:3]:
+                steps.append(
+                    f"£{txn['amount']:,.2f} credit on {txn.get('date', 'unknown date')} "
+                    f"is UNEXPLAINED - not counted toward traced funding"
+                )
             paths.append({
                 "path_id": 1,
                 "description": "Unable to trace clear funding path",
-                "steps": ["No large credits identified that match purchase amount"],
+                "steps": steps,
                 "total_traced": 0,
                 "purchase_amount": purchase_amount,
                 "coverage": 0,
                 "plausible": False
             })
-        
+
         return paths
     
     def check_date_alignment(
@@ -917,82 +1200,144 @@ class SoFAssessmentEngine:
         constraints: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Check if statement periods cover claimed receipt periods
+        Check if statement periods cover claimed receipt periods.
+
+        Dates are parsed to real date objects and compared properly —
+        lexicographic string comparison mixed DD/MM/YYYY and ISO forms
+        and gave wrong answers. Unparseable dates are skipped and
+        counted rather than crashing the assessment.
         """
-        # Get statement date range
-        dates = [t.get('date') for t in bank_statements if t.get('date')]
-        if not dates:
+        # Get statement date range (parsed, not lexicographic).
+        skipped_dates = 0
+        parsed_dates: List[date] = []
+        for t in bank_statements:
+            raw = t.get('date')
+            if not raw:
+                continue
+            d = self._parse_date_flexible(raw)
+            if d is not None:
+                parsed_dates.append(d)
+            else:
+                skipped_dates += 1
+
+        if not parsed_dates:
+            gaps = ["No transaction dates available"]
+            if skipped_dates:
+                gaps.append(f"{skipped_dates} transaction date(s) could not be parsed")
             return {
                 "statement_coverage": None,
                 "claimed_receipt_period": None,
                 "coverage_adequate": False,
-                "gaps": ["No transaction dates available"]
+                "gaps": gaps
             }
-        
-        dates.sort()
-        stmt_start = dates[0]
-        stmt_end = dates[-1]
-        
+
+        stmt_start = min(parsed_dates)
+        stmt_end = max(parsed_dates)
+
         # Get claimed date ranges
         claimed_ranges = [
-            c.get('expected_date_range') 
-            for c in claims 
+            c.get('expected_date_range')
+            for c in claims
             if c.get('expected_date_range')
         ]
-        
+
         coverage_adequate = True
         gaps = []
-        
+        unparseable_claim_dates = 0
+
         if claimed_ranges:
             # Check if statements cover claimed periods
             for claim_range in claimed_ranges:
-                claim_start = claim_range.get('start')
-                claim_end = claim_range.get('end')
-                
-                # Simple string comparison (assuming ISO dates)
+                claim_start = self._parse_date_flexible(claim_range.get('start'))
+                claim_end = self._parse_date_flexible(claim_range.get('end'))
+                if claim_range.get('start') and claim_start is None:
+                    unparseable_claim_dates += 1
+                if claim_range.get('end') and claim_end is None:
+                    unparseable_claim_dates += 1
+
                 if claim_start and claim_start < stmt_start:
                     gaps.append(
-                        f"Statements start {stmt_start} but claim mentions {claim_start}"
+                        f"Statements start {stmt_start.isoformat()} but claim mentions {claim_start.isoformat()}"
                     )
                     coverage_adequate = False
-                
+
                 if claim_end and claim_end > stmt_end:
                     gaps.append(
-                        f"Statements end {stmt_end} but claim mentions {claim_end}"
+                        f"Statements end {stmt_end.isoformat()} but claim mentions {claim_end.isoformat()}"
                     )
                     coverage_adequate = False
-        
-        # Check for unexplained large credits outside claimed periods
-        # (implementation detail - would need date parsing)
-        
+
+        if skipped_dates:
+            gaps.append(
+                f"{skipped_dates} transaction date(s) could not be parsed and were skipped"
+            )
+        if unparseable_claim_dates:
+            gaps.append(
+                f"{unparseable_claim_dates} claimed date(s) could not be parsed and were skipped"
+            )
+
         return {
             "statement_coverage": {
-                "start": stmt_start,
-                "end": stmt_end
+                "start": stmt_start.isoformat(),
+                "end": stmt_end.isoformat()
             },
             "claimed_receipt_period": claimed_ranges[0] if claimed_ranges else None,
             "coverage_adequate": coverage_adequate,
             "gaps": gaps if gaps else []
         }
     
+    def _load_country_risk_sets(self) -> Tuple[set, set]:
+        """Country risk sourced from the same DB-driven CountryRisk
+        list the transaction monitoring service uses. The DB list is
+        AUTHORITATIVE; the hardcoded fallback below is UK-appropriate
+        (UK sanctions regimes: North Korea, Iran, Syria, Russia,
+        Belarus, Myanmar) and used only when the DB is unavailable."""
+        try:
+            from app.models.transaction import CountryRisk
+            if self.db:
+                rows = self.db.query(CountryRisk).all()
+                if rows:
+                    prohibited = {r.iso2 for r in rows if r.prohibited}
+                    high_risk = {
+                        r.iso2 for r in rows
+                        if (r.risk_level or '') in ('HIGH', 'HIGH_3RD') and not r.prohibited
+                    }
+                    if prohibited or high_risk:
+                        return prohibited, high_risk
+        except Exception as exc:
+            logger.warning(
+                "CountryRisk table unavailable (%s: %s); falling back to "
+                "built-in UK sanctions list", type(exc).__name__, exc,
+            )
+        # Fallback ONLY — the DB CountryRisk list is authoritative.
+        return (
+            {'KP', 'IR', 'SY', 'RU', 'BY', 'MM'},   # UK sanctions regimes
+            {'AF', 'PK', 'YE', 'LY', 'SO', 'SD', 'SS', 'IQ', 'LB', 'ZW',
+             'HT', 'ML', 'NG', 'VE'},
+        )
+
     def get_transaction_review_data(self) -> Dict[str, Any]:
         """
         CRITICAL: Get Transaction Review alerts for this matter
         This integrates AML monitoring findings into SoF assessment
-        
-        NEW: Analyzes bank statements directly for AML risks when TransactionAlert table is empty
-        - Sanctioned countries: IR, KP, SY, CU → CRITICAL
-        - Large cash (≥£10k) → HIGH
+
+        Analyzes bank statements directly for AML risks when the
+        TransactionAlert table is empty. Country risk comes from the
+        DB-driven CountryRisk list (UK sanctions), with a UK fallback.
+
+        The summary carries `monitoring_ran`: False means monitoring
+        DID NOT RUN (no transaction data at all) — which must never be
+        presented as "no alerts, all clear".
         """
         from app.models import TransactionAlert, Transaction
-        
+
         # Check if database connection is available
         alerts = []
         if self.db:
             alerts = self.db.query(TransactionAlert).filter(
                 TransactionAlert.matter_id == self.matter_id
             ).all()
-        
+
         # If no alerts in database, analyze bank statements directly
         if not alerts:
             # Load bank statements from DB
@@ -1004,14 +1349,16 @@ class SoFAssessmentEngine:
                 ).first()
                 matter_storage = _as_row.data if _as_row and _as_row.data else None
 
-            if matter_storage and matter_storage.get('bank_statements'):
+            monitoring_ran = bool(matter_storage and matter_storage.get('bank_statements'))
+
+            if monitoring_ran:
                 bank_statements = matter_storage['bank_statements']
 
-                # Analyze for AML risks - SYNCHRONIZED WITH TRANSACTION REVIEW ENDPOINT
-                # Sanctioned countries that trigger CRITICAL alerts
-                sanctioned_countries = ['IR', 'KP', 'SY', 'CU', 'VE', 'RU', 'BY', 'AF']
-                # High-risk countries that trigger HIGH alerts
-                high_risk_countries = ['PK', 'MM', 'YE', 'LY', 'SO', 'SD', 'SS', 'IQ', 'LB', 'ZW']
+                # Country risk from the shared DB-driven list (UK
+                # sanctions regimes) — see _load_country_risk_sets.
+                _prohibited, _high_risk = self._load_country_risk_sets()
+                sanctioned_countries = _prohibited
+                high_risk_countries = _high_risk
 
                 # Country name mappings
                 country_names = {
@@ -1041,15 +1388,15 @@ class SoFAssessmentEngine:
                     description = stmt.get('description', 'Unknown transaction')
                     counterparty = stmt.get('counterparty', 'Unknown')
 
-                    # Check for sanctioned countries
+                    # Check for sanctioned countries (DB-driven UK list)
                     if country in sanctioned_countries:
                         sanctions_count += 1
                         country_display = country_names.get(country, country)
                         alert_objects.append({
                             "severity": "CRITICAL",
                             "score": 100,
-                            "reasons": [f"Transaction to sanctioned jurisdiction: {country_display}",
-                                       "UK/EU sanctions regulations apply",
+                            "reasons": [f"Transaction to UK-sanctioned jurisdiction: {country_display}",
+                                       "UK sanctions regulations apply",
                                        "Immediate review and enhanced due diligence required"],
                             "transaction": {
                                 "id": f"BANK-{self.matter_id}-{date}",
@@ -1091,7 +1438,9 @@ class SoFAssessmentEngine:
                     ]) or ('CASH' in narrative_upper and 'WITHDRAWAL' in narrative_upper) or \
                        ('ATM' in narrative_upper and direction in ('out', 'debit'))
 
-                    cash_threshold = 7500  # £7,500 threshold
+                    # One source of truth for the cash threshold:
+                    # cfg_cash_threshold_deposit (tiered config).
+                    cash_threshold = float(self.settings.get('cfg_cash_threshold_deposit', 7500.0))
                     is_cash = channel == 'cash' or is_cash_deposit or is_cash_withdrawal
 
                     if is_cash and amount >= cash_threshold:
@@ -1131,19 +1480,26 @@ class SoFAssessmentEngine:
                             "critical_alerts": sanctions_count,
                             "high_alerts": high_risk_count + cash_count,
                             "medium_alerts": 0,
-                            "key_concerns": key_concerns
+                            "key_concerns": key_concerns,
+                            "monitoring_ran": True
                         },
                         "alerts": alert_objects  # Now includes actual alert objects for questions
                     }
 
-            # No alerts and no bank statement risks
+            # Zero alerts. Distinguish "monitoring ran over the
+            # statements and found nothing" from "monitoring DID NOT
+            # RUN because there was no transaction data at all" — the
+            # latter must never be reported as a clean result.
             return {
                 "summary": {
                     "total_alerts": 0,
                     "critical_alerts": 0,
                     "high_alerts": 0,
                     "medium_alerts": 0,
-                    "key_concerns": []
+                    "key_concerns": [] if monitoring_ran else [
+                        "Transaction monitoring did not run - no transaction data available"
+                    ],
+                    "monitoring_ran": monitoring_ran
                 },
                 "alerts": []
             }
@@ -1191,7 +1547,8 @@ class SoFAssessmentEngine:
                 "critical_alerts": critical,
                 "high_alerts": high,
                 "medium_alerts": medium,
-                "key_concerns": key_concerns
+                "key_concerns": key_concerns,
+                "monitoring_ran": True
             },
             "alerts": alert_details
         }
@@ -1202,12 +1559,14 @@ class SoFAssessmentEngine:
         claims: List[Dict[str, Any]],
         evidence_matches: List[Dict[str, Any]],
         flags: Dict[str, Any],
-        transaction_review_data: Dict[str, Any]
+        transaction_review_data: Dict[str, Any],
+        client_info: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
         Identify red flags including Transaction Review alerts
         """
         red_flags = []
+        client_name = str((client_info or {}).get('client_name') or '')
         
         # 1. Add Transaction Review CRITICAL and HIGH alerts as red flags
         tr_alerts = transaction_review_data.get('alerts', [])
@@ -1237,10 +1596,25 @@ class SoFAssessmentEngine:
                     "details": alert['reasons']
                 })
         
-        # 2. Unmatched claims
+        # 2. Unmatched claims (de-minimis claims demand no evidence;
+        #    amount-only / aggregated partial matches are called out
+        #    honestly rather than as "no evidence").
         for i, evidence in enumerate(evidence_matches):
-            if not evidence['verified']:
-                claim = claims[i]
+            claim = claims[i]
+            if claim.get('de_minimis'):
+                continue
+            if evidence.get('verified'):
+                continue
+            if evidence.get('partially_verified'):
+                red_flags.append({
+                    "severity": "MEDIUM",
+                    "source": "SoF_ANALYSIS",
+                    "flag": f"Claimed {claim['source_type']} of £{claim['expected_amount']:,.2f} "
+                           f"matched by amount only ({evidence.get('match_quality')}) - "
+                           f"payer/source not corroborated; confirmation required",
+                    "claim_id": claim['claim_id']
+                })
+            else:
                 red_flags.append({
                     "severity": "HIGH",
                     "source": "SoF_ANALYSIS",
@@ -1248,38 +1622,133 @@ class SoFAssessmentEngine:
                            f"£{claim['expected_amount']:,.2f}",
                     "claim_id": claim['claim_id']
                 })
-        
-        # 3. Large unexplained credits
+
+        # 3. Large unexplained credits — keyed with description so two
+        #    distinct same-day equal credits stay distinct; threshold
+        #    from configuration; HIGH severity (these drive the verdict).
         explained_amounts = set()
         for evidence in evidence_matches:
             for txn in evidence['transactions']:
-                explained_amounts.add((txn['date'], txn['amount']))
-        
-        large_threshold = 10000  # £10k
+                explained_amounts.add((txn.get('date'), txn.get('amount'), txn.get('description')))
+
+        large_threshold = float(self.settings.get('sof_large_credit_threshold', 10000.0))
         for txn in bank_statements:
-            if txn.get('direction') == 'credit' and txn.get('amount', 0) > large_threshold:
-                if (txn.get('date'), txn.get('amount')) not in explained_amounts:
+            if txn.get('direction') == 'credit' and txn.get('amount', 0) >= large_threshold:
+                if (txn.get('date'), txn.get('amount'), txn.get('description')) not in explained_amounts:
                     red_flags.append({
-                        "severity": "MEDIUM",
+                        "severity": "HIGH",
                         "source": "SoF_ANALYSIS",
                         "flag": f"Large unexplained credit of £{txn['amount']:,.2f} on {txn.get('date')} "
                                f"in {txn.get('account_id', 'account')}",
                         "transaction_ref": f"{txn.get('account_id')}-{txn.get('date')}"
                     })
-        
-        # 4. Cash deposits
+
+        # 4. Cash deposits — threshold from cfg_cash_threshold_deposit
+        #    (one source of truth with Transaction Review); HIGH severity.
+        cash_threshold = float(self.settings.get('cfg_cash_threshold_deposit', 7500.0))
         cash_keywords = ['cash', 'deposit', 'atm deposit']
         for txn in bank_statements:
             desc = txn.get('description', '').lower()
             if txn.get('direction') == 'credit' and any(kw in desc for kw in cash_keywords):
-                if txn.get('amount', 0) > 5000:  # £5k threshold
+                if txn.get('amount', 0) >= cash_threshold:
                     red_flags.append({
-                        "severity": "MEDIUM",
+                        "severity": "HIGH",
                         "source": "SoF_ANALYSIS",
                         "flag": f"Cash deposit of £{txn['amount']:,.2f} on {txn.get('date')}",
                         "transaction_ref": f"{txn.get('account_id')}-{txn.get('date')}"
                     })
-        
+
+        # 4b. THIRD-PARTY FUNDS: material credits whose payer is
+        #     neither the client nor matched to any declared claim.
+        #     Undeclared third-party funding is an SRA thematic-review
+        #     focus and must be surfaced by name.
+        tp_threshold = float(self.settings.get('sof_third_party_min_amount', 1000.0))
+        if client_name:
+            for txn in bank_statements:
+                if txn.get('direction') != 'credit':
+                    continue
+                try:
+                    amt = float(txn.get('amount', 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if amt < tp_threshold:
+                    continue
+                if (txn.get('date'), txn.get('amount'), txn.get('description')) in explained_amounts:
+                    continue
+                payer = str(txn.get('counterparty_name') or txn.get('counterparty') or '').strip()
+                payer_text = payer or str(txn.get('description') or '')
+                if not payer_text.strip():
+                    continue
+                if self._names_match(client_name, payer_text):
+                    continue
+                red_flags.append({
+                    "severity": "HIGH",
+                    "source": "SoF_ANALYSIS",
+                    "rule": "THIRD_PARTY_FUNDS",
+                    "flag": f"THIRD_PARTY_FUNDS: credit of £{amt:,.2f} on {txn.get('date')} "
+                           f"from undeclared third party '{payer or payer_text[:60]}' - "
+                           f"not matched to any declared source",
+                    "transaction_ref": f"{txn.get('account_id')}-{txn.get('date')}",
+                    "details": [f"Payer: {payer or payer_text[:120]}",
+                                "Third-party funds must be declared and evidenced "
+                                "(donor identity, relationship and source of funds)"]
+                })
+
+        # 4c. Unknown-direction transactions (parser could not tell
+        #     credit from debit): NEEDS REVIEW — never counted as
+        #     credit evidence, flagged above a de-minimis amount.
+        unknown_txns = [
+            t for t in bank_statements
+            if t.get('direction') == 'unknown'
+            and float(t.get('amount', 0) or 0) >= 500
+        ]
+        if unknown_txns:
+            unknown_total = sum(float(t.get('amount', 0) or 0) for t in unknown_txns)
+            red_flags.append({
+                "severity": "HIGH",
+                "source": "SoF_ANALYSIS",
+                "rule": "UNKNOWN_DIRECTION",
+                "flag": f"{len(unknown_txns)} transaction(s) totalling £{unknown_total:,.2f} "
+                       f"have UNKNOWN direction and require manual review - they have NOT "
+                       f"been counted as credit evidence",
+            })
+
+        # 4d. AI-extracted transaction provenance: evidence produced by
+        #     AI from an unparseable document requires human confirmation.
+        ai_txns = [t for t in bank_statements if t.get('source') == 'ai_extracted']
+        if ai_txns:
+            red_flags.append({
+                "severity": "HIGH",
+                "source": "SoF_ANALYSIS",
+                "rule": "AI_EXTRACTED_EVIDENCE",
+                "flag": f"{len(ai_txns)} transaction(s) were extracted by AI from an "
+                       f"unparseable document and require human confirmation - they "
+                       f"cannot auto-verify any claim",
+            })
+
+        # 4e. Minimum declared claims (sof_min_claims_required): a
+        #     matter moving material funds must declare enough sources.
+        min_claims = int(self.settings.get('sof_min_claims_required', 1))
+        real_claims = [
+            c for c in claims
+            if str(c.get('source_type', '')).lower() != 'unspecified'
+            and not c.get('de_minimis')
+        ]
+        material_funds = any(
+            t.get('direction') == 'credit'
+            and float(t.get('amount', 0) or 0) >= 500
+            for t in bank_statements
+        )
+        if material_funds and len(real_claims) < min_claims:
+            red_flags.append({
+                "severity": "HIGH",
+                "source": "SoF_ANALYSIS",
+                "rule": "INSUFFICIENT_CLAIMS",
+                "flag": f"Only {len(real_claims)} declared source-of-funds claim(s) "
+                       f"but the configuration requires at least {min_claims} for "
+                       f"this risk tier while material funds are present",
+            })
+
         # 5. PEP flag
         if flags.get('pep'):
             red_flags.append({
@@ -1310,66 +1779,95 @@ class SoFAssessmentEngine:
         red_flags: List[Dict[str, Any]],
         transaction_review_data: Dict[str, Any],
         client_info: Dict[str, Any] = None,
-        purchase: Dict[str, Any] = None
+        purchase: Dict[str, Any] = None,
+        bank_statements: List[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Make overall risk decision considering all factors
         Now properly considers BOTH bank transaction matches AND document verification
-        AND requires 100% confidence for full verification
+        Uses the CONFIGURED confidence threshold (sof_confidence_threshold)
+        consistently — not a hardcoded float equality.
         """
+        conf_threshold = float(self.settings.get('sof_confidence_threshold', 0.999))
+
         # Count verified claims - must have:
         # 1. Bank match (verified=True)
-        # 2. Document verification (document_verified=True)  
-        # 3. 100% confidence (no issues found)
+        # 2. Document verification (document_verified=True)
+        # 3. Document confidence at/above the configured threshold
         verified_claims = sum(
-            1 for e in evidence_matches 
-            if e.get('verified', False) 
+            1 for e in evidence_matches
+            if e.get('verified', False)
             and e.get('document_verified', False)
-            and e.get('document_verification', {}).get('confidence', 0) >= 1.0
+            and (e.get('document_verification') or {}).get('confidence', 0) >= conf_threshold
         )
-        total_claims = len(claims)
+        # De-minimis claims demand no evidence, so they are excluded
+        # from the verification-rate denominator.
+        substantive_claims = [c for c in claims if not c.get('de_minimis')]
+        total_claims = len(substantive_claims) or len(claims)
         verification_rate = verified_claims / total_claims if total_claims > 0 else 0
-        
+
         # Check funding coverage
         best_coverage = max([p['coverage'] for p in funding_paths], default=0)
-        
-        # Count red flags by severity
+
+        # Count red flags by severity — MEDIUM flags matter too:
+        # accumulation of medium concerns must erode confidence.
         critical_flags = sum(1 for f in red_flags if f['severity'] == 'CRITICAL')
         high_flags = sum(1 for f in red_flags if f['severity'] == 'HIGH')
-        
+        medium_flags = sum(1 for f in red_flags if f['severity'] == 'MEDIUM')
+
         # Transaction Review integration - CRITICAL impact
         tr_summary = transaction_review_data.get('summary', {})
         tr_critical = tr_summary.get('critical_alerts', 0)
         tr_high = tr_summary.get('high_alerts', 0)
-        
+        monitoring_ran = bool(tr_summary.get('monitoring_ran', True))
+
+        # Data-quality / provenance counts from the parsed statements.
+        stmts = bank_statements or []
+        ai_extracted_count = sum(1 for t in stmts if t.get('source') == 'ai_extracted')
+        unknown_direction_count = sum(1 for t in stmts if t.get('direction') == 'unknown')
+
+        verdict_notes: List[str] = []
+
         # Base confidence score
         confidence = 50
-        
+
         # Adjust for claim verification
         confidence += int(verification_rate * 30)
-        
+
         # Adjust for funding coverage
         confidence += int(best_coverage * 0.2)
-        
+
         # Penalize for red flags
         confidence -= (critical_flags * 30)
         confidence -= (high_flags * 15)
-        
+        # MEDIUM flags: -5 each, capped at -20 so accumulation matters
+        # without a pile of mediums outweighing a critical.
+        confidence -= min(medium_flags * 5, 20)
+
         # Transaction Review penalties - SEVERE impact
         if tr_critical > 0:
             confidence = min(confidence, 40)  # Cap at 40% if CRITICAL alerts exist
         if tr_high > 0:
-            confidence -= (tr_high * 10)
-        
+            confidence -= (tr_high * 15)
+
+        # Monitoring that never ran is NOT a clean result — withhold
+        # any benefit of the doubt.
+        if not monitoring_ran:
+            confidence -= 5
+            verdict_notes.append(
+                "Transaction monitoring DID NOT RUN (no transaction data available) — "
+                "the absence of alerts must not be read as a clean result."
+            )
+
         # Adjust for risk rating
         if risk_rating == 'high':
             confidence -= 10
         elif risk_rating == 'low':
             confidence += 10
-        
+
         # Clamp confidence
         confidence = max(0, min(100, confidence))
-        
+
         # Determine status
         if confidence >= 80 and critical_flags == 0 and tr_critical == 0:
             status = "sufficient"
@@ -1377,7 +1875,30 @@ class SoFAssessmentEngine:
             status = "borderline"
         else:
             status = "insufficient"
-        
+
+        # tr_critical_alerts_block: when ON (default), ANY CRITICAL
+        # transaction-monitoring alert hard-blocks the verdict at
+        # INSUFFICIENT regardless of score.
+        if tr_critical > 0 and bool(self.settings.get('tr_critical_alerts_block', True)):
+            status = "insufficient"
+            verdict_notes.append(
+                f"BLOCKED: {tr_critical} CRITICAL transaction-monitoring alert(s) exist and "
+                f"the tr_critical_alerts_block control is ON — the verdict is INSUFFICIENT "
+                f"regardless of score until the alert(s) are resolved or accepted with a rationale."
+            )
+
+        if ai_extracted_count > 0:
+            verdict_notes.append(
+                f"{ai_extracted_count} transaction(s) were extracted by AI from an unparseable "
+                f"document and require human confirmation — they have been excluded from "
+                f"auto-verifying claims."
+            )
+        if unknown_direction_count > 0:
+            verdict_notes.append(
+                f"{unknown_direction_count} transaction(s) have unknown direction and were "
+                f"not counted as credit evidence — manual review required."
+            )
+
         # Build structured, detailed rationale
         rationale = self._build_detailed_rationale(
             verified_claims=verified_claims,
@@ -1394,9 +1915,13 @@ class SoFAssessmentEngine:
             status=status,
             red_flags=red_flags,
             client_info=client_info,
-            purchase=purchase
+            purchase=purchase,
+            verdict_notes=verdict_notes,
+            monitoring_ran=monitoring_ran,
+            ai_extracted_count=ai_extracted_count,
+            unknown_direction_count=unknown_direction_count
         )
-        
+
         return {
             "status": status,
             "confidence": confidence,
@@ -1419,13 +1944,37 @@ class SoFAssessmentEngine:
         status: str,
         red_flags: List[Dict[str, Any]],
         client_info: Dict[str, Any] = None,
-        purchase: Dict[str, Any] = None
+        purchase: Dict[str, Any] = None,
+        verdict_notes: List[str] = None,
+        monitoring_ran: bool = True,
+        ai_extracted_count: int = 0,
+        unknown_direction_count: int = 0
     ) -> str:
         """
         Build detailed, structured rationale with sections and tables
         """
         sections = []
-        
+
+        # ============================================================
+        # DATA QUALITY / EVIDENCE PROVENANCE (prominent, first)
+        # ============================================================
+        if ai_extracted_count > 0 or unknown_direction_count > 0:
+            dq = ["=== EVIDENCE PROVENANCE & DATA QUALITY ==="]
+            if ai_extracted_count > 0:
+                dq.append(
+                    f"⚠️ {ai_extracted_count} transaction(s) were extracted by AI from an "
+                    f"unparseable document and REQUIRE HUMAN CONFIRMATION. They may "
+                    f"corroborate claims but cannot auto-verify them."
+                )
+            if unknown_direction_count > 0:
+                dq.append(
+                    f"⚠️ {unknown_direction_count} transaction(s) have UNKNOWN direction "
+                    f"(credit/debit could not be determined) and were NOT counted as "
+                    f"credit evidence."
+                )
+            dq.append("")
+            sections.append("\n".join(dq))
+
         # ============================================================
         # CLIENT INFORMATION HEADER
         # ============================================================
@@ -1501,7 +2050,7 @@ class SoFAssessmentEngine:
             
             # Check for document verification first
             doc_verified = evidence.get('document_verified', False)
-            doc_verification = evidence.get('document_verification', {})
+            doc_verification = (evidence.get('document_verification') or {})
             
             # Evidence found - check both bank transactions AND document verification
             evidence_parts = []
@@ -1655,9 +2204,18 @@ class SoFAssessmentEngine:
                     f"though the overall funding position is mathematically sufficient.\n"
                 )
             else:
+                # Sum the ACTUAL declared amounts of the unverified
+                # claims (previously the first claim's amount was
+                # multiplied by a count — a fabricated figure).
+                unverified_total = sum(
+                    e.get('expected_amount', 0)
+                    for e in evidence_matches
+                    if not e.get('verified')
+                )
                 sof_section.append(
                     f"These unverified claims represent material funding gaps. Without supporting evidence, "
-                    f"we cannot confirm the source of approximately £{(evidence_matches[0]['expected_amount'] * (total_claims - verified_claims)):,.0f}. "
+                    f"we cannot confirm the source of approximately £{unverified_total:,.0f} "
+                    f"(the sum of the declared amounts of the unverified claims). "
                     f"This is a regulatory compliance concern that must be addressed before proceeding.\n"
                 )
         else:
@@ -1763,13 +2321,22 @@ class SoFAssessmentEngine:
                 tr_section.append(f"\nADDITIONAL RED FLAGS:\n")
                 for flag in red_flags[:5]:
                     tr_section.append(f"  • [{flag['severity']}] {flag['flag']}\n")
-        else:
+        elif monitoring_ran:
             tr_section.append(
-                "✅ OVERALL STATUS: No transaction alerts identified.\n\n"
+                "✅ OVERALL STATUS: Transaction monitoring ran and identified no alerts.\n\n"
                 "TRANSACTION REVIEW SUMMARY:\n"
                 "The automated transaction monitoring has not identified any AML/CTF concerns in the "
                 "transaction data reviewed. This is a positive indicator, though it does not replace "
                 "the requirement for proper SoF documentation.\n"
+            )
+        else:
+            tr_section.append(
+                "⚠️ OVERALL STATUS: Transaction monitoring DID NOT RUN.\n\n"
+                "TRANSACTION REVIEW SUMMARY:\n"
+                "No transaction data was available for this matter, so the automated transaction "
+                "monitoring could not run. The absence of alerts is NOT a clean result — it means "
+                "the transactions have not been screened at all. Bank statements must be obtained "
+                "and monitoring re-run before any positive conclusion is drawn.\n"
             )
         
         sections.append("".join(tr_section))
@@ -1778,7 +2345,14 @@ class SoFAssessmentEngine:
         # SECTION 3: FINAL ASSESSMENT
         # ============================================================
         final_section = ["\n=== FINAL ASSESSMENT ===\n\n"]
-        
+
+        # Verdict-shaping notes (critical-alert block, monitoring not
+        # run, AI-extracted evidence, unknown directions).
+        for note in (verdict_notes or []):
+            final_section.append(f"⚠️ {note}\n")
+        if verdict_notes:
+            final_section.append("\n")
+
         if status == "sufficient":
             final_section.append(
                 "✅ DECISION: SUFFICIENT\n\n"
@@ -1874,28 +2448,46 @@ class SoFAssessmentEngine:
                         f"requires explanation - {reason}."
                     )
                 
-                # Add document request for cash transactions
+                # Add document request for cash transactions (threshold
+                # from the shared cash-deposit configuration key)
                 if any('cash' in str(a.get('reasons', [])).lower() for a in high_tr):
-                    documents.append("Source documentation for all cash transactions over £10,000")
+                    _cash_thr = float(self.settings.get('cfg_cash_threshold_deposit', 7500.0))
+                    documents.append(
+                        f"Source documentation for all cash transactions of £{_cash_thr:,.0f} or more"
+                    )
         
         # 2. Document requirements for ALL claims (verified and unverified)
         # Bank payments alone are insufficient - we need source documents
         for i, evidence in enumerate(evidence_matches):
             claim = claims[i]
             source_lower = claim['source_type'].lower()
-            
+
+            # De-minimis (sub-£500) claims: no evidence demanded.
+            if claim.get('de_minimis'):
+                continue
+
             # Add questions for unverified claims
             if not evidence['verified']:
-                questions.append(
-                    f"No bank statement evidence found for your claimed {claim['source_type']} "
-                    f"of £{claim['expected_amount']:,.2f}. Please provide supporting documentation."
-                )
-            
-            # Check if this specific claim is fully verified
+                if evidence.get('partially_verified'):
+                    questions.append(
+                        f"A credit matching the amount of your claimed {claim['source_type']} "
+                        f"of £{claim['expected_amount']:,.2f} was found, but the payer does not "
+                        f"corroborate the stated source. Please confirm who the payment came from "
+                        f"and provide supporting documentation."
+                    )
+                else:
+                    questions.append(
+                        f"No bank statement evidence found for your claimed {claim['source_type']} "
+                        f"of £{claim['expected_amount']:,.2f}. Please provide supporting documentation."
+                    )
+
+            # Check if this specific claim is fully verified — uses the
+            # SAME configured threshold as the verdict and rationale
+            # (sof_confidence_threshold), not a different bar.
             claim_fully_verified = (
-                evidence.get('verified', False) and 
+                evidence.get('verified', False) and
                 evidence.get('document_verified', False) and
-                evidence.get('document_verification', {}).get('confidence', 0) >= self.settings.get('sof_partial_confidence_threshold', 0.99)
+                (evidence.get('document_verification') or {}).get('confidence', 0) >= self.settings.get('sof_confidence_threshold', 0.999)
             )
             
             # Skip document requests for fully verified claims (100% confidence)
@@ -1915,7 +2507,7 @@ class SoFAssessmentEngine:
                     documents.append(f"Solicitor's statement of account showing sale proceeds (for {claim['source_type']} claim)")
                 
                 # Check if completion statement was uploaded but missing amount
-                doc_ver = evidence.get('document_verification', {})
+                doc_ver = (evidence.get('document_verification') or {})
                 differences = doc_ver.get('differences', [])
                 for diff in differences:
                     if diff.get('field') == 'payment_amount' and 'not found' in diff.get('issue', '').lower():
@@ -1952,9 +2544,9 @@ class SoFAssessmentEngine:
         # 5. Standard documents if not already provided
         # BUT: Skip if all evidence is fully verified (100% confidence)
         all_fully_verified = all(
-            match.get('verified', False) and 
+            match.get('verified', False) and
             match.get('document_verified', False) and
-            match.get('document_verification', {}).get('confidence', 0) >= self.settings.get('sof_partial_confidence_threshold', 0.99)
+            (match.get('document_verification') or {}).get('confidence', 0) >= self.settings.get('sof_confidence_threshold', 0.999)
             for match in evidence_matches
         ) if evidence_matches else False
         
@@ -2060,14 +2652,16 @@ class SoFAssessmentEngine:
         bank_verified_count = sum(1 for e in evidence_matches if e.get('verified', False))
         doc_verified_count = sum(1 for e in evidence_matches if e.get('document_verified', False))
         
-        # FULLY VERIFIED requires: bank + docs + 100% confidence
+        # FULLY VERIFIED requires: bank + docs + configured confidence
+        # threshold (sof_confidence_threshold — same bar as the verdict)
+        _conf_threshold = float(self.settings.get('sof_confidence_threshold', 0.999))
         fully_verified_count = sum(
-            1 for e in evidence_matches 
-            if e.get('verified', False) 
+            1 for e in evidence_matches
+            if e.get('verified', False)
             and e.get('document_verified', False)
-            and e.get('document_verification', {}).get('confidence', 0) >= 1.0
+            and (e.get('document_verification') or {}).get('confidence', 0) >= _conf_threshold
         )
-        
+
         note_parts.append(
             f"Bank transactions: {bank_verified_count}/{len(claims)} claims matched."
         )
@@ -2075,35 +2669,36 @@ class SoFAssessmentEngine:
             f"Supporting documents: {doc_verified_count}/{len(claims)} claims verified with source documentation."
         )
         note_parts.append(
-            f"FULLY VERIFIED (bank + docs + 100% confidence): {fully_verified_count}/{len(claims)} claims."
+            f"FULLY VERIFIED (bank + docs + confidence ≥ {_conf_threshold:.1%}): {fully_verified_count}/{len(claims)} claims."
         )
-        
-        # Show warning if any claims have less than 100% confidence
+
+        # Show warning if any claims sit below the configured threshold
         partial_verified = sum(
-            1 for e in evidence_matches 
-            if e.get('verified', False) 
+            1 for e in evidence_matches
+            if e.get('verified', False)
             and e.get('document_verified', False)
-            and e.get('document_verification', {}).get('confidence', 0) < 1.0
+            and (e.get('document_verification') or {}).get('confidence', 0) < _conf_threshold
         )
         if partial_verified > 0:
             note_parts.append(
-                f"⚠️ REQUIRES REVIEW: {partial_verified} claim(s) have document issues (confidence < 100%)."
+                f"⚠️ REQUIRES REVIEW: {partial_verified} claim(s) have document issues "
+                f"(confidence below the configured threshold)."
             )
         
         note_parts.append("")
         
         for evidence in evidence_matches:
             doc_verified = evidence.get('document_verified', False)
-            doc_verification = evidence.get('document_verification', {})
+            doc_verification = (evidence.get('document_verification') or {})
             
             # Show bank transaction status
             if evidence['verified']:
                 txns = evidence['transactions']
                 first_txn = txns[0]
                 
-                # Determine status based on confidence
+                # Determine status based on confidence (configured threshold)
                 confidence = doc_verification.get('confidence', 0)
-                is_fully_verified = doc_verified and confidence >= 1.0
+                is_fully_verified = doc_verified and confidence >= _conf_threshold
                 
                 status_icon = '✅' if is_fully_verified else '⚠️'
                 status_text = 'FULLY VERIFIED' if is_fully_verified else 'REQUIRES REVIEW'

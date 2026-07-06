@@ -8,6 +8,9 @@ import { API_BASE_URL, authFetch } from '../lib/api'
 import { useCurrentMatter } from '../stores/currentMatterStore'
 import { useAuthStore } from '../stores/authStore'
 import MatterStatusBadge from '../components/ui/MatterStatusBadge'
+import { RationaleModal } from '../components/ui/RationaleModal'
+import { showToast } from '../lib/toast'
+import { formatCurrencyWhole, formatDateTime } from '../lib/format'
 
 type TabType = 'sof-assessment' | 'transactions' | 'funds-lineage' | 'verification' | 'audit-trail'
 
@@ -51,7 +54,7 @@ export default function MatterDetailPage() {
         transaction_type: data.transaction_type ?? null,
       })
     } catch (err) {
-      console.error('Error fetching matter:', err)
+      console.debug('Error fetching matter:', err)
       if (showSpinner) setError('Failed to load matter details. Please try again.')
     } finally {
       if (showSpinner) setLoading(false)
@@ -83,8 +86,8 @@ export default function MatterDetailPage() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <p className="text-red-700 text-lg">{error || 'Matter not found'}</p>
-          <button 
-            onClick={() => window.location.reload()}
+          <button
+            onClick={() => refreshMatter(true)}
             className="mt-4 bg-zinc-900 text-white px-4 py-2 rounded"
           >
             Retry
@@ -154,13 +157,6 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
         let txnData: any[] = []
         if (txnResponse.ok) {
           txnData = await txnResponse.json()
-          console.log('🔗 Funds Lineage: Fetched', txnData.length, 'transactions from API')
-          if (txnData.length > 0) {
-            console.log('🔗 Funds Lineage: First API transaction:', txnData[0])
-            console.log('🔗 Funds Lineage: account_id:', txnData[0].account_id)
-            console.log('🔗 Funds Lineage: bank_name:', txnData[0].bank_name)
-            console.log('🔗 Funds Lineage: account_type:', txnData[0].account_type)
-          }
         }
         
         // Fetch SoF assessment to check for savings claims
@@ -172,32 +168,26 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
         
         if (sofResponse.ok) {
           const sofData = await sofResponse.json()
-          console.log('🔗 Funds Lineage: SoF results data:', sofData)
-          
+
           // Data is nested inside 'assessment' object
           const assessment = sofData.assessment || sofData
-          console.log('🔗 Funds Lineage: Assessment object:', assessment)
-          
+
           claims = assessment.claims || sofData.claims || []
-          console.log('🔗 Funds Lineage: Claims array:', claims)
-          
+
           // Check if any claim is savings-related
           if (claims.length > 0) {
             isSavingsClaim = claims.some((claim: any) => {
               const sourceType = (claim.source_type || '').toLowerCase()
-              console.log('🔗 Funds Lineage: Checking claim source_type:', sourceType)
               return sourceType.includes('saving') || sourceType.includes('accumul')
             })
           }
-          
+
           // Also check evidence for savings claims
           const evidence = assessment.evidence || sofData.evidence || []
-          console.log('🔗 Funds Lineage: Evidence array:', evidence)
-          
+
           if (!isSavingsClaim && evidence.length > 0) {
             for (const ev of evidence) {
               const claimSource = (ev.claim_source || '').toLowerCase()
-              console.log('🔗 Funds Lineage: Checking evidence claim_source:', claimSource)
               if (claimSource.includes('saving') || claimSource.includes('accumul')) {
                 isSavingsClaim = true
                 if (claims.length === 0) {
@@ -215,20 +205,18 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
               const answer = String(questionnaireAnswers[key] || '').toLowerCase()
               if (answer.includes('saving') || answer.includes('accumul')) {
                 isSavingsClaim = true
-                console.log('🔗 Funds Lineage: Found savings in questionnaire answer:', key)
                 break
               }
             }
           }
         }
-        
+
         // If no results yet or no savings found, also check the status endpoint
         if (!isSavingsClaim) {
           const statusResponse = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/status`)
           if (statusResponse.ok) {
             const statusData = await statusResponse.json()
-            console.log('🔗 Funds Lineage: SoF status data:', statusData)
-            
+
             // Check questionnaire answers
             if (statusData.questionnaire_answers) {
               const answers = statusData.questionnaire_answers
@@ -246,14 +234,11 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
               const statusStr = JSON.stringify(statusData).toLowerCase()
               if (statusStr.includes('saving') || statusStr.includes('accumul')) {
                 isSavingsClaim = true
-                console.log('🔗 Funds Lineage: Found savings keyword in status data')
               }
             }
           }
         }
-        
-        console.log('🔗 Funds Lineage: FINAL isSavingsClaim =', isSavingsClaim, 'claims =', claims)
-        
+
         // Transform transaction data
         const formattedTransactions = (txnData || []).map((t: any, idx: number) => {
           const directionLower = (t.direction || '').toLowerCase()
@@ -276,19 +261,7 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
             // Just use the account ID if that's all we have - this should work for distinguishing accounts
             accountDisplay = `Account ${accountId}`
           }
-          
-          // Debug log first few transactions
-          if (idx < 3) {
-            console.log(`🔗 DEBUG txn[${idx}]:`, {
-              raw_account_id: t.account_id,
-              raw_customer_id: t.customer_id,
-              raw_bank_name: t.bank_name,
-              raw_account_type: t.account_type,
-              computed_accountId: accountId,
-              computed_accountDisplay: accountDisplay
-            })
-          }
-          
+
           return {
             id: t.id?.toString() || `TXN-${idx}`,
             date: t.txn_date || t.date || t.transaction_date,
@@ -304,21 +277,11 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
         })
         
         setTransactions(formattedTransactions)
-        
-        // Debug: Log transformed transactions
-        console.log('🔗 Funds Lineage: Transformed transactions:', formattedTransactions.length)
-        if (formattedTransactions.length > 0) {
-          console.log('🔗 Funds Lineage: First transformed transaction:', formattedTransactions[0])
-          // Show unique accounts
-          const accounts = new Set(formattedTransactions.map((t: any) => t.account))
-          console.log('🔗 Funds Lineage: Unique accounts after transform:', Array.from(accounts))
-        }
-        
         setSofClaims(claims)
         setHasSavingsClaim(isSavingsClaim)
-        
+
       } catch (err) {
-        console.error('🔗 Funds Lineage: Error fetching data:', err)
+        console.debug('Funds Lineage: error fetching data:', err)
       } finally {
         setLoading(false)
       }
@@ -366,7 +329,7 @@ function FundsLineageTab({ matterId }: { matterId: number }) {
                 {sofClaims.length > 0 ? (
                   <ul className="text-xs text-zinc-600 space-y-1">
                     {sofClaims.map((claim, idx) => (
-                      <li key={idx}>• {claim.source_type}: £{(claim.expected_amount || 0).toLocaleString()}</li>
+                      <li key={idx}>• {claim.source_type}: {formatCurrencyWhole(claim.expected_amount)}</li>
                     ))}
                   </ul>
                 ) : (
@@ -432,7 +395,7 @@ function AuditTrailTab({ matterId }: { matterId: number }) {
           setStatusHistory(await statusRes.json())
         }
       } catch (err) {
-        console.error('Error fetching audit data:', err)
+        console.debug('Error fetching audit data:', err)
       } finally {
         setLoading(false)
       }
@@ -601,7 +564,12 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
   const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
   const status = matter.compliance_status || 'none'
   const [referrals, setReferrals] = useState<any[]>([])
+  // Referral load failure must DISABLE "Return to Fee Earner" - the
+  // list of referred claims is the evidence the return decision rests
+  // on, so a silent failure cannot be allowed to unlock the button.
+  const [referralsError, setReferralsError] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [showReturnModal, setShowReturnModal] = useState(false)
 
   const loadReferrals = async () => {
     if (!isAdmin || status !== 'in_review') return
@@ -610,8 +578,13 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
       if (r.ok) {
         const d = await r.json()
         setReferrals(d.referrals || [])
+        setReferralsError(false)
+      } else {
+        setReferralsError(true)
       }
-    } catch { /* non-blocking */ }
+    } catch {
+      setReferralsError(true)
+    }
   }
   useEffect(() => { loadReferrals() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [matter.id, status])
 
@@ -620,11 +593,7 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
   // compliance conversation lives on each claim.
   if (status === 'none' || status === 'returned') return null
 
-  const fmt = (s: string | null) => {
-    if (!s) return ''
-    const d = new Date(s)
-    return isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-  }
+  const fmt = (s: string | null) => (s ? formatDateTime(s) : '')
 
   const markReviewed = async (claimIndex: number) => {
     setBusy(true)
@@ -632,42 +601,30 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
       const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/sof-assessment/claims/${claimIndex}/mark-reviewed`, { method: 'POST' })
       if (!r.ok) {
         const err = await r.json().catch(() => ({}))
-        alert(`Could not mark reviewed: ${err.detail || r.statusText}`)
+        showToast(`Could not mark reviewed: ${err.detail || r.statusText}`, 'error')
         return
       }
       await loadReferrals()
     } catch (e: any) {
-      alert(`Could not mark reviewed: ${e?.message || 'Unknown error'}`)
+      showToast(`Could not mark reviewed: ${e?.message || 'Unknown error'}`, 'error')
     } finally {
       setBusy(false)
     }
   }
 
-  const returnToFeeEarner = async () => {
-    const rationale = window.prompt(
-      'Return this matter to the fee earner. Give the rationale for the return (required) - '
-      + 'the fee earner sees this so they know what compliance found.',
-      '',
-    )
-    if (rationale === null) return
-    if (rationale.trim().length < 10) {
-      alert('A rationale of at least 10 characters is required.')
-      return
-    }
+  const returnToFeeEarner = async (rationale: string) => {
     setBusy(true)
     try {
       const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matter.id}/return-to-fee-earner`, {
         method: 'POST',
-        body: JSON.stringify({ rationale: rationale.trim() }),
+        body: JSON.stringify({ rationale }),
       })
       if (!r.ok) {
         const err = await r.json().catch(() => ({}))
-        alert(`Could not return: ${err.detail || r.statusText}`)
-        return
+        throw new Error(err.detail || r.statusText || 'The return failed.')
       }
+      setShowReturnModal(false)
       onReviewed()
-    } catch (e: any) {
-      alert(`Could not return: ${e?.message || 'Unknown error'}`)
     } finally {
       setBusy(false)
     }
@@ -676,8 +633,9 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
   const allReviewed = referrals.length > 0 && referrals.every((r) => r.reviewed)
   // A matter can be returned once every per-claim referral has been
   // reviewed - or when there are none (it was sent to compliance as a
-  // whole rather than claim-by-claim).
-  const canReturn = referrals.length === 0 || allReviewed
+  // whole rather than claim-by-claim). If the referrals could not be
+  // loaded we cannot know either way, so the return stays disabled.
+  const canReturn = !referralsError && (referrals.length === 0 || allReviewed)
   const tone =
     status === 'returned' ? 'border-red-200 bg-red-50'
       : status === 'cleared' ? 'border-green-200 bg-green-50'
@@ -719,7 +677,17 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
           <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-700 mb-2">
             Referred claims - review each, then return the matter
           </div>
-          {referrals.length === 0 ? (
+          {referralsError ? (
+            <div className="flex items-center justify-between gap-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <span>Could not load referrals — the matter cannot be returned until they are reviewed.</span>
+              <button
+                onClick={loadReferrals}
+                className="flex-shrink-0 px-3 py-1 text-xs font-medium rounded border border-red-300 bg-white text-red-700 hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </div>
+          ) : referrals.length === 0 ? (
             <div className="text-xs text-amber-700">
               This matter was sent to compliance as a whole - there are no
               individual claim referrals to review. Add a rationale and return
@@ -731,7 +699,7 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
                 <li key={r.claim_index} className="flex items-start justify-between gap-3 rounded border border-amber-200 bg-white px-3 py-2">
                   <div className="min-w-0 text-xs">
                     <div className="font-medium text-zinc-900 capitalize">
-                      {r.source_type} <span className="text-zinc-400 tabular-nums">· £{Number(r.amount || 0).toLocaleString()}</span>
+                      {r.source_type} <span className="text-zinc-400 tabular-nums">· {formatCurrencyWhole(r.amount)}</span>
                     </div>
                     {r.reason && <div className="mt-0.5 italic text-zinc-600">"{r.reason}"</div>}
                     <div className="mt-0.5 text-zinc-400">Referred by {r.sent_by || 'unknown'}</div>
@@ -758,10 +726,14 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
           )}
           <div className="mt-3 flex items-center justify-end gap-3">
             {!canReturn && (
-              <span className="text-xs text-amber-700">Review every referral to enable return.</span>
+              <span className="text-xs text-amber-700">
+                {referralsError
+                  ? 'Referrals could not be loaded — retry above to enable return.'
+                  : 'Review every referral to enable return.'}
+              </span>
             )}
             <button
-              onClick={returnToFeeEarner}
+              onClick={() => setShowReturnModal(true)}
               disabled={busy || !canReturn}
               className={`px-3.5 py-1.5 text-xs font-semibold rounded-full transition-colors ${
                 canReturn && !busy
@@ -774,6 +746,15 @@ function ComplianceReviewPanel({ matter, onReviewed }: { matter: any; onReviewed
           </div>
         </div>
       )}
+
+      <RationaleModal
+        isOpen={showReturnModal}
+        title="Return matter to fee earner"
+        description="Give the rationale for the return - the fee earner sees this so they know what compliance found."
+        confirmLabel="Return to Fee Earner"
+        onConfirm={returnToFeeEarner}
+        onClose={() => setShowReturnModal(false)}
+      />
     </div>
   )
 }

@@ -6,12 +6,11 @@ Creates all tables, runs Alembic migrations, and seeds the default admin user.
 Usage (from backend/):
     python -m scripts.init_db
 
-Set ADMIN_PASSWORD env var to specify admin password, otherwise one is generated.
+Admin seeding requires the ADMIN_PASSWORD env var; if unset, seeding is
+skipped (with a warning) and the rest of the initialisation still runs.
 """
 import asyncio
 import os
-import secrets
-import string
 import subprocess
 import sys
 from pathlib import Path
@@ -44,26 +43,8 @@ from app.core.config import settings
 from app.core.security import get_password_hash
 
 # ── Admin seed data ──────────────────────────────────────────
-ADMIN_EMAIL = "admin@agora.ai"
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@agora.ai")
 ADMIN_FULL_NAME = "System Administrator"
-
-
-def _get_admin_password() -> tuple[str, bool]:
-    """Get admin password from env var or generate a secure one.
-    Returns (password, was_generated)."""
-    from app.core.security import validate_password_policy
-    env_pw = os.environ.get("ADMIN_PASSWORD")
-    if env_pw:
-        valid, msg = validate_password_policy(env_pw)
-        if not valid:
-            raise ValueError(f"ADMIN_PASSWORD does not meet policy: {msg}")
-        return env_pw, False
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-    while True:
-        pw = ''.join(secrets.choice(alphabet) for _ in range(16))
-        ok, _ = validate_password_policy(pw)
-        if ok:
-            return pw, True
 
 
 async def create_tables(engine):
@@ -98,11 +79,30 @@ _SCHEMA_PATCHES: list[tuple[str, str, str]] = [
     ("matters", "compliance_review_notes",   "TEXT"),
 ]
 
+# Raw idempotent statements applied after the column patches: indexes
+# added to existing tables and enum members added to existing types.
+# create_all does not alter existing tables/types, so drift is patched
+# here. Each statement must be safe to run on every boot.
+_SCHEMA_STATEMENTS: list[str] = [
+    # Audit-log query indexes (added 2026-07)
+    "CREATE INDEX IF NOT EXISTS ix_audit_logs_matter_id ON audit_logs (matter_id)",
+    "CREATE INDEX IF NOT EXISTS ix_audit_logs_user_id ON audit_logs (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_audit_logs_entity_type_entity_id ON audit_logs (entity_type, entity_id)",
+    # AssessmentStorage matter_id lookup index (FK added to the model 2026-07)
+    "CREATE INDEX IF NOT EXISTS ix_assessment_storage_matter_id ON assessment_storage (matter_id)",
+    # New AuditLogAction members (SQLEnum stores the member NAMES)
+    "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'ARCHIVED'",
+    "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'LOGIN'",
+    "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'LOGIN_FAILED'",
+    "ALTER TYPE auditlogaction ADD VALUE IF NOT EXISTS 'LOGOUT'",
+]
+
 
 async def patch_schema(engine):
     """Apply idempotent ALTER TABLE ADD COLUMN IF NOT EXISTS for any
     columns that were added to SQLAlchemy models after the table was
-    first created. Postgres-only syntax (IF NOT EXISTS on ADD COLUMN)."""
+    first created, then the raw statements in _SCHEMA_STATEMENTS.
+    Postgres-only syntax (IF NOT EXISTS on ADD COLUMN)."""
     from sqlalchemy import text
     async with engine.begin() as conn:
         for table, column, coltype in _SCHEMA_PATCHES:
@@ -115,6 +115,16 @@ async def patch_schema(engine):
                 # the whole boot.
                 print(f"[!] Schema patch skipped ({table}.{column}): {exc}")
         print("[+] Schema patches applied (idempotent ADD COLUMN IF NOT EXISTS).")
+
+    # Each ALTER TYPE ... ADD VALUE needs its own transaction on older
+    # Postgres versions, so run these statements one connection each.
+    for stmt in _SCHEMA_STATEMENTS:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(stmt))
+        except Exception as exc:
+            print(f"[!] Schema statement skipped ({stmt}): {exc}")
+    print("[+] Schema index/enum statements applied.")
 
 
 def run_migrations():
@@ -151,30 +161,14 @@ def run_migrations():
 
 
 async def seed_admin(engine):
-    """Seed/refresh the admin user with a known password on every deploy.
+    """Seed the admin user IF it does not already exist.
 
-    The login is deterministic so the operator always has a way in:
-      Email:    admin@agora.ai
-      Password: ADMIN_PASSWORD env var if set, otherwise DEFAULT_ADMIN_PASSWORD below.
-
-    On every run this also enforces role=ADMIN + is_superuser=True and clears
-    any lockout state. To stop the auto-reset later, remove this function
-    from main() or guard it behind an env flag.
+    Requires the ADMIN_PASSWORD env var — without it, seeding is skipped
+    with a warning (the rest of startup continues). An existing admin
+    user is NEVER modified: no password reset, no role change, no
+    lockout clearing. The password is never printed to logs.
     """
-    # NOTE: this default is visible in the public repo. Change it once you
-    # no longer need the deterministic-login behaviour, or always set
-    # ADMIN_PASSWORD in the deploy env to override.
-    DEFAULT_ADMIN_PASSWORD = "Agora-Login-2026!"
-
     from app.core.security import validate_password_policy
-
-    env_pw = os.environ.get("ADMIN_PASSWORD")
-    password = env_pw or DEFAULT_ADMIN_PASSWORD
-    source = "ADMIN_PASSWORD env var" if env_pw else "default in init_db.py"
-
-    valid, msg = validate_password_policy(password)
-    if not valid:
-        raise ValueError(f"Admin password does not meet policy ({source}): {msg}")
 
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -185,32 +179,36 @@ async def seed_admin(engine):
         existing = result.scalar_one_or_none()
 
         if existing:
-            existing.hashed_password = get_password_hash(password)
-            existing.role = UserRole.ADMIN
-            existing.is_active = True
-            existing.is_superuser = True
-            existing.failed_login_attempts = 0
-            existing.locked_until = None
-            await session.commit()
-            print(f"[+] Admin user reset  —  {ADMIN_EMAIL}")
-        else:
-            admin = User(
-                email=ADMIN_EMAIL,
-                hashed_password=get_password_hash(password),
-                full_name=ADMIN_FULL_NAME,
-                role=UserRole.ADMIN,
-                is_active=True,
-                is_superuser=True,
-            )
-            session.add(admin)
-            await session.commit()
-            print(f"[+] Admin user created  —  {ADMIN_EMAIL}")
+            # Never touch an existing user — password, role, and lockout
+            # state are left exactly as they are.
+            print(f"[+] Admin user already exists ({ADMIN_EMAIL}) — seeding skipped.")
+            return
 
-        print(f"    Password source: {source}")
-        if not env_pw:
-            print(f"    Login: {ADMIN_EMAIL} / {DEFAULT_ADMIN_PASSWORD}")
-            print("    To change: edit DEFAULT_ADMIN_PASSWORD in init_db.py OR")
-            print("    set ADMIN_PASSWORD in Railway env vars, then redeploy.")
+        password = os.environ.get("ADMIN_PASSWORD")
+        if not password:
+            print(
+                "[!] WARNING: ADMIN_PASSWORD env var is not set and no admin "
+                f"user ({ADMIN_EMAIL}) exists — admin seeding SKIPPED. Set "
+                "ADMIN_PASSWORD and re-run to create the admin account."
+            )
+            return
+
+        valid, msg = validate_password_policy(password)
+        if not valid:
+            print(f"[!] WARNING: ADMIN_PASSWORD does not meet policy ({msg}) — admin seeding SKIPPED.")
+            return
+
+        admin = User(
+            email=ADMIN_EMAIL,
+            hashed_password=get_password_hash(password),
+            full_name=ADMIN_FULL_NAME,
+            role=UserRole.ADMIN,
+            is_active=True,
+            is_superuser=True,
+        )
+        session.add(admin)
+        await session.commit()
+        print(f"[+] Admin user created  —  {ADMIN_EMAIL} (password from ADMIN_PASSWORD env var)")
 
 
 def seed_app_config():
@@ -252,8 +250,12 @@ async def main():
     # 2. Run Alembic migrations
     run_migrations()
 
-    # 3. Seed admin user
-    await seed_admin(engine)
+    # 3. Seed admin user (skipped with a warning if ADMIN_PASSWORD is
+    #    unset or the user already exists — must not abort startup)
+    try:
+        await seed_admin(engine)
+    except Exception as exc:
+        print(f"[!] WARNING: admin seeding failed ({exc}) — continuing startup.")
 
     # 4. Seed / backfill the platform configuration catalogue
     seed_app_config()

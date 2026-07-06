@@ -6,12 +6,16 @@ Handles file uploads, processing, and SoF assessment results
 """
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 import json
 
+import structlog
+
+from app.core.config import settings
 from app.db.session import get_db, get_sync_db, get_sync_engine, get_sync_session
-from app.api.dependencies.auth import require_analyst, require_admin
+from app.api.dependencies.auth import require_analyst, require_admin, require_matter_access
 from app.models.user import User
 from app.services.file_processor import file_processor
 from app.services.sof_assessment_engine import SoFAssessmentEngine
@@ -21,7 +25,11 @@ from app.models.statement_validation import (
     StatementValidation, StatementValidationFlag, StatementValidationTransaction,
     ValidationStatus, FlagSeverity,
 )
-from app.services.document_verification_pipeline import document_verification_pipeline, VerificationResult as DocVerResult
+from app.services.document_verification_pipeline import (
+    document_verification_pipeline,
+    compute_verdict as compute_dv_verdict,
+    VerificationResult as DocVerResult,
+)
 from app.services.statement_validation_pipeline import StatementValidationPipeline, ValidationResult as StmtValResult
 from app.services.cross_document_corroborator import corroborate as corroborate_verification
 from app.models.document_verification import (
@@ -34,6 +42,8 @@ from app.models.notification import Notification
 from app.models.user import UserRole
 
 router = APIRouter()
+
+logger = structlog.get_logger(__name__)
 
 
 import os
@@ -58,6 +68,73 @@ def format_date_uk(date_obj) -> str:
     if date_obj:
         return date_obj.strftime('%d/%m/%Y')
     return 'Unknown'
+
+
+def _extract_statement_period(text: str) -> tuple:
+    """Best-effort extraction of a statement period from document text.
+
+    Looks for the common UK statement banner shapes, e.g.
+    "1 January 2026 to 31 January 2026" or "01/01/2026 - 31/01/2026".
+    Returns (start_iso, end_iso) as 'YYYY-MM-DD' strings, or (None, None).
+    """
+    import re as _re
+    if not text:
+        return None, None
+    patterns = [
+        # "1 January 2026 to 31 January 2026" / "1 Jan 2026 – 31 Jan 2026"
+        r"(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s*(?:to|until|through|-|–|—)\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})",
+        # "01/01/2026 to 31/01/2026" / "01/01/2026 - 31/01/2026"
+        r"(\d{1,2}/\d{1,2}/\d{4})\s*(?:to|until|through|-|–|—)\s*(\d{1,2}/\d{1,2}/\d{4})",
+        # "2026-01-01 to 2026-01-31"
+        r"(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|-|–|—)\s*(\d{4}-\d{2}-\d{2})",
+    ]
+    for pat in patterns:
+        m = _re.search(pat, text[:5000], _re.IGNORECASE)
+        if not m:
+            continue
+        start_dt = parse_date_flexible(m.group(1))
+        end_dt = parse_date_flexible(m.group(2))
+        if start_dt and end_dt and end_dt >= start_dt:
+            return start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d')
+    return None, None
+
+
+_VERDICT_SEVERITY_ORDER = {
+    VerificationVerdict.PENDING: 0,
+    VerificationVerdict.VERIFIED: 0,
+    VerificationVerdict.SUSPICIOUS: 1,
+    VerificationVerdict.LIKELY_TAMPERED: 2,
+}
+
+
+def _escalate_verdict_after_corroboration(db: Session, dv_record, flag_severities: List[str]):
+    """Recompute the verdict once cross-document corroboration flags have
+    been added, per the standard rule (critical => LikelyTampered +
+    blocked; >=2 high => Suspicious). Escalation only — corroboration
+    flags never soften an existing verdict. Commits the update."""
+    new_verdict_str = compute_dv_verdict(
+        dv_record.authenticity_score or 0.0, flag_severities
+    )
+    new_verdict = VerificationVerdict(new_verdict_str)
+    if (_VERDICT_SEVERITY_ORDER.get(new_verdict, 0)
+            > _VERDICT_SEVERITY_ORDER.get(dv_record.verdict, 0)):
+        dv_record.verdict = new_verdict
+        if new_verdict == VerificationVerdict.LIKELY_TAMPERED:
+            dv_record.blocked = True
+        db.commit()
+
+
+def _find_existing_verification(db: Session, matter_id: int, file_hash: str):
+    """(matter_id, file_hash) dedupe lookup — used both up-front and to
+    resolve races where a concurrent upload created the row first."""
+    return (
+        db.query(DocumentVerification)
+        .filter(
+            DocumentVerification.matter_id == matter_id,
+            DocumentVerification.file_hash == file_hash,
+        )
+        .first()
+    )
 
 # ---------------------------------------------------------------------------
 # PostgreSQL-backed assessment storage helpers
@@ -125,10 +202,9 @@ def run_automated_funds_lineage(
     target_desc = target_transaction.get('description', '')
     target_id = target_transaction.get('id') or target_transaction.get('transaction_id') or f"TXN-TARGET-1"
     
-    print(f"\n=== AUTOMATED FUNDS LINEAGE (RECURSIVE) ===")
-    print(f"  Target: £{target_amount:,.2f} from {target_desc[:50]}...")
-    print(f"  Target account: {target_account}")
-    print(f"  Target date: {target_date}")
+    # Log structure only — transaction descriptions / account identifiers
+    # are client data and must not go to stdout.
+    logger.debug("funds_lineage_start", target_amount=target_amount)
     
     # Group transactions by account
     accounts: Dict[str, List[Dict]] = {}
@@ -141,7 +217,7 @@ def run_automated_funds_lineage(
             txn['id'] = f"TXN-{acc_id[:10]}-{idx + 1}"
         accounts[acc_id].append(txn)
     
-    print(f"  Found {len(accounts)} account(s): {list(accounts.keys())}")
+    logger.debug("funds_lineage_accounts_found", account_count=len(accounts))
     
     # Helper to parse dates in multiple formats
     def parse_date_flexible(date_str: str):
@@ -172,10 +248,8 @@ def run_automated_funds_lineage(
                 'transaction_count': len(txns)
             }
     
-    print(f"\n  === ACCOUNT STATEMENT COVERAGE ===")
-    for acc_id, range_info in account_date_ranges.items():
-        print(f"    {acc_id}: {range_info['earliest_str']} to {range_info['latest_str']} ({range_info['transaction_count']} txns)")
-    print(f"  ===================================\n")
+    logger.debug("funds_lineage_statement_coverage",
+                 account_count=len(account_date_ranges))
     
     # Classify accounts (savings vs current vs unknown).
     # P1.4 — surface ambiguity. Previously this function always returned
@@ -229,9 +303,10 @@ def run_automated_funds_lineage(
     savings_accounts = [acc for acc, typ in account_types.items() if typ == 'savings']
     current_accounts = [acc for acc, typ in account_types.items() if typ == 'current']
 
-    print(f"  Account types: {account_types}")
-    if ambiguous_accounts:
-        print(f"  ⚠ Ambiguous classification: {ambiguous_accounts}")
+    logger.debug("funds_lineage_account_classification",
+                 savings_count=len(savings_accounts),
+                 current_count=len(current_accounts),
+                 ambiguous_count=len(ambiguous_accounts))
     
     # Keywords for identifying external origins (legitimate sources)
     external_origin_keywords = [
@@ -595,7 +670,7 @@ def run_automated_funds_lineage(
                 'description': txn.get('description', ''),
                 'source_type': source_type
             })
-            print(f"    {'  ' * level}✓ EXTERNAL: £{txn_amount:,.2f} - {source_type}")
+            logger.debug("funds_lineage_external", level=level, source_type=source_type)
             # For a salary origin, state the salary amount and the date
             # of the payment so the reviewer sees it without drilling in.
             _origin_note = f'Origin: {source_type}'
@@ -627,7 +702,7 @@ def run_automated_funds_lineage(
                 matched_debit = find_matching_debit(txn, other_acc_txns)
                 if matched_debit:
                     matched_transfers += 1
-                    print(f"    {'  ' * level}✓ MATCHED: £{txn_amount:,.2f} from {other_acc_id}")
+                    logger.debug("funds_lineage_transfer_matched", level=level)
                     
                     # Find credits that funded this debit
                     funding_credits = find_funding_credits(matched_debit, other_acc_txns, txn_id)
@@ -672,7 +747,7 @@ def run_automated_funds_lineage(
                         'reason': 'statement_gap'
                     }
                     statement_gap_items.append(gap_info)
-                    print(f"    {'  ' * level}📋 STATEMENT GAP: £{txn_amount:,.2f} - need {gap_account} statements before {gap_range.get('earliest_str', 'Unknown')}")
+                    logger.debug("funds_lineage_statement_gap", level=level)
                     
                     return {
                         'id': node_id,
@@ -698,7 +773,7 @@ def run_automated_funds_lineage(
         
         if not is_suspicious and not is_large:
             traced_amount += txn_amount
-            print(f"    {'  ' * level}✓ REGULAR: £{txn_amount:,.2f} - small amount")
+            logger.debug("funds_lineage_regular_credit", level=level)
             return {
                 'id': node_id,
                 'level': level,
@@ -724,7 +799,7 @@ def run_automated_funds_lineage(
             'account': txn_account,
             'reason': 'unverified_source'
         })
-        print(f"    {'  ' * level}⚠ UNRESOLVED: £{txn_amount:,.2f} - requires evidence (ID: {txn_id})")
+        logger.debug("funds_lineage_unresolved", level=level)
         
         return {
             'id': node_id,
@@ -742,7 +817,7 @@ def run_automated_funds_lineage(
         }
     
     # Build the lineage tree starting from the target transaction
-    print(f"\n  Building lineage tree from target...")
+    logger.debug("funds_lineage_tree_build_start")
     root_node = build_lineage_node(target_transaction, 0, set())
     lineage_tree = [root_node]
     
@@ -781,21 +856,13 @@ def run_automated_funds_lineage(
                 'total_amount_affected': sum(item['amount'] for item in items)
             })
     
-    print(f"\n  === LINEAGE SUMMARY ===")
-    print(f"  Total: £{target_amount:,.2f}")
-    print(f"  Traced: £{traced_amount:,.2f} ({traced_percentage}%)")
-    print(f"  Matched transfers: {matched_transfers}")
-    print(f"  External origins: {len(external_origins)}")
-    print(f"  Unresolved: {len(unresolved_items)}")
-    print(f"  Statement gaps: {len(statement_gap_items)}")
-    print(f"  Accumulation period: {accumulation_days} days")
-    if statement_gaps_summary:
-        print(f"\n  === STATEMENT GAPS DETECTED ===")
-        for gap in statement_gaps_summary:
-            print(f"    {gap['account']}: Current coverage {gap['current_coverage_from']} to {gap['current_coverage_to']}")
-            print(f"      Need statements from: {gap['statements_needed_from']}")
-            print(f"      Transactions affected: {gap['transactions_affected']} (£{gap['total_amount_affected']:,.2f})")
-    print(f"  ========================\n")
+    logger.debug("funds_lineage_summary",
+                 traced_percentage=traced_percentage,
+                 matched_transfers=matched_transfers,
+                 external_origin_count=len(external_origins),
+                 unresolved_count=len(unresolved_items),
+                 statement_gap_count=len(statement_gap_items),
+                 accumulation_days=accumulation_days)
     
     summary = {
         'totalAmount': target_amount,
@@ -844,17 +911,15 @@ async def upload_sof_files(
     - supporting_doc: PDF supporting document
     """
     
-    # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
-    
-    print(f"\n📤 Uploading file for matter {matter_id}: {file.filename} ({file_category})")
-    
+    # Verify matter exists and the current user may access it
+    matter = require_matter_access(matter_id, current_user, db)
+
+    logger.info("sof_upload_start", matter_id=matter_id, file_category=file_category)
+
     # Load existing storage for this matter from DB (or create new)
     storage = _db_load_storage(db, matter_id)
     if storage is None:
-        print(f"   Creating new storage for matter {matter_id}")
+        logger.info("sof_upload_new_storage", matter_id=matter_id)
         storage = {
             "client_info": None,
             "bank_statements": [],
@@ -863,8 +928,6 @@ async def upload_sof_files(
             "status": "pending",
             "last_updated": None
         }
-    else:
-        print(f"   Using existing storage for matter {matter_id}")
 
     # Determine file type from extension and MIME
     file_ext = file.filename.split('.')[-1].lower() if file.filename else ''
@@ -915,9 +978,42 @@ async def upload_sof_files(
             detail=f"Invalid file category: {file_category}"
         )
     
-    # Read file content for document verification (before process_upload consumes it)
-    file_content_for_verification = await file.read()
+    # Enforce the upload size limit BEFORE reading the whole file into
+    # memory: reject on the declared size when available, then read in
+    # 1 MB chunks and abort as soon as the limit is crossed.
+    max_upload_bytes = getattr(settings, 'MAX_UPLOAD_SIZE_MB', 50) * 1024 * 1024
+    declared_size = getattr(file, 'size', None)
+    if declared_size and declared_size > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {getattr(settings, 'MAX_UPLOAD_SIZE_MB', 50)}MB upload limit"
+        )
+
+    _chunks = []
+    _total_read = 0
+    while True:
+        _chunk = await file.read(1024 * 1024)
+        if not _chunk:
+            break
+        _total_read += len(_chunk)
+        if _total_read > max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {getattr(settings, 'MAX_UPLOAD_SIZE_MB', 50)}MB upload limit"
+            )
+        _chunks.append(_chunk)
+    file_content_for_verification = b"".join(_chunks)
+    del _chunks
     await file.seek(0)  # Reset for process_upload
+
+    # Magic-byte check: a file claiming to be a PDF must actually start
+    # with the %PDF header — reject renamed images/executables outright.
+    if file_ext == 'pdf' and not file_content_for_verification.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=400,
+            detail="File has a .pdf extension but is not a valid PDF (missing %PDF header). "
+                   "Please upload the original PDF exported from the bank or source system."
+        )
 
     # Persist file to disk for later retrieval (PDF viewer)
     import os as _os
@@ -972,32 +1068,27 @@ async def upload_sof_files(
     # full pipeline on a known file.
     # ------------------------------------------------------------------
     _precomputed_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
-    existing_dv = (
-        db.query(DocumentVerification)
-        .filter(
-            DocumentVerification.matter_id == matter_id,
-            DocumentVerification.file_hash == _precomputed_hash,
-        )
-        .first()
-    )
+    existing_dv = _find_existing_verification(db, matter_id, _precomputed_hash)
     if existing_dv:
         verification_verdict = existing_dv.verdict.value if existing_dv.verdict else None
         verification_score = existing_dv.authenticity_score
         doc_ver_record = existing_dv
-        print(
-            f"   ↺ Skipping verification — file hash {_precomputed_hash[:12]}…"
-            f" already verified as DV #{existing_dv.id} ({verification_verdict})"
+        logger.info(
+            "sof_upload_verification_dedupe",
+            matter_id=matter_id,
+            verification_id=existing_dv.id,
+            verdict=verification_verdict,
         )
 
-    try:
-        is_pdf = file_content_for_verification[:4] == b"%PDF"
+    is_pdf = file_content_for_verification[:4] == b"%PDF"
 
+    try:
         if not dv_enabled:
             # Module turned off in the Configuration page. Persist the
             # raw file but skip the entire forensic pipeline; the
             # operator has accepted that this matter will not have
             # document-level checks.
-            print(f"   ⚙️  Document Verification module is OFF — skipping pipeline for {file.filename}")
+            logger.info("sof_upload_dv_disabled", matter_id=matter_id)
         elif existing_dv:
             # Already verified — skip the rest of the verification work.
             # Skip the entire pipeline branch by raising-to-continue.
@@ -1015,74 +1106,130 @@ async def upload_sof_files(
             verification_verdict = doc_ver_result.verdict
             verification_score = doc_ver_result.authenticity_score
 
-            doc_ver_record = DocumentVerification(
-                matter_id=matter_id,
-                filename=file.filename or "unknown",
-                file_hash=doc_ver_result.file_hash_sha256,
-                file_category=file_category,
-                disk_filename=_safe_filename,
-                file_bytes=file_content_for_verification,
-                authenticity_score=doc_ver_result.authenticity_score,
-                verdict=VerificationVerdict(doc_ver_result.verdict),
-                verification_phase="structural_only",
-                verification_method="PDF structural analysis",
-                structural_pipeline_score=doc_ver_result.authenticity_score,
-                metadata_result=doc_ver_result.metadata_result,
-                structural_result=doc_ver_result.structural_result,
-                font_text_result=doc_ver_result.font_text_result,
-                image_result=doc_ver_result.image_result,
-                content_consistency_result=doc_ver_result.content_consistency_result,
-                signature_result=doc_ver_result.signature_result,
-                annotation_form_result=getattr(doc_ver_result, 'annotation_form_result', None),
-                hidden_content_result=getattr(doc_ver_result, 'hidden_content_result', None),
-                blocked=(doc_ver_result.verdict == "LikelyTampered"),
-            )
-            db.add(doc_ver_record)
-            db.flush()
+            # Extract full text once — reused for the statement-period
+            # extraction and for cross-document corroboration below.
+            pdf_text = ""
+            try:
+                import fitz
+                _doc = fitz.open(stream=file_content_for_verification, filetype="pdf")
+                pdf_text = "\n".join(p.get_text() or "" for p in _doc)
+                _doc.close()
+            except Exception:
+                pdf_text = ""
 
-            for flag in doc_ver_result.flags:
-                db.add(DocumentVerificationFlag(
-                    verification_id=doc_ver_record.id,
-                    pipeline_stage=flag.pipeline_stage,
-                    code=flag.code,
-                    severity=flag.severity,
-                    message=flag.message,
-                    details=flag.details,
-                ))
-            db.commit()
-            print(f"   PDF verification: {doc_ver_result.verdict} (score: {doc_ver_result.authenticity_score})")
+            # Best-effort statement period from the document banner —
+            # persisted so the corroborator's PERIOD_GAP check has data.
+            _period_start, _period_end = (None, None)
+            if file_category == "bank_statement":
+                _period_start, _period_end = _extract_statement_period(pdf_text)
+
+            # Re-check for a concurrent upload of the same file (dedupe
+            # race) just before creating the row.
+            _created_new_record = False
+            _race_dv = _find_existing_verification(db, matter_id, doc_ver_result.file_hash_sha256)
+            if _race_dv:
+                doc_ver_record = _race_dv
+                verification_verdict = _race_dv.verdict.value if _race_dv.verdict else None
+                verification_score = _race_dv.authenticity_score
+            else:
+                _created_new_record = True
+                doc_ver_record = DocumentVerification(
+                    matter_id=matter_id,
+                    filename=file.filename or "unknown",
+                    file_hash=doc_ver_result.file_hash_sha256,
+                    file_category=file_category,
+                    disk_filename=_safe_filename,
+                    file_bytes=file_content_for_verification,
+                    authenticity_score=doc_ver_result.authenticity_score,
+                    verdict=VerificationVerdict(doc_ver_result.verdict),
+                    verification_phase="structural_only",
+                    verification_method="PDF structural analysis",
+                    structural_pipeline_score=doc_ver_result.authenticity_score,
+                    metadata_result=doc_ver_result.metadata_result,
+                    structural_result=doc_ver_result.structural_result,
+                    font_text_result=doc_ver_result.font_text_result,
+                    image_result=doc_ver_result.image_result,
+                    content_consistency_result=doc_ver_result.content_consistency_result,
+                    signature_result=doc_ver_result.signature_result,
+                    annotation_form_result=getattr(doc_ver_result, 'annotation_form_result', None),
+                    hidden_content_result=getattr(doc_ver_result, 'hidden_content_result', None),
+                    period_start=_period_start,
+                    period_end=_period_end,
+                    blocked=(doc_ver_result.verdict == "LikelyTampered"),
+                )
+                db.add(doc_ver_record)
+                try:
+                    db.flush()
+                    for flag in doc_ver_result.flags:
+                        db.add(DocumentVerificationFlag(
+                            verification_id=doc_ver_record.id,
+                            pipeline_stage=flag.pipeline_stage,
+                            code=flag.code,
+                            severity=flag.severity,
+                            message=flag.message,
+                            details=flag.details,
+                        ))
+                    db.commit()
+                except IntegrityError:
+                    # Concurrent upload won the race — reuse its row.
+                    db.rollback()
+                    _created_new_record = False
+                    doc_ver_record = _find_existing_verification(
+                        db, matter_id, doc_ver_result.file_hash_sha256
+                    )
+                logger.info(
+                    "sof_upload_pdf_verified",
+                    matter_id=matter_id,
+                    verdict=doc_ver_result.verdict,
+                    score=doc_ver_result.authenticity_score,
+                    flag_count=len(doc_ver_result.flags),
+                )
 
             # Cross-document corroboration — does this PDF agree with the
-            # other documents on the matter (client name, period gaps)?
-            try:
-                pdf_text = ""
+            # other documents on the matter (client name, period gaps,
+            # account numbers)? Only for a record created by THIS request;
+            # a race-reused row has already been corroborated.
+            if doc_ver_record is not None and _created_new_record:
                 try:
-                    import fitz
-                    _doc = fitz.open(stream=file_content_for_verification, filetype="pdf")
-                    pdf_text = "\n".join(p.get_text() or "" for p in _doc)
-                    _doc.close()
-                except Exception:
-                    pdf_text = ""
-                corr_flags = corroborate_verification(
-                    db, matter_id, doc_ver_record.id,
-                    new_doc_text=pdf_text,
-                    new_period_start=doc_ver_record.period_start,
-                    new_period_end=doc_ver_record.period_end,
-                )
-                for cf in corr_flags:
-                    db.add(DocumentVerificationFlag(
-                        verification_id=doc_ver_record.id,
-                        pipeline_stage=cf.pipeline_stage,
-                        code=cf.code,
-                        severity=cf.severity,
-                        message=cf.message,
-                        details=cf.details,
-                    ))
-                if corr_flags:
-                    db.commit()
-                    print(f"   Cross-doc corroboration raised {len(corr_flags)} flag(s)")
-            except Exception as corr_err:
-                print(f"   Cross-document corroboration skipped ({corr_err})")
+                    corr_flags = corroborate_verification(
+                        db, matter_id, doc_ver_record.id,
+                        new_doc_text=pdf_text,
+                        new_period_start=doc_ver_record.period_start,
+                        new_period_end=doc_ver_record.period_end,
+                        file_category=file_category,
+                    )
+                    for cf in corr_flags:
+                        db.add(DocumentVerificationFlag(
+                            verification_id=doc_ver_record.id,
+                            pipeline_stage=cf.pipeline_stage,
+                            code=cf.code,
+                            severity=cf.severity,
+                            message=cf.message,
+                            details=cf.details,
+                        ))
+                    if corr_flags:
+                        db.commit()
+                        logger.info(
+                            "sof_upload_corroboration_flags",
+                            matter_id=matter_id,
+                            verification_id=doc_ver_record.id,
+                            flag_count=len(corr_flags),
+                        )
+                        # Recompute verdict/blocked now the corroboration
+                        # flags are on the record (critical => LikelyTampered
+                        # + blocked; >=2 high => Suspicious).
+                        all_severities = (
+                            [f.severity for f in doc_ver_result.flags]
+                            + [cf.severity for cf in corr_flags]
+                        )
+                        _escalate_verdict_after_corroboration(db, doc_ver_record, all_severities)
+                        verification_verdict = doc_ver_record.verdict.value if doc_ver_record.verdict else None
+                except Exception as corr_err:
+                    logger.warning(
+                        "sof_upload_corroboration_skipped",
+                        matter_id=matter_id,
+                        error=str(corr_err),
+                    )
 
         elif file_category == "bank_statement" and not is_pdf:
             # --- CSV bank statement: run statement validation pipeline for math check ---
@@ -1103,20 +1250,163 @@ async def upload_sof_files(
             math_total = math_result.get("checks_total", 0)
             math_pass = math_passed > 0 and math_passed >= math_total
 
+            # Wording matters: CSVs cannot be authenticated (no structure
+            # to inspect, no signature) — the method string must describe
+            # an arithmetic check, not imply document authentication.
             if math_pass:
                 csv_verdict = VerificationVerdict.VERIFIED
-                csv_method = "CSV uploaded — Math check: PASS"
+                csv_method = "CSV arithmetic check: PASS (provenance unverifiable)"
                 csv_score = stmt_result.authenticity_score
                 csv_blocked = False
             else:
                 csv_verdict = VerificationVerdict.LIKELY_TAMPERED
-                csv_method = "CSV uploaded — Math check: FAIL"
+                csv_method = "CSV arithmetic check: FAIL (provenance unverifiable)"
                 csv_score = stmt_result.authenticity_score
                 csv_blocked = True
 
             verification_verdict = csv_verdict.value
             verification_score = csv_score
 
+            # Statement period from the extracted transactions — persisted
+            # so the corroborator's PERIOD_GAP check has data to work with.
+            _txn_dates = []
+            for et in stmt_result.extracted_transactions:
+                _d = parse_date_flexible(et.date)
+                if _d:
+                    _txn_dates.append(_d)
+            _period_start = min(_txn_dates).strftime('%Y-%m-%d') if _txn_dates else None
+            _period_end = max(_txn_dates).strftime('%Y-%m-%d') if _txn_dates else None
+
+            file_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
+            # Re-check for a concurrent upload of the same file (dedupe
+            # race) just before creating the row.
+            _created_new_record = False
+            _race_dv = _find_existing_verification(db, matter_id, file_hash)
+            if _race_dv:
+                doc_ver_record = _race_dv
+                verification_verdict = _race_dv.verdict.value if _race_dv.verdict else None
+                verification_score = _race_dv.authenticity_score
+            else:
+                _created_new_record = True
+                doc_ver_record = DocumentVerification(
+                    matter_id=matter_id,
+                    filename=file.filename or "unknown",
+                    file_hash=file_hash,
+                    file_category=file_category,
+                    disk_filename=_safe_filename,
+                    file_bytes=file_content_for_verification,
+                    authenticity_score=csv_score,
+                    verdict=csv_verdict,
+                    verification_phase="statement_only",
+                    verification_method=csv_method,
+                    statement_pipeline_score=stmt_result.authenticity_score,
+                    file_integrity_result=stmt_result.file_integrity_result,
+                    template_match_result=stmt_result.template_match_result,
+                    extraction_result=stmt_result.extraction_result,
+                    math_check_result=stmt_result.math_check_result,
+                    anomaly_check_result=stmt_result.anomaly_check_result,
+                    identified_bank_template=stmt_result.identified_bank_template,
+                    period_start=_period_start,
+                    period_end=_period_end,
+                    blocked=csv_blocked,
+                )
+                db.add(doc_ver_record)
+                try:
+                    db.flush()
+
+                    # Persist flags
+                    for flag in stmt_result.flags:
+                        db.add(DocumentVerificationFlag(
+                            verification_id=doc_ver_record.id,
+                            pipeline_stage=flag.pipeline_stage,
+                            code=flag.code,
+                            severity=flag.severity,
+                            message=flag.message,
+                            details=flag.details if isinstance(flag.details, dict) else None,
+                        ))
+
+                    # Persist extracted transactions
+                    for et in stmt_result.extracted_transactions:
+                        db.add(DocumentVerificationTransaction(
+                            verification_id=doc_ver_record.id,
+                            date=et.date,
+                            description=et.description,
+                            amount=et.amount,
+                            direction=et.direction,
+                            balance=et.balance,
+                            transaction_type=et.transaction_type,
+                            raw_row=et.raw_row,
+                        ))
+
+                    db.commit()
+                except IntegrityError:
+                    # Concurrent upload won the race — reuse its row.
+                    db.rollback()
+                    _created_new_record = False
+                    doc_ver_record = _find_existing_verification(db, matter_id, file_hash)
+                logger.info(
+                    "sof_upload_csv_verified",
+                    matter_id=matter_id,
+                    verdict=verification_verdict,
+                    score=csv_score,
+                    transaction_count=len(stmt_result.extracted_transactions),
+                )
+
+            # Cross-document corroboration for CSV uploads. We use the raw
+            # bytes decoded as text — good enough for a name-tokens search.
+            # Only for a record created by THIS request; a race-reused row
+            # has already been corroborated.
+            if doc_ver_record is not None and _created_new_record:
+                try:
+                    try:
+                        csv_text = file_content_for_verification.decode("utf-8", errors="ignore")
+                    except Exception:
+                        csv_text = ""
+                    corr_flags = corroborate_verification(
+                        db, matter_id, doc_ver_record.id,
+                        new_doc_text=csv_text,
+                        new_period_start=doc_ver_record.period_start,
+                        new_period_end=doc_ver_record.period_end,
+                        file_category=file_category,
+                    )
+                    for cf in corr_flags:
+                        db.add(DocumentVerificationFlag(
+                            verification_id=doc_ver_record.id,
+                            pipeline_stage=cf.pipeline_stage,
+                            code=cf.code,
+                            severity=cf.severity,
+                            message=cf.message,
+                            details=cf.details,
+                        ))
+                    if corr_flags:
+                        db.commit()
+                        logger.info(
+                            "sof_upload_corroboration_flags",
+                            matter_id=matter_id,
+                            verification_id=doc_ver_record.id,
+                            flag_count=len(corr_flags),
+                        )
+                        # Recompute verdict/blocked with corroboration flags
+                        # included (escalation only).
+                        all_severities = (
+                            [f.severity for f in stmt_result.flags]
+                            + [cf.severity for cf in corr_flags]
+                        )
+                        _escalate_verdict_after_corroboration(db, doc_ver_record, all_severities)
+                        verification_verdict = doc_ver_record.verdict.value if doc_ver_record.verdict else None
+                except Exception as corr_err:
+                    logger.warning(
+                        "sof_upload_corroboration_skipped",
+                        matter_id=matter_id,
+                        error=str(corr_err),
+                    )
+
+        elif file_category != 'client_info':
+            # Non-PDF, non-bank-statement evidence files (e.g. a DOCX or
+            # image supporting document). Spec §3.0: these still get a
+            # verification row — verdict Pending, score 0, info flag
+            # NON_PDF_FILE — so they are visible in the verification tab
+            # rather than silently absent.
             file_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
             doc_ver_record = DocumentVerification(
                 matter_id=matter_id,
@@ -1125,85 +1415,90 @@ async def upload_sof_files(
                 file_category=file_category,
                 disk_filename=_safe_filename,
                 file_bytes=file_content_for_verification,
-                authenticity_score=csv_score,
-                verdict=csv_verdict,
-                verification_phase="statement_only",
-                verification_method=csv_method,
-                statement_pipeline_score=stmt_result.authenticity_score,
-                file_integrity_result=stmt_result.file_integrity_result,
-                template_match_result=stmt_result.template_match_result,
-                extraction_result=stmt_result.extraction_result,
-                math_check_result=stmt_result.math_check_result,
-                anomaly_check_result=stmt_result.anomaly_check_result,
-                identified_bank_template=stmt_result.identified_bank_template,
-                blocked=csv_blocked,
+                authenticity_score=0.0,
+                verdict=VerificationVerdict.PENDING,
+                verification_phase="structural_only",
+                verification_method="Non-PDF file — structural verification not applicable",
+                blocked=False,
             )
             db.add(doc_ver_record)
-            db.flush()
-
-            # Persist flags
-            for flag in stmt_result.flags:
+            try:
+                db.flush()
                 db.add(DocumentVerificationFlag(
                     verification_id=doc_ver_record.id,
-                    pipeline_stage=flag.pipeline_stage,
-                    code=flag.code,
-                    severity=flag.severity,
-                    message=flag.message,
-                    details=flag.details if isinstance(flag.details, dict) else None,
+                    pipeline_stage="metadata",
+                    code="NON_PDF_FILE",
+                    severity="info",
+                    message=(
+                        f"File is not a PDF ({file.filename}). Structural verification "
+                        "not applicable."
+                    ),
+                    details=None,
                 ))
-
-            # Persist extracted transactions
-            for et in stmt_result.extracted_transactions:
-                db.add(DocumentVerificationTransaction(
-                    verification_id=doc_ver_record.id,
-                    date=et.date,
-                    description=et.description,
-                    amount=et.amount,
-                    direction=et.direction,
-                    balance=et.balance,
-                    transaction_type=et.transaction_type,
-                    raw_row=et.raw_row,
-                ))
-
-            db.commit()
-            print(f"   CSV verification: {csv_method} (score: {csv_score})")
-
-            # Cross-document corroboration for CSV uploads. We use the raw
-            # bytes decoded as text — good enough for a name-tokens search.
-            try:
-                try:
-                    csv_text = file_content_for_verification.decode("utf-8", errors="ignore")
-                except Exception:
-                    csv_text = ""
-                corr_flags = corroborate_verification(
-                    db, matter_id, doc_ver_record.id,
-                    new_doc_text=csv_text,
-                    new_period_start=doc_ver_record.period_start,
-                    new_period_end=doc_ver_record.period_end,
-                )
-                for cf in corr_flags:
-                    db.add(DocumentVerificationFlag(
-                        verification_id=doc_ver_record.id,
-                        pipeline_stage=cf.pipeline_stage,
-                        code=cf.code,
-                        severity=cf.severity,
-                        message=cf.message,
-                        details=cf.details,
-                    ))
-                if corr_flags:
-                    db.commit()
-                    print(f"   Cross-doc corroboration raised {len(corr_flags)} flag(s)")
-            except Exception as corr_err:
-                print(f"   Cross-document corroboration skipped ({corr_err})")
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                doc_ver_record = _find_existing_verification(db, matter_id, file_hash)
+            verification_verdict = VerificationVerdict.PENDING.value
+            verification_score = 0.0
+            logger.info("sof_upload_non_pdf_pending", matter_id=matter_id,
+                        file_category=file_category)
 
         else:
-            # Non-PDF, non-bank-statement files (e.g. client_info.json) — skip verification
-            print(f"   Skipping verification for {file_category} file (not a bank statement or PDF)")
+            # client_info files are inputs, not evidence — no verification row
+            logger.info("sof_upload_verification_skipped", matter_id=matter_id,
+                        file_category=file_category)
 
     except Exception as ver_err:
-        print(f"   Document verification error (non-blocking): {ver_err}")
-        import traceback
-        traceback.print_exc()
+        # Belt and braces: verify_document should never throw (it degrades
+        # internally to a PIPELINE_ERROR flag), but if anything unexpected
+        # happens here the document must NEVER end up with a silently
+        # missing verification record — create a blocked one.
+        logger.error(
+            "sof_upload_verification_error",
+            matter_id=matter_id,
+            error_type=type(ver_err).__name__,
+            exc_info=True,
+        )
+        try:
+            db.rollback()
+            if doc_ver_record is None and dv_enabled and (is_pdf or file_category == 'bank_statement'):
+                _err_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
+                doc_ver_record = _find_existing_verification(db, matter_id, _err_hash)
+                if doc_ver_record is None:
+                    doc_ver_record = DocumentVerification(
+                        matter_id=matter_id,
+                        filename=file.filename or "unknown",
+                        file_hash=_err_hash,
+                        file_category=file_category,
+                        disk_filename=_safe_filename,
+                        file_bytes=file_content_for_verification,
+                        authenticity_score=0.0,
+                        verdict=VerificationVerdict.LIKELY_TAMPERED,
+                        verification_phase="structural_only",
+                        verification_method="Verification pipeline error",
+                        blocked=True,
+                    )
+                    db.add(doc_ver_record)
+                    db.flush()
+                    db.add(DocumentVerificationFlag(
+                        verification_id=doc_ver_record.id,
+                        pipeline_stage="scoring",
+                        code="PIPELINE_ERROR",
+                        severity="critical",
+                        message=(
+                            f"Verification failed with {type(ver_err).__name__}. "
+                            "Document could not be verified — treat as unverified "
+                            "and review manually."
+                        ),
+                        details={"exception_type": type(ver_err).__name__},
+                    ))
+                    db.commit()
+                verification_verdict = doc_ver_record.verdict.value if doc_ver_record.verdict else None
+                verification_score = doc_ver_record.authenticity_score
+        except Exception:
+            logger.error("sof_upload_verification_error_record_failed",
+                         matter_id=matter_id, exc_info=True)
     
     # Validate result based on file category
     if file_category == 'bank_statement':
@@ -1352,11 +1647,11 @@ async def upload_sof_files(
                 if detected_type and not str(txn.get('account_type', '')).lower() in ('current', 'savings'):
                     txn['account_type'] = detected_type
 
-            print(f"   📋 Adding {len(new_transactions)} transactions (file: {file.filename})")
-            print(f"      Account ID (file-scoped): {file_account_id}")
-            print(f"      Account Type: {new_transactions[0].get('account_type', 'N/A')}")
-            print(f"      Bank: {new_transactions[0].get('bank_name', 'N/A')}")
-            print(f"      Sort Code: {new_transactions[0].get('sort_code', 'N/A')}")
+            # Log counts only — account numbers, sort codes and bank names
+            # are client data and must not go to stdout.
+            logger.info("sof_upload_transactions_added",
+                        matter_id=matter_id,
+                        transaction_count=len(new_transactions))
         
         storage['bank_statements'].extend(new_transactions)
         
@@ -1367,9 +1662,9 @@ async def upload_sof_files(
             acc_type = txn.get('account_type', '')
             bank = txn.get('bank_name', '')
             unique_accounts.add(f"{bank} {acc_type} ({acc_id})")
-        print(f"   🏦 Total accounts now: {len(unique_accounts)}")
-        for acc in sorted(unique_accounts):
-            print(f"      - {acc}")
+        logger.info("sof_upload_accounts_merged",
+                    matter_id=matter_id,
+                    account_count=len(unique_accounts))
     
     elif file_category == 'supporting_doc':
         # Add filename and upload timestamp to the document data for audit trail
@@ -1563,9 +1858,7 @@ async def get_sof_assessment_status(
     Get current status of SoF assessment for a matter
     """
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     # Load assessment data from database
     storage = _db_load_storage(db, matter_id)
@@ -1607,23 +1900,23 @@ async def run_sof_assessment(
     Integrates with Transaction Review automatically
     """
     # Load storage from database
-    print(f"\n🔄 Run assessment for matter {matter_id}")
+    logger.info("sof_assessment_run_start", matter_id=matter_id)
 
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     # Get assessment data from DB
     storage = _db_load_storage(db, matter_id)
     if storage is None:
-        print(f"   ❌ Matter {matter_id} not found in storage!")
+        logger.info("sof_assessment_no_storage", matter_id=matter_id)
         raise HTTPException(
             status_code=400,
             detail="No files uploaded for this matter"
         )
 
-    print(f"   ✅ Found storage for matter {matter_id}: status={storage.get('status')}, files={len(storage.get('uploaded_files', []))}")
+    logger.info("sof_assessment_storage_loaded", matter_id=matter_id,
+                status=storage.get('status'),
+                file_count=len(storage.get('uploaded_files', [])))
     
     # Validate required data
     if not storage.get('client_info'):
@@ -1643,13 +1936,12 @@ async def run_sof_assessment(
     
     # DEFENSIVE: Ensure client_info_data is a dict
     if not isinstance(client_info_data, dict):
-        print(f"⚠️ client_info_data is not a dict: {type(client_info_data)}")
+        logger.warning("sof_assessment_client_info_not_dict", matter_id=matter_id,
+                       actual_type=type(client_info_data).__name__)
         client_info_data = {}
-    
-    print(f"\n=== CLIENT INFO DEBUG ===")
-    print(f"client_info_data type: {type(client_info_data)}")
-    print(f"client_info_data keys: {client_info_data.keys() if isinstance(client_info_data, dict) else 'N/A'}")
-    print(f"=========================\n")
+
+    logger.debug("sof_assessment_client_info_loaded", matter_id=matter_id,
+                 field_count=len(client_info_data))
     
     # Handle different client_info structures
     if isinstance(client_info_data, dict) and 'client_info' in client_info_data:
@@ -1665,7 +1957,8 @@ async def run_sof_assessment(
     
     # DEFENSIVE: Ensure client_info is a dict
     if not isinstance(client_info, dict):
-        print(f"⚠️ client_info is not a dict: {type(client_info)}")
+        logger.warning("sof_assessment_client_info_section_not_dict", matter_id=matter_id,
+                       actual_type=type(client_info).__name__)
         client_info = {'client_name': 'Unknown', 'client_risk_rating': 'medium', 'pep_status': False, 'business_sector': 'Unknown'}
     
     if isinstance(client_info_data, dict) and 'purchase' in client_info_data:
@@ -1679,7 +1972,8 @@ async def run_sof_assessment(
     
     # DEFENSIVE: Ensure purchase is a dict
     if not isinstance(purchase, dict):
-        print(f"⚠️ purchase is not a dict: {type(purchase)}")
+        logger.warning("sof_assessment_purchase_not_dict", matter_id=matter_id,
+                       actual_type=type(purchase).__name__)
         purchase = {'amount': 0, 'currency': 'GBP', 'description': 'Unknown'}
 
     # Backfill the matter's transaction value from the client_info
@@ -1699,7 +1993,7 @@ async def run_sof_assessment(
         matter.target_amount = _purchase_amt
         db.add(matter)
         db.commit()
-        print(f"   ↪ Backfilled matter.target_amount = £{_purchase_amt:,.2f} from client_info")
+        logger.info("sof_assessment_target_amount_backfilled", matter_id=matter_id)
 
     if isinstance(client_info_data, dict) and 'sof_explanation' in client_info_data:
         sof_explanation = client_info_data.get('sof_explanation') or ''
@@ -1714,19 +2008,15 @@ async def run_sof_assessment(
     
     # Check if client_info JSON has explicit claims array
     # If so, convert to structured format for the assessment engine
-    print(f"\n=== CLAIMS CHECK ===")
-    print(f"Has 'claims' key: {'claims' in client_info_data}")
-    if 'claims' in client_info_data:
-        print(f"Claims array: {client_info_data['claims']}")
-    
+    logger.debug("sof_assessment_claims_check", matter_id=matter_id,
+                 has_claims='claims' in client_info_data,
+                 claim_count=len(client_info_data.get('claims') or []))
+
     if 'claims' in client_info_data and client_info_data['claims']:
         # Convert claims array to structured format
-        print(f"✅ Converting claims array to structured format")
         sof_explanation = {
             'sources': client_info_data['claims']
         }
-        print(f"sof_explanation type: {type(sof_explanation)}")
-    print(f"====================\n")
     
     # IMPORTANT: Build fresh known_documents list from current uploads only
     # Do NOT accumulate from previous assessments
@@ -1742,16 +2032,10 @@ async def run_sof_assessment(
     flags = client_info_data.get('flags', {})
     constraints = client_info_data.get('constraints', {})
     
-    # DEBUG LOGGING
-    print(f"\n=== SoF ASSESSMENT DEBUG ===")
-    print(f"Matter ID: {matter_id}")
-    print(f"Supporting docs uploaded: {len(supporting_docs_data)}")
-    for idx, doc in enumerate(supporting_docs_data):
-        print(f"  Doc {idx}: Type={doc.get('document_type')}, Has extracted_data={bool(doc.get('extracted_data'))}")
-        if doc.get('extracted_data'):
-            print(f"    Extracted fields: {list(doc.get('extracted_data', {}).keys())}")
-    print(f"Known documents: {known_documents}")
-    print(f"===========================\n")
+    # DEBUG LOGGING — counts only, no extracted client data
+    logger.debug("sof_assessment_docs_summary", matter_id=matter_id,
+                 supporting_doc_count=len(supporting_docs_data),
+                 known_document_count=len(known_documents))
     
     # ============================================================
     # DOCUMENT VERIFICATION — ASSESSMENT-TIME UPDATE
@@ -1789,8 +2073,8 @@ async def run_sof_assessment(
         if not file_groups and bank_statements:
             file_groups['bank_statement'] = bank_statements
 
-        print(f"\n=== DOCUMENT VERIFICATION — ASSESSMENT UPDATE ===")
-        print(f"Processing {len(file_groups)} statement file(s)...")
+        logger.info("sof_assessment_verification_update_start",
+                    matter_id=matter_id, statement_file_count=len(file_groups))
 
         score_total = 0.0
 
@@ -1808,7 +2092,10 @@ async def run_sof_assessment(
 
             # If CSV and already has statement results, skip re-run
             if existing_dv and existing_dv.verification_phase == "statement_only":
-                print(f"  📄 {fname}: CSV already verified (score={existing_dv.authenticity_score}, verdict={existing_dv.verdict.value})")
+                logger.info("sof_assessment_csv_already_verified",
+                            matter_id=matter_id, verification_id=existing_dv.id,
+                            score=existing_dv.authenticity_score,
+                            verdict=existing_dv.verdict.value)
                 score_total += existing_dv.authenticity_score
                 document_verification_summary["total_documents"] += 1
                 if existing_dv.verdict == VerificationVerdict.VERIFIED:
@@ -1860,7 +2147,10 @@ async def run_sof_assessment(
                 period_end=p_end,
             )
 
-            print(f"  📄 {fname}: stmt_score={vresult.authenticity_score}, status={vresult.status}")
+            logger.info("sof_assessment_statement_validated",
+                        matter_id=matter_id,
+                        stmt_score=vresult.authenticity_score,
+                        status=vresult.status)
 
             if existing_dv and existing_dv.verification_phase == "structural_only":
                 # PDF: combine structural + statement scores
@@ -1922,7 +2212,10 @@ async def run_sof_assessment(
                 db.refresh(existing_dv)
                 dv_record = existing_dv
                 final_score = combined_score
-                print(f"    Combined: structural={structural_score} * 0.4 + stmt={stmt_score} * 0.6 = {combined_score}")
+                logger.info("sof_assessment_scores_combined",
+                            matter_id=matter_id, verification_id=existing_dv.id,
+                            structural_score=structural_score,
+                            stmt_score=stmt_score, combined_score=combined_score)
             else:
                 # No existing record — create new (shouldn't happen normally, but handle gracefully)
                 import hashlib as _hl
@@ -2000,15 +2293,18 @@ async def run_sof_assessment(
             for v in document_verification_summary["verifications"]
         )
 
-        print(f"=== VERIFICATION COMPLETE: avg={document_verification_summary['average_score']}, "
-              f"verified={document_verification_summary['verified_count']}, "
-              f"suspicious={document_verification_summary['suspicious_count']}, "
-              f"tampered={document_verification_summary['likely_tampered_count']} ===\n")
+        logger.info("sof_assessment_verification_complete",
+                    matter_id=matter_id,
+                    average_score=document_verification_summary['average_score'],
+                    verified=document_verification_summary['verified_count'],
+                    suspicious=document_verification_summary['suspicious_count'],
+                    likely_tampered=document_verification_summary['likely_tampered_count'])
 
     except Exception as val_err:
-        import traceback
-        print(f"⚠️ Document verification update error (non-fatal): {val_err}")
-        print(traceback.format_exc())
+        logger.error("sof_assessment_verification_update_error",
+                     matter_id=matter_id,
+                     error_type=type(val_err).__name__,
+                     exc_info=True)
 
     # Store both keys for backward compatibility
     storage['document_verification_summary'] = document_verification_summary
@@ -2101,7 +2397,7 @@ async def run_sof_assessment(
                     # Exact match within £1 tolerance for rounding
                     if abs(txn_amount - savings_amount) < 1.0:
                         target_transaction = txn
-                        print(f"    ✓ EXACT MATCH FOUND: £{txn_amount:,.2f} - {txn.get('description', '')[:50]}")
+                        logger.debug("sof_assessment_savings_exact_match", matter_id=matter_id)
                         break
             
             if target_transaction:
@@ -2419,24 +2715,20 @@ async def run_sof_assessment(
         }
 
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"\n=== ASSESSMENT ERROR ===")
-        print(f"Error: {str(e)}")
-        print(f"Traceback:\n{error_traceback}")
-        print(f"========================\n")
-        
+        # Log the full traceback server-side only — never return internals
+        # (paths, code, client data) to the client.
+        logger.error("sof_assessment_engine_error",
+                     matter_id=matter_id,
+                     error_type=type(e).__name__,
+                     exc_info=True)
+
         storage['status'] = 'error'
-        storage['error'] = str(e)
-        storage['error_traceback'] = error_traceback
-        
-        # Include traceback in response for debugging
+        storage['error'] = f"Assessment engine error ({type(e).__name__})"
+
         raise HTTPException(
             status_code=500,
-            detail={
-                "error": f"Assessment engine error: {str(e)}",
-                "traceback": error_traceback
-            }
+            detail="Assessment engine error. The failure has been logged — "
+                   "please retry or contact an administrator."
         )
 
 
@@ -2449,12 +2741,10 @@ async def get_sof_assessment_results(
     """
     Get full SoF assessment results
     """
-    print(f"\n📥 Getting assessment for matter {matter_id}")
+    logger.debug("sof_assessment_results_requested", matter_id=matter_id)
 
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     # Load from database
     storage = _db_load_storage(db, matter_id)
@@ -2722,9 +3012,7 @@ async def save_evidence_checklist(
     so the worklist progress survives a refresh and is visible to other
     reviewers. The body is the full checklist state — per-claim suggested
     evidence ticked, and transaction-alert items ticked."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -2754,9 +3042,7 @@ async def download_file_note(
     """
 
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     # Get assessment data from DB
     storage = _db_load_storage(db, matter_id)
@@ -3222,9 +3508,7 @@ async def accept_claim_differences(
     from datetime import datetime
 
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     # Get assessment data from DB
     storage = _db_load_storage(db, matter_id)
@@ -3329,9 +3613,7 @@ async def save_funds_lineage(
     """
     
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     
     # Load storage from database
     storage = _db_load_storage(db, matter_id)
@@ -3485,9 +3767,7 @@ async def get_funds_lineage(
     """
     
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     
     # Load from database
     storage = _db_load_storage(db, matter_id) or {}
@@ -3515,9 +3795,7 @@ async def reset_sof_assessment(
     """
 
     # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     # Clear storage from database
     _db_delete_storage(db, matter_id)
@@ -3550,9 +3828,7 @@ async def delete_uploaded_file(
     if category not in ("client_info", "bank_statement", "supporting_doc"):
         raise HTTPException(status_code=400, detail=f"Unknown category: {category}")
 
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
 
     storage = _db_load_storage(db, matter_id)
     if not storage:
@@ -3681,9 +3957,7 @@ async def mark_item_sufficient(
             status_code=400,
             detail="Record your conclusion (at least 10 characters) - what you reviewed and why it is sufficient.",
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -3722,9 +3996,7 @@ async def send_item_to_compliance(
             status_code=400,
             detail="A reason (at least 10 characters) is required so compliance can see why it was referred.",
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -3793,9 +4065,7 @@ async def cancel_item_compliance(
             status_code=400,
             detail="A rationale (at least 10 characters) is required to cancel a compliance review.",
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -3848,9 +4118,7 @@ async def mark_alert_satisfied(
             status_code=400,
             detail="A rationale (at least 10 characters) is required to satisfy an alert.",
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -3896,9 +4164,7 @@ async def mark_claim_sufficient(
                 "evidence shows and why it is sufficient."
             ),
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -3940,9 +4206,7 @@ async def confirm_sof_adequate(
     The matter cannot reach Verified — the file cannot proceed — until
     this confirmation is given, and every claim must already be marked
     as having sufficient evidence."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -4001,9 +4265,7 @@ async def send_claim_to_compliance(
             status_code=400,
             detail="A reason (at least 10 characters) is required so compliance can see why the claim was referred.",
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -4090,9 +4352,7 @@ async def cancel_claim_compliance(
             status_code=400,
             detail="A rationale (at least 10 characters) is required to cancel a compliance review.",
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -4148,9 +4408,7 @@ async def get_compliance_referrals(
     """List the claims on a matter that have been referred to compliance,
     with each referral's reason and whether the officer has reviewed it.
     Admin (compliance officer) only."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id) or {}
     claims = (storage.get('assessment_result') or {}).get('claims') or []
     actions = storage.get('claim_actions') or {}
@@ -4193,9 +4451,7 @@ async def mark_referral_reviewed(
     db: Session = Depends(get_sync_db),
 ):
     """Compliance officer marks a single referred claim as reviewed."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -4247,9 +4503,7 @@ async def compliance_return_claim(
                 "earner can see compliance's queries."
             ),
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id)
     if not storage:
         raise HTTPException(status_code=404, detail="No assessment data for this matter")
@@ -4345,9 +4599,7 @@ async def return_to_fee_earner(
                 "earner knows why the matter is being returned."
             ),
         )
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     storage = _db_load_storage(db, matter_id) or {}
     actions = storage.get('claim_actions') or {}
 

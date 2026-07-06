@@ -1,24 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 import { translateFlag } from '../DocumentVerification/flagTranslations';
 import { FileUploader } from '../ui';
+import { RationaleModal, ConfirmModal } from '../ui/RationaleModal';
+import { showToast } from '../../lib/toast';
+import { formatCurrency, formatCurrencyWhole, formatDate, formatDateTime } from '../../lib/format';
 import { useAuthStore } from '../../stores/authStore';
-
-// Helper to format dates as dd/mm/yyyy
-const formatDate = (dateStr: string | undefined): string => {
-  if (!dateStr) return 'Unknown date';
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  } catch {
-    return dateStr;
-  }
-};
 
 interface UploadedFile {
   filename: string;
@@ -295,10 +283,41 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   
   // Alert management state
   const [alertRationales, setAlertRationales] = useState<{ [key: number]: string }>({});
-  const [alertSatisfied, setAlertSatisfied] = useState<{ [key: number]: boolean }>({});
 
-  // Validation summary state (used by assessment run response - now unified with document verification)
-  const [validationSummary, setValidationSummary] = useState<any>(null);
+  // Load failures for status/results - surfaced as a visible banner
+  // with a retry, never silently rendered as empty tiles.
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Shared rationale-capture modal (replaces window.prompt). Whichever
+  // action opened it supplies the copy and the submit handler; a
+  // failed submit shows inline and preserves the typed text.
+  const [rationaleModal, setRationaleModal] = useState<null | {
+    title: string;
+    description?: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    onConfirm: (text: string) => Promise<void>;
+  }>(null);
+
+  // Shared confirmation modal (replaces window.confirm).
+  const [confirmModal, setConfirmModal] = useState<null | {
+    title: string;
+    message: React.ReactNode;
+    confirmLabel: string;
+    destructive?: boolean;
+    typedConfirmation?: string;
+    onConfirm: () => Promise<void>;
+  }>(null);
+
+  // Evidence Checklist manual overrides - keyed `${claimIdx}|${doc}`,
+  // true = mark provided, false = untick an auto (filename-heuristic)
+  // match. Component state only; persistence is a backlog item.
+  const [evidenceOverrides, setEvidenceOverrides] = useState<Record<string, boolean>>({});
+
+  // Validation summary state (used by assessment run response - now
+  // unified with document verification; the value itself is currently
+  // rendered via docVerificationSummary, so only the setter is used).
+  const [, setValidationSummary] = useState<any>(null);
 
   // Document Verification state
   const [docVerificationSummary, setDocVerificationSummary] = useState<any>(null);
@@ -330,7 +349,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         }
       }
     } catch (err) {
-      console.error('Error loading funds lineage:', err);
+      console.debug('Error loading funds lineage:', err);
     }
   };
 
@@ -343,27 +362,41 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const fetchStatus = async () => {
     try {
       const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/status`);
+      if (!response.ok) {
+        console.debug('Status fetch failed:', response.status);
+        setLoadError('The assessment status could not be loaded.');
+        return;
+      }
       const data = await response.json();
       setStatus(data);
-      
+      setLoadError(null);
+
       // If assessment completed, fetch results
       if (data.status === 'completed') {
         fetchResults();
       }
     } catch (error) {
-      console.error('Error fetching status:', error);
+      console.debug('Error fetching status:', error);
+      setLoadError('The assessment status could not be loaded.');
     }
   };
 
   const fetchResults = async () => {
     try {
       const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/results`);
+      if (!response.ok) {
+        console.debug('Results fetch failed:', response.status);
+        setLoadError('The assessment results could not be loaded.');
+        return;
+      }
       const data = await response.json();
       setResult(data.assessment);
       setValidationSummary(data.document_verification_summary || data.statement_validation_summary || null);
       setActiveStep('results');
+      setLoadError(null);
     } catch (error) {
-      console.error('Error fetching results:', error);
+      console.debug('Error fetching results:', error);
+      setLoadError('The assessment results could not be loaded.');
     }
     // Also load document verification summary
     loadDocVerificationSummary();
@@ -379,7 +412,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         }
       }
     } catch (err) {
-      console.error('Error loading document verification summary:', err);
+      console.debug('Error loading document verification summary:', err);
     }
   };
 
@@ -566,34 +599,22 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       );
 
       if (!response.ok) {
-        const errorData = await response.json();
-        // Handle both string and object error details
-        let errorMessage = 'Assessment failed';
-        if (errorData.detail) {
-          if (typeof errorData.detail === 'string') {
-            errorMessage = errorData.detail;
-          } else if (typeof errorData.detail === 'object') {
-            errorMessage = errorData.detail.error || 'Assessment failed';
-            // Log full traceback to console for debugging
-            if (errorData.detail.traceback) {
-              console.error('=== ASSESSMENT ERROR TRACEBACK ===');
-              console.error(errorData.detail.traceback);
-              console.error('==================================');
-              // Add first line of traceback to error message
-              const tbLines = errorData.detail.traceback.split('\n').filter((l: string) => l.trim());
-              const lastLine = tbLines[tbLines.length - 1] || '';
-              errorMessage += ` (${lastLine})`;
-            }
+        const errorData = await response.json().catch(() => ({}));
+        // Never surface backend internals (tracebacks) to the user -
+        // log the detail for support and show a plain message.
+        let errorMessage = 'The assessment could not be completed. Please try again. A reference has been logged for support.';
+        if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail;
+        } else if (errorData.detail && typeof errorData.detail === 'object') {
+          console.debug('Assessment error detail:', errorData.detail);
+          if (typeof errorData.detail.error === 'string') {
+            errorMessage = `${errorData.detail.error} (reference logged)`;
           }
         }
         throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      console.log('Assessment result received:', data.assessment);
-      console.log('Evidence matches:', data.assessment.evidence_matches);
-      console.log('Funds lineage run:', data.funds_lineage_run);
-      console.log('Document verification summary:', data.document_verification_summary);
       setResult(data.assessment);
       setValidationSummary(data.document_verification_summary || data.statement_validation_summary || null);
       setActiveStep('results');
@@ -620,7 +641,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/file-note`,
       );
       if (!r.ok) {
-        alert(`Audit report failed (HTTP ${r.status}). Check you're still logged in.`);
+        showToast('The audit report could not be generated. Please try again.', 'error');
         return;
       }
       const blob = await r.blob();
@@ -635,7 +656,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(`Audit report failed: ${err.message || 'Unknown error'}`);
+      console.debug('Audit report failed:', err);
+      showToast('The audit report could not be generated. Please try again.', 'error');
     }
   };
 
@@ -646,138 +668,111 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     setResult((prev) => (prev ? ({ ...prev, claim_actions: claimActions } as any) : prev));
   };
 
+  // POST a rationale-style body to an assessment endpoint. Throws with
+  // a readable message on failure so the modal can show it inline
+  // without discarding the typed text.
+  const postRationale = async (
+    url: string,
+    body: Record<string, string>,
+    apply: (data: any) => void,
+  ) => {
+    const r = await authFetch(url, { method: 'POST', body: JSON.stringify(body) });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(
+        typeof err.detail === 'string' ? err.detail : (r.statusText || 'The request failed. Please try again.'),
+      );
+    }
+    apply(await r.json());
+  };
+
   // Final sign-off that the source of funds is adequate. The matter
   // cannot proceed to Verified until the fee earner gives this.
-  const confirmSofAdequate = async () => {
-    if (!confirm('Confirm the source of funds is adequate for this matter? The matter cannot proceed to Verified until this is given.')) return;
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/confirm-sof-adequate`,
-        { method: 'POST' },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not confirm: ${err.detail || r.statusText}`);
-        return;
-      }
-      const data = await r.json();
-      setResult((prev) => (prev ? ({ ...prev, sof_confirmed: data.sof_confirmed } as any) : prev));
-    } catch (e: any) {
-      alert(`Could not confirm: ${e?.message || 'Unknown error'}`);
-    }
+  const confirmSofAdequate = () => {
+    setConfirmModal({
+      title: 'Confirm source of funds adequate',
+      message: 'Confirm the source of funds is adequate for this matter? The matter cannot proceed to Verified until this is given.',
+      confirmLabel: 'Confirm adequate',
+      onConfirm: async () => {
+        const r = await authFetch(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/confirm-sof-adequate`,
+          { method: 'POST' },
+        );
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(typeof err.detail === 'string' ? err.detail : 'The confirmation could not be recorded.');
+        }
+        const data = await r.json();
+        setResult((prev) => (prev ? ({ ...prev, sof_confirmed: data.sof_confirmed } as any) : prev));
+        setConfirmModal(null);
+      },
+    });
   };
 
-  const markClaimSufficient = async (claimIndex: number) => {
-    const rationale = window.prompt(
-      'Mark this claim as having sufficient evidence. Record your conclusion (required) - '
-      + 'what the evidence shows and why it is sufficient.',
-      '',
-    );
-    if (rationale === null) return;
-    if (rationale.trim().length < 10) {
-      alert('A conclusion of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/sufficient-evidence`,
-        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not update: ${err.detail || r.statusText}`);
-        return;
-      }
-      const data = await r.json();
-      applyClaimActions(data.claim_actions);
-    } catch (e: any) {
-      alert(`Could not update: ${e?.message || 'Unknown error'}`);
-    }
+  const markClaimSufficient = (claimIndex: number) => {
+    setRationaleModal({
+      title: 'Sufficient evidence provided',
+      description: 'Mark this claim as having sufficient evidence. Record your conclusion - what the evidence shows and why it is sufficient.',
+      confirmLabel: 'Mark sufficient',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/sufficient-evidence`,
+          { rationale: text },
+          (data) => applyClaimActions(data.claim_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
-  const sendClaimToCompliance = async (claimIndex: number) => {
-    const reason = window.prompt(
-      'Send this claim to compliance. Give the reason for the referral (required) - '
-      + 'the compliance team sees this so they know why it has come to them.',
-      '',
-    );
-    if (reason === null) return;
-    if (reason.trim().length < 10) {
-      alert('A reason of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/send-to-compliance`,
-        { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not send: ${err.detail || r.statusText}`);
-        return;
-      }
-      const data = await r.json();
-      applyClaimActions(data.claim_actions);
-    } catch (e: any) {
-      alert(`Could not send: ${e?.message || 'Unknown error'}`);
-    }
+  const sendClaimToCompliance = (claimIndex: number) => {
+    setRationaleModal({
+      title: 'Send claim to compliance',
+      description: 'Give the reason for the referral - the compliance team sees this so they know why it has come to them.',
+      confirmLabel: 'Send to Compliance',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/send-to-compliance`,
+          { reason: text },
+          (data) => applyClaimActions(data.claim_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
-  const cancelClaimCompliance = async (claimIndex: number) => {
-    const rationale = window.prompt(
-      'This claim no longer needs compliance review. Give a rationale (required) - it is recorded in the audit trail.',
-      '',
-    );
-    if (rationale === null) return;
-    if (rationale.trim().length < 10) {
-      alert('A rationale of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/cancel-compliance`,
-        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not cancel: ${err.detail || r.statusText}`);
-        return;
-      }
-      const data = await r.json();
-      applyClaimActions(data.claim_actions);
-    } catch (e: any) {
-      alert(`Could not cancel: ${e?.message || 'Unknown error'}`);
-    }
+  const cancelClaimCompliance = (claimIndex: number) => {
+    setRationaleModal({
+      title: 'Cancel compliance referral',
+      description: 'This claim no longer needs compliance review. Give a rationale - it is recorded in the audit trail.',
+      confirmLabel: 'Cancel referral',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/cancel-compliance`,
+          { rationale: text },
+          (data) => applyClaimActions(data.claim_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
   // Compliance officer (admin) responds to a referred claim and returns
   // it to the fee earner - the compliance side of the conversation.
-  const complianceReturnClaim = async (claimIndex: number) => {
-    const response = window.prompt(
-      'Return this claim to the fee earner. Give your response (required) - '
-      + 'the fee earner sees this so they know what compliance found.',
-      '',
-    );
-    if (response === null) return;
-    if (response.trim().length < 10) {
-      alert('A response of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/compliance-return`,
-        { method: 'POST', body: JSON.stringify({ response: response.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not return: ${err.detail || r.statusText}`);
-        return;
-      }
-      const data = await r.json();
-      applyClaimActions(data.claim_actions);
-    } catch (e: any) {
-      alert(`Could not return: ${e?.message || 'Unknown error'}`);
-    }
+  const complianceReturnClaim = (claimIndex: number) => {
+    setRationaleModal({
+      title: 'Return claim to fee earner',
+      description: 'Give your response - the fee earner sees this so they know what compliance found.',
+      confirmLabel: 'Return to Fee Earner',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/claims/${claimIndex}/compliance-return`,
+          { response: text },
+          (data) => applyClaimActions(data.claim_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
   // ── Review-item actions (non-claim sections, e.g. Transaction Review) ──
@@ -785,84 +780,52 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     setResult((prev) => (prev ? ({ ...prev, item_actions: itemActions } as any) : prev));
   };
 
-  const markItemSufficient = async (itemKey: string) => {
-    const rationale = window.prompt(
-      'Mark this section as having sufficient evidence. Record your conclusion (required) - '
-      + 'what you reviewed and why it is sufficient.',
-      '',
-    );
-    if (rationale === null) return;
-    if (rationale.trim().length < 10) {
-      alert('A conclusion of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/sufficient-evidence`,
-        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not update: ${err.detail || r.statusText}`);
-        return;
-      }
-      applyItemActions((await r.json()).item_actions);
-    } catch (e: any) {
-      alert(`Could not update: ${e?.message || 'Unknown error'}`);
-    }
+  const markItemSufficient = (itemKey: string) => {
+    setRationaleModal({
+      title: 'Sufficient evidence provided',
+      description: 'Mark this section as having sufficient evidence. Record your conclusion - what you reviewed and why it is sufficient.',
+      confirmLabel: 'Mark sufficient',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/sufficient-evidence`,
+          { rationale: text },
+          (data) => applyItemActions(data.item_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
-  const sendItemToCompliance = async (itemKey: string) => {
-    const reason = window.prompt(
-      'Send this section to compliance. Give the reason for the referral (required) - '
-      + 'the compliance team sees this so they know why it has come to them.',
-      '',
-    );
-    if (reason === null) return;
-    if (reason.trim().length < 10) {
-      alert('A reason of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/send-to-compliance`,
-        { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not send: ${err.detail || r.statusText}`);
-        return;
-      }
-      applyItemActions((await r.json()).item_actions);
-    } catch (e: any) {
-      alert(`Could not send: ${e?.message || 'Unknown error'}`);
-    }
+  const sendItemToCompliance = (itemKey: string) => {
+    setRationaleModal({
+      title: 'Send section to compliance',
+      description: 'Give the reason for the referral - the compliance team sees this so they know why it has come to them.',
+      confirmLabel: 'Send to Compliance',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/send-to-compliance`,
+          { reason: text },
+          (data) => applyItemActions(data.item_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
-  const cancelItemCompliance = async (itemKey: string) => {
-    const rationale = window.prompt(
-      'This section no longer needs compliance review. Give a rationale (required) - it is recorded in the audit trail.',
-      '',
-    );
-    if (rationale === null) return;
-    if (rationale.trim().length < 10) {
-      alert('A rationale of at least 10 characters is required.');
-      return;
-    }
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/cancel-compliance`,
-        { method: 'POST', body: JSON.stringify({ rationale: rationale.trim() }) },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not cancel: ${err.detail || r.statusText}`);
-        return;
-      }
-      applyItemActions((await r.json()).item_actions);
-    } catch (e: any) {
-      alert(`Could not cancel: ${e?.message || 'Unknown error'}`);
-    }
+  const cancelItemCompliance = (itemKey: string) => {
+    setRationaleModal({
+      title: 'Cancel compliance referral',
+      description: 'This section no longer needs compliance review. Give a rationale - it is recorded in the audit trail.',
+      confirmLabel: 'Cancel referral',
+      onConfirm: async (text) => {
+        await postRationale(
+          `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/items/${itemKey}/cancel-compliance`,
+          { rationale: text },
+          (data) => applyItemActions(data.item_actions),
+        );
+        setRationaleModal(null);
+      },
+    });
   };
 
   // Mark a single transaction-review alert satisfied, with the rationale
@@ -870,7 +833,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   const markAlertSatisfied = async (itemKey: string, alertIndex: number) => {
     const rationale = (alertRationales[alertIndex] || '').trim();
     if (rationale.length < 10) {
-      alert('Enter a rationale of at least 10 characters before marking the alert satisfied.');
+      showToast('Enter a rationale of at least 10 characters before marking the alert satisfied.', 'error');
       return;
     }
     try {
@@ -880,12 +843,12 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       );
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
-        alert(`Could not update: ${err.detail || r.statusText}`);
+        showToast(`Could not update: ${err.detail || r.statusText}`, 'error');
         return;
       }
       applyItemActions((await r.json()).item_actions);
     } catch (e: any) {
-      alert(`Could not update: ${e?.message || 'Unknown error'}`);
+      showToast(`Could not update: ${e?.message || 'Unknown error'}`, 'error');
     }
   };
 
@@ -893,31 +856,32 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
   // Remove one uploaded file from this matter. Cleans up storage,
   // DocumentVerification rows, and the file on disk. Triggers a
   // status refresh on success so the uploaded-files list re-renders.
-  const deleteUploadedFile = async (
+  const deleteUploadedFile = (
     filename: string,
     category: 'client_info' | 'bank_statement' | 'supporting_doc',
   ) => {
-    if (!confirm(`Remove "${filename}"? This will clear it from the assessment.`)) return;
-
-    try {
-      const url = `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/uploaded-file?filename=${encodeURIComponent(filename)}&category=${encodeURIComponent(category)}`;
-      const response = await authFetch(url, { method: 'DELETE' });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        alert(`Could not remove file: ${err.detail || response.statusText}`);
-        return;
-      }
-      setFileVerificationResults((prev) => {
-        const { [filename]: _, ...rest } = prev;
-        return rest;
-      });
-      // Stale results aren't useful once the inputs change.
-      setResult(null);
-      await fetchStatus();
-    } catch (error: any) {
-      console.error('Error deleting file:', error);
-      alert(`Could not remove file: ${error?.message || 'Unknown error'}`);
-    }
+    setConfirmModal({
+      title: 'Remove file',
+      message: <>Remove <span className="font-medium">"{filename}"</span>? This will clear it from the assessment.</>,
+      confirmLabel: 'Remove file',
+      destructive: true,
+      onConfirm: async () => {
+        const url = `${API_BASE_URL}/api/v1/matters/${matterId}/sof-assessment/uploaded-file?filename=${encodeURIComponent(filename)}&category=${encodeURIComponent(category)}`;
+        const response = await authFetch(url, { method: 'DELETE' });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(typeof err.detail === 'string' ? err.detail : 'The file could not be removed.');
+        }
+        setFileVerificationResults((prev) => {
+          const { [filename]: _, ...rest } = prev;
+          return rest;
+        });
+        // Stale results aren't useful once the inputs change.
+        setResult(null);
+        setConfirmModal(null);
+        await fetchStatus();
+      },
+    });
   };
 
   // Download an uploaded document so another reviewer can see the
@@ -929,7 +893,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
         `${API_BASE_URL}/api/v1/matters/${matterId}/documents/${encodeURIComponent(filename)}`,
       );
       if (!r.ok) {
-        alert(`Could not download "${filename}" (HTTP ${r.status}). The original file may not be available.`);
+        showToast(`Could not download "${filename}". The original file may not be available.`, 'error');
         return;
       }
       const blob = await r.blob();
@@ -942,95 +906,31 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      alert(`Could not download: ${e?.message || 'Unknown error'}`);
+      showToast(`Could not download: ${e?.message || 'Unknown error'}`, 'error');
     }
   };
 
-  const deleteMatter = async () => {
-    if (!confirm('This will permanently delete this matter, every uploaded file, and every assessment record. This cannot be undone. Continue?')) {
-      return;
-    }
-
-    try {
-      const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        alert(`Could not delete matter: ${err.detail || response.statusText}`);
-        return;
-      }
-      navigate('/matters');
-    } catch (error: any) {
-      console.error('Error deleting matter:', error);
-      alert(`Could not delete matter: ${error?.message || 'Unknown error'}`);
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    // Use cream/tan color to match the screenshot
-    return 'bg-zinc-100';
-  };
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'CRITICAL':
-        return 'bg-red-700';
-      case 'HIGH':
-        return 'bg-amber-500'; // Warm tan/brown for high severity
-      case 'MEDIUM':
-        return 'bg-zinc-50'; // Light cream for medium
-      default:
-        return 'bg-zinc-200';
-    }
-  };
-
-  const extractFinalAssessmentText = (rationale: string): string[] => {
-    // This function is no longer used - we'll build from result data directly
-    return [];
-  };
-
-  const renderStructuredRationale = (result: AssessmentResult) => {
-    // Renders only the Transaction Review section, which genuinely
-    // needs the engine's free-text rationale. The Source of Funds
-    // Analysis tile is rendered separately and directly from
-    // result.claims (see the renderResult body) so it can never be
-    // lost to a header-less or malformed rationale. Null-guarded -
-    // rationale may be empty on a degraded result.
-    const rationale = (result.outcome && result.outcome.rationale) || '';
-    const sections = rationale.split('===').filter(s => s.trim());
-
-    return (
-      <div className="space-y-6">
-        {sections.map((section) => {
-          const lines = section.trim().split('\n');
-          const title = (lines[0] || '').trim().toUpperCase();
-          const content = lines.slice(1).join('\n');
-          if (title.includes('TRANSACTION REVIEW')) {
-            return renderTransactionReviewSection(content, result);
-          }
-          // CLIENT INFORMATION / SOURCE OF FUNDS / FINAL ASSESSMENT
-          // are handled elsewhere or intentionally not shown here.
-          return null;
-        })}
-      </div>
-    );
-  };
-
-  const renderClientInfoSection = (content: string) => {
-    return (
-      <div key="client-info" className="bg-white border border-zinc-200 rounded-md overflow-hidden">
-        {/* Header */}
-        <div className="bg-zinc-50 border-b border-zinc-200 px-6 py-4">
-          <h3 className="text-lg font-bold text-zinc-900">Client Information</h3>
-        </div>
-        
-        {/* Client Details */}
-        <div className="px-6 py-4">
-          <pre className="whitespace-pre-wrap text-sm text-zinc-900 font-mono">{content}</pre>
-        </div>
-      </div>
-    );
+  // Archive the matter. The backend retains all data for
+  // record-keeping - this closes the matter rather than deleting it.
+  const archiveMatter = () => {
+    setConfirmModal({
+      title: 'Archive matter',
+      message: 'The matter will be closed and retained for record-keeping (not deleted). It will no longer appear in the active matters list.',
+      confirmLabel: 'Archive matter',
+      destructive: true,
+      typedConfirmation: 'ARCHIVE',
+      onConfirm: async () => {
+        const response = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(typeof err.detail === 'string' ? err.detail : 'The matter could not be archived.');
+        }
+        setConfirmModal(null);
+        navigate('/matters');
+      },
+    });
   };
 
   // Source of Funds Claims - one row per declared claim, with a
@@ -1113,10 +1013,10 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     <tr className="hover:bg-zinc-50/60">
                       <td className="px-5 py-3.5 text-sm text-zinc-900">
                         <span className="font-medium text-red-800">Funds shortfall</span>
-                        <span className="ml-2 text-xs text-zinc-500 tabular-nums">£{Number(result.funds_shortfall.shortfall).toLocaleString()}</span>
+                        <span className="ml-2 text-xs text-zinc-500 tabular-nums">{formatCurrency(result.funds_shortfall.shortfall)}</span>
                         <div className="mt-0.5 text-xs text-zinc-500">
-                          Declared sources are £{Number(result.funds_shortfall.shortfall).toLocaleString()} short of the
-                          £{Number(result.funds_shortfall.transaction_value).toLocaleString()} transaction value.
+                          Declared sources are {formatCurrency(result.funds_shortfall.shortfall)} short of the
+                          {' '}{formatCurrency(result.funds_shortfall.transaction_value)} transaction value.
                         </div>
                       </td>
                       <td className="px-5 py-3.5 text-sm whitespace-nowrap">
@@ -1130,7 +1030,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 {claimList.map((claim, idx) => {
                   const status = claimStatus(idx);
                   const sourceLabel = String(claim.source_type || '').replace(/_/g, ' ');
-                  const amountStr = `£${Number(claim.expected_amount || 0).toLocaleString()}`;
+                  const amountStr = formatCurrencyWhole(claim.expected_amount);
                   const chip = STATUS_CHIP[status];
                   return (
                     <tr key={idx} className="hover:bg-zinc-50/60">
@@ -1154,178 +1054,31 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
     );
   };
 
-  const renderTransactionReviewSection = (content: string, result: AssessmentResult) => {
-    // Hidden entirely when the Transaction Review module is switched
-    // off on the Configuration page.
-    if (result.sections_enabled?.transaction_review === false) return null;
-    const overallMatch = content.match(/OVERALL STATUS:([^\n]+)/);
-    const overallStatus = overallMatch ? overallMatch[1].trim() : '';
-
-    const hasCritical = overallStatus.includes('CRITICAL') || content.includes('CRITICAL');
-
-    return (
-      <details key="tr" id="tile-transaction-review" className="bg-white border border-zinc-200 rounded-md overflow-hidden group">
-        <summary className="bg-zinc-50 border-b border-zinc-200 px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-zinc-100 list-none">
-          <h3 className="text-lg font-bold text-zinc-900">Transaction Review</h3>
-          <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </summary>
-        
-        {/* Overall Status */}
-        <div className={`px-6 py-4 border-b ${hasCritical ? 'bg-red-50 border-red-200' : 'bg-zinc-50 border-zinc-200'}`}>
-          <p className={`font-semibold ${hasCritical ? 'text-red-700' : 'text-zinc-900'}`}>
-            {overallStatus}
-          </p>
-        </div>
-        
-        {/* Alert Stats */}
-        {result.transaction_review_summary && result.transaction_review_summary.total_alerts > 0 && (
-          <div className="px-6 py-4 border-b border-zinc-200">
-            <div className="grid grid-cols-4 gap-4">
-              <div className="bg-zinc-100 rounded-md p-3 text-center">
-                <div className="text-2xl font-bold text-zinc-900">{result.transaction_review_summary.total_alerts}</div>
-                <div className="text-xs text-zinc-600 mt-1">Total Alerts</div>
-              </div>
-              <div className="bg-red-100 rounded-md p-3 text-center">
-                <div className="text-2xl font-bold text-red-700">{result.transaction_review_summary.critical_alerts}</div>
-                <div className="text-xs text-red-700 mt-1">Critical</div>
-              </div>
-              <div className="bg-zinc-200 rounded-md p-3 text-center">
-                <div className="text-2xl font-bold text-zinc-900">{result.transaction_review_summary.high_alerts}</div>
-                <div className="text-xs text-zinc-600 mt-1">High</div>
-              </div>
-              <div className="bg-zinc-50 rounded-md p-3 text-center">
-                <div className="text-2xl font-bold text-zinc-900">{result.transaction_review_summary.medium_alerts}</div>
-                <div className="text-xs text-zinc-600 mt-1">Medium</div>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        {/* Alert Table or No Alerts Message */}
-        {result.transaction_review_summary && (result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details) && (result.transaction_review_summary.alerts?.length > 0 || result.transaction_review_summary.alert_details?.length > 0) ? (
-          <div className="px-6 py-4">
-            <h4 className="text-sm font-bold text-zinc-600 mb-3">Alert Analysis</h4>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-brand-muted">
-                <thead className="bg-zinc-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Severity</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Issue Identified</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Transaction Details</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Alert Rationale</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Alert Satisfied</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 uppercase tracking-wider">Summary</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-brand-muted">
-                  {(result.transaction_review_summary.alerts || result.transaction_review_summary.alert_details || []).slice(0, 5).map((alert, idx) => {
-                    const severity = alert.severity || 'HIGH';
-                    // Handle both flat structure (alerts) and nested structure (alert_details with transaction object)
-                    const txn = alert.transaction || alert;
-                    const amount = txn.amount || alert.amount;
-                    const date = txn.date || alert.date;
-                    const narrative = txn.narrative || alert.counterparty || '';
-                    
-                    return (
-                      <tr key={idx} className="hover:bg-zinc-50">
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-bold whitespace-nowrap ${
-                            severity === 'CRITICAL' ? 'bg-red-700 text-white' : 'bg-amber-500 text-white'
-                          }`}>
-                            <span>{severity === 'CRITICAL' ? '🔴' : '🟠'}</span>
-                            <span>{severity}</span>
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-zinc-900">
-                          {alert.reasons && alert.reasons.length > 0 ? alert.reasons[0] : 'AML concern'}
-                          <div className="text-xs text-zinc-400 mt-1">
-                            {narrative || 'No description'}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-zinc-900">
-                          <div>Amount: £{amount?.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) || '0.00'}</div>
-                          <div className="text-xs text-zinc-400">Date: {date || 'Unknown'}</div>
-                          {narrative && <div className="text-xs text-zinc-400">Details: {narrative}</div>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <textarea
-                            value={alertRationales[idx] || ''}
-                            onChange={(e) => setAlertRationales({...alertRationales, [idx]: e.target.value})}
-                            placeholder="Enter rationale..."
-                            className="w-full px-2 py-1 text-sm border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-500"
-                            rows={2}
-                          />
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={alertSatisfied[idx] || false}
-                            onChange={(e) => setAlertSatisfied({...alertSatisfied, [idx]: e.target.checked})}
-                            className="w-5 h-5 text-zinc-700 border-zinc-200 rounded focus:ring-zinc-500"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          {alertSatisfied[idx] ? (
-                            <div className="space-y-1">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-green-100 text-green-700">
-                                <span>✅</span>
-                                <span>SATISFIED</span>
-                              </span>
-                              <div className="text-xs text-zinc-600">
-                                <div>By: Current User</div>
-                                <div>Date: {new Date().toLocaleDateString('en-GB')}</div>
-                                {alertRationales[idx] && (
-                                  <div className="italic mt-1">"{alertRationales[idx].slice(0, 50)}{alertRationales[idx].length > 50 ? '...' : ''}"</div>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${
-                              severity === 'CRITICAL' ? 'bg-red-100 text-red-700' : 'bg-zinc-100 text-zinc-900'
-                            }`}>
-                              <span>{severity === 'CRITICAL' ? '❌' : '⚠️'}</span>
-                              <span>{severity === 'CRITICAL' ? 'BLOCKS COMPLETION' : 'REQUIRES REVIEW'}</span>
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <div className="px-6 py-8">
-            <div className="text-center text-zinc-400">
-              <div className="text-4xl mb-2">✓</div>
-              <p className="font-medium">No alerts found within transactions</p>
-            </div>
-          </div>
-        )}
-
-
-      </details>
-    );
-  };
 
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header - the Archive action lives at the bottom of the tab,
+          away from the primary workflow actions. */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-zinc-900">Source of Funds Assessment</h2>
         </div>
-        <button
-          onClick={deleteMatter}
-          className="px-4 py-2 text-sm text-red-700 hover:text-red-700 border border-red-200 rounded hover:bg-red-50"
-        >
-          Delete Matter
-        </button>
       </div>
+
+      {/* Load failure - visible banner with retry, never empty tiles. */}
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 rounded-md px-5 py-4 flex items-center justify-between gap-4">
+          <div className="text-sm text-red-700">{loadError}</div>
+          <button
+            type="button"
+            onClick={() => { fetchStatus(); }}
+            className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded border border-red-300 bg-white text-red-700 hover:bg-red-50 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Step Tabs */}
       <div className="border-b border-zinc-200 flex items-center justify-between">
@@ -1747,7 +1500,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             </div>
           )}
 
-          {!status || !status.ready_for_assessment && (
+          {/* Operator precedence fix: show the requirements hint only
+              once the status HAS loaded and reports not-ready. While
+              status is still null (loading/failed) the hint would be
+              noise - the load-error banner covers the failure case. */}
+          {status && !status.ready_for_assessment && (
             <div className="bg-zinc-50 border border-zinc-200 rounded-md p-4 text-zinc-900">
               <strong>Required:</strong> Upload Client Info (JSON) and at least one Bank Statement (CSV/PDF) to run assessment.
             </div>
@@ -1781,10 +1538,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               !!((result.claim_actions || {})[String(i)] || {}).sufficient);
             const confirmed = result.sof_confirmed;
             if (confirmed) {
-              const d = new Date(confirmed.at);
-              const when = isNaN(d.getTime())
-                ? ''
-                : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              const when = confirmed.at ? formatDateTime(confirmed.at) : '';
               return (
                 <div className="bg-green-50 border border-green-200 rounded-md px-5 py-4 flex items-center gap-3">
                   <svg className="h-5 w-5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1883,14 +1637,14 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             const claimVerified = (idx: number): boolean =>
               !!((result.claim_actions || {})[String(idx)] || {}).sufficient;
 
-            const fmtMoney = (n: any) => `£${Math.round(Number(n) || 0).toLocaleString()}`;
+            const fmtMoney = (n: any) => formatCurrencyWhole(Math.round(Number(n) || 0));
             // Enrich a provided-evidence line with the claim amount it
             // confirms, e.g. "...letter for the sale" becomes
             // "...letter confirming £400,000 for the sale".
             const enrichDoc = (doc: string, amount: any): string => {
               const amt = Math.round(Number(amount) || 0);
               if (amt <= 0 || /£[\d,]/.test(doc)) return doc;
-              const money = `£${amt.toLocaleString()}`;
+              const money = formatCurrencyWhole(amt);
               const lastFor = doc.toLowerCase().lastIndexOf(' for ');
               if (lastFor > 0) {
                 return `${doc.slice(0, lastFor)} confirming ${money}${doc.slice(lastFor)}`;
@@ -1916,12 +1670,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
             );
             const fmtGapDate = (s: any): string => {
               if (!s) return 'an unknown date';
-              const str = String(s);
-              if (str.includes('-')) {
-                const p = str.split('-');
-                if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
-              }
-              return str;
+              return formatDate(String(s));
             };
 
             // What the other modules have flagged for review against
@@ -1977,15 +1726,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
             // Build the rows - every claim with a checklist or an open
             // gap. Provided / Suggested / Gaps are precomputed here.
+            //
+            // Provided-detection is a FILENAME HEURISTIC, so each
+            // auto-tick carries a visible caveat and the user can
+            // manually toggle any line either way (evidenceOverrides -
+            // component state only, not saved).
             const rows = (result.claims || []).map((claim: any, idx: number) => {
               const docs: string[] = claim.expected_evidence || [];
               const ev = result.evidence_matches[idx] || {};
               const action = (result.claim_actions || {})[String(idx)] || {};
               const verified = claimVerified(idx);
-              const provided = docs
-                .map((d: string) => ({ doc: d, file: matchedFile(d) }))
-                .filter((x: any) => x.file);
-              const suggested = docs.filter((d: string) => !matchedFile(d));
               // Where the lineage has flagged credits whose origin is not
               // established (e.g. unexplained faster payments into the
               // statement), ask for evidence of where those funds came from.
@@ -1994,9 +1744,24 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                 (d: any) => String(d?.field || '') === 'untraced_funds' && Number(d?.amount || 0) > 0,
               );
               const UNVERIFIED_LINE = 'Evidence to support source of unverified credits';
-              if (hasUnverifiedCredits && !suggested.includes(UNVERIFIED_LINE)) {
-                suggested.push(UNVERIFIED_LINE);
+              const allDocs = [...docs];
+              if (hasUnverifiedCredits && !allDocs.includes(UNVERIFIED_LINE)) {
+                allDocs.push(UNVERIFIED_LINE);
               }
+              const items = allDocs.map((d: string) => {
+                const file = matchedFile(d);
+                const key = `${idx}|${d}`;
+                const override = evidenceOverrides[key];
+                return {
+                  doc: d,
+                  file,
+                  key,
+                  provided: override !== undefined ? override : !!file,
+                  manual: override !== undefined,
+                };
+              });
+              const provided = items.filter((x) => x.provided);
+              const suggested = items.filter((x) => !x.provided);
               const gaps = claimGaps(claim, ev, verified, provided.length > 0);
               return { claim, idx, docs, verified, action, provided, suggested, gaps };
             }).filter((r: any) => r.docs.length > 0 || r.gaps.length > 0);
@@ -2012,12 +1777,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
               const inReview = comp.state === 'in_review';
               const sufficient = !!ia.sufficient;
               const thread: any[] = comp.thread || [];
-              const fmtTs = (s: string) => {
-                const d = new Date(s);
-                return isNaN(d.getTime())
-                  ? ''
-                  : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-              };
+              const fmtTs = (s: string) => (s ? formatDateTime(s) : '');
               return (
                 <>
                   {sufficient && ia.sufficient.rationale && (
@@ -2103,9 +1863,9 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           <li className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
                             <span className="mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 bg-red-400" />
                             <span>
-                              The declared sources total £{Number(result.funds_shortfall.claimed_total).toLocaleString()}, but
-                              the transaction value is £{Number(result.funds_shortfall.transaction_value).toLocaleString()} - a
-                              shortfall of £{Number(result.funds_shortfall.shortfall).toLocaleString()}. Obtain evidence for the
+                              The declared sources total {formatCurrency(result.funds_shortfall.claimed_total)}, but
+                              the transaction value is {formatCurrency(result.funds_shortfall.transaction_value)} - a
+                              shortfall of {formatCurrency(result.funds_shortfall.shortfall)}. Obtain evidence for the
                               difference, establish how the balance is funded, or record a rationale below for why the shortfall
                               is acceptable.
                             </span>
@@ -2118,7 +1878,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   <div className="space-y-4">
                     {rows.map((row: any) => {
                       const label = String(row.claim.source_type || 'Source').replace(/_/g, ' ');
-                      const amt = `£${Number(row.claim.expected_amount || 0).toLocaleString()}`;
+                      const amt = formatCurrencyWhole(row.claim.expected_amount);
                       const provided = row.provided;
                       const suggested = row.suggested;
                       // How a claim links to a bank statement:
@@ -2127,8 +1887,8 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       //  - a lump-sum claim (property sale, gift) links to
                       //    the one statement showing the matching credit;
                       //  - otherwise fall back to listing the statements.
-                      const isStmtFile = (fn: string) =>
-                        uploaded.some((f) => f.filename === fn && f.category === 'bank_statement');
+                      const isStmtFile = (fn: string | null) =>
+                        !!fn && uploaded.some((f) => f.filename === fn && f.category === 'bank_statement');
                       const stmtItems = provided.filter((it: any) => isStmtFile(it.file));
                       const docItems = provided.filter((it: any) => !isStmtFile(it.file));
                       const stmtMatch = (result.claim_statement_matches || {})[String(row.idx)];
@@ -2140,8 +1900,30 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                       const statements = (savingsStatements.length === 0 && !stmtMatch && stmtItems.length > 0)
                         ? (result.statements_provided || []) : [];
                       const showProvided = provided.length > 0 || !!stmtMatch || savingsStatements.length > 0;
-                      const fmtCredit = (n: any) =>
-                        `£${Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
+                      const fmtCredit = (n: any) => formatCurrency(n);
+                      // Small caveat/toggle controls for the heuristic
+                      // filename matches (D18) - the tick can be wrong,
+                      // so say how it was made and let the user correct it.
+                      const heuristicCaveat = (item: any) => (
+                        <>
+                          {item.file && !item.manual && (
+                            <span className="ml-1.5 text-[10px] text-amber-600 whitespace-nowrap">matched by filename — verify manually</span>
+                          )}
+                          {item.manual && (
+                            <span className="ml-1.5 text-[10px] italic text-zinc-400 whitespace-nowrap">manual override (not saved)</span>
+                          )}
+                        </>
+                      );
+                      const untickButton = (item: any) => (
+                        <button
+                          type="button"
+                          onClick={() => setEvidenceOverrides((prev) => ({ ...prev, [item.key]: false }))}
+                          title="Untick this line - manual override (not saved)"
+                          className="flex-shrink-0 text-[10px] text-zinc-400 hover:text-zinc-700 underline underline-offset-2"
+                        >
+                          untick
+                        </button>
+                      );
                       return (
                         <div key={row.idx} className="border border-zinc-100 rounded p-3">
                           <div className="text-sm font-medium text-zinc-900 capitalize">
@@ -2157,10 +1939,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 {docItems.map((item: any, di: number) => (
                                   <li key={`d${di}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
-                                    <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>
-                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
-                                      {item.file}
+                                    <span className="flex-1 min-w-0 text-zinc-700">
+                                      {enrichDoc(item.doc, row.claim.expected_amount)}
+                                      {heuristicCaveat(item)}
                                     </span>
+                                    {item.file && (
+                                      <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
+                                        {item.file}
+                                      </span>
+                                    )}
+                                    {untickButton(item)}
                                   </li>
                                 ))}
                                 {stmtMatch && (
@@ -2168,7 +1956,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                     {checkIcon}
                                     <span className="flex-1 min-w-0 text-zinc-700">
                                       {stmtMatch.account_label} showing a {fmtCredit(stmtMatch.credit_amount)} credit
-                                      {stmtMatch.credit_date ? ` on ${stmtMatch.credit_date}` : ''}
+                                      {stmtMatch.credit_date ? ` on ${formatDate(stmtMatch.credit_date)}` : ''}
                                     </span>
                                     <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={stmtMatch.filename}>
                                       {stmtMatch.filename}
@@ -2199,10 +1987,16 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 {savingsStatements.length === 0 && !stmtMatch && statements.length === 0 && stmtItems.map((item: any, di: number) => (
                                   <li key={`b${di}`} className="flex items-start gap-3 text-xs leading-snug">
                                     {checkIcon}
-                                    <span className="flex-1 min-w-0 text-zinc-700">{enrichDoc(item.doc, row.claim.expected_amount)}</span>
-                                    <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
-                                      {item.file}
+                                    <span className="flex-1 min-w-0 text-zinc-700">
+                                      {enrichDoc(item.doc, row.claim.expected_amount)}
+                                      {heuristicCaveat(item)}
                                     </span>
+                                    {item.file && (
+                                      <span className="flex-shrink-0 max-w-[14rem] truncate text-[11px] text-zinc-500 font-mono" title={item.file}>
+                                        {item.file}
+                                      </span>
+                                    )}
+                                    {untickButton(item)}
                                   </li>
                                 ))}
                               </ul>
@@ -2217,12 +2011,25 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                 {row.verified ? 'Other possible evidence' : 'Suggested Evidence to Obtain'}
                               </div>
                               <ul className="space-y-1">
-                                {suggested.map((doc: string, di: number) => (
+                                {suggested.map((item: any, di: number) => (
                                   <li key={di} className="flex items-start gap-2 text-xs text-zinc-700 leading-snug">
                                     <span className={`mt-[5px] h-1.5 w-1.5 rounded-full flex-shrink-0 ${
                                       row.verified ? 'bg-zinc-300' : 'bg-amber-400'
                                     }`} />
-                                    {doc}
+                                    <span className="flex-1 min-w-0">
+                                      {item.doc}
+                                      {item.manual && (
+                                        <span className="ml-1.5 text-[10px] italic text-zinc-400 whitespace-nowrap">unticked manually (not saved)</span>
+                                      )}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEvidenceOverrides((prev) => ({ ...prev, [item.key]: true }))}
+                                      title="Tick this line as provided - manual override (not saved)"
+                                      className="flex-shrink-0 text-[10px] text-zinc-400 hover:text-zinc-700 underline underline-offset-2"
+                                    >
+                                      mark provided
+                                    </button>
                                   </li>
                                 ))}
                               </ul>
@@ -2252,12 +2059,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                           {(() => {
                             const thread: any[] = (row.action.compliance || {}).thread || [];
                             if (thread.length === 0) return null;
-                            const fmtTs = (s: string) => {
-                              const d = new Date(s);
-                              return isNaN(d.getTime())
-                                ? ''
-                                : d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-                            };
+                            const fmtTs = (s: string) => (s ? formatDateTime(s) : '');
                             return (
                               <div className="mt-3 pt-3 border-t border-zinc-100">
                                 <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
@@ -2368,7 +2170,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   {(() => {
                     if (result.sections_enabled?.transaction_review === false) return null;
                     const trs = result.transaction_review_summary;
-                    const alerts: any[] = (trs?.alerts || (trs as any)?.alert_details || []);
+                    const alerts: any[] = ((trs as any)?.alerts || (trs as any)?.alert_details || []);
                     if (alerts.length === 0) return null;
                     const alertActions = ((result.item_actions || {})['transaction-review'] || {}).alerts || {};
                     return (
@@ -2399,7 +2201,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                       severity === 'CRITICAL' ? 'text-red-600' : severity === 'HIGH' ? 'text-amber-600' : 'text-zinc-400'
                                     }`}>{severity}</span>
                                     <div className="text-zinc-500">
-                                      {amount != null && `£${Number(amount).toLocaleString()}`}{date && ` · ${date}`}{narrative && ` · ${narrative}`}
+                                      {amount != null && formatCurrency(amount)}{date && ` · ${formatDate(date)}`}{narrative && ` · ${narrative}`}
                                     </div>
                                   </span>
                                 </div>
@@ -2448,10 +2250,13 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     const s = fundsLineageData.summary;
                     const total = s.totalAmount || 0;
                     const traced = s.tracedAmount || 0;
-                    const untraced = s.untracedAmount || 0;
-                    const tracedPct = total > 0 ? (traced / total) * 100 : 0;
+                    // Clamp at zero - external origins can legitimately sum
+                    // to more than the target credit; a negative figure here
+                    // would be meaningless.
+                    const untraced = Math.max(0, s.untracedAmount || 0);
+                    const tracedPct = total > 0 ? Math.min(100, (traced / total) * 100) : 0;
                     const untracedPct = total > 0 ? Math.max(0, 100 - tracedPct) : 0;
-                    const fmt = (n: any) => `£${Math.round(Number(n) || 0).toLocaleString()}`;
+                    const fmt = (n: any) => formatCurrencyWhole(Math.round(Number(n) || 0));
                     const items: { label: string; value: string }[] = [
                       { label: 'Total amount', value: fmt(total) },
                       { label: `Traced (${tracedPct.toFixed(2)}%)`, value: fmt(traced) },
@@ -2466,7 +2271,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                     }
                     // Infer the salary from the statements - sum the
                     // recurring salary credits the lineage identified.
-                    const salaryCredits = ((fundsLineageData.external_origins || []) as any[])
+                    const salaryCredits = (((fundsLineageData as any).external_origins || []) as any[])
                       .filter((o) => /salary|employment income/i.test(String(o?.source_type || '')))
                       .map((o) => Math.abs(Number(o?.amount) || 0))
                       .filter((a) => a > 0);
@@ -2571,7 +2376,6 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                   const isCSVDoc = v.verification_phase === 'statement_only';
                   const isVerified = v.verdict === 'Verified';
                   const isSuspicious = v.verdict === 'Suspicious';
-                  const isTampered = v.verdict === 'LikelyTampered';
 
                   const verdictConfig = isVerified
                     ? { label: isCSVDoc ? 'CHECKS PASSED' : 'VERIFIED', sublabel: 'No issues detected', borderClass: 'border-zinc-200 border-l-2 border-l-green-500', bgClass: 'bg-white', textClass: 'text-zinc-600', badgeClass: 'bg-green-50 text-green-700 ring-1 ring-inset ring-green-200' }
@@ -2697,7 +2501,7 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                               <div className="mt-1">
                                 Override proposed by <span className="font-mono">{v.override_proposed_by}</span>
                                 {v.override_proposed_at && (
-                                  <span> on {new Date(v.override_proposed_at).toLocaleString()}</span>
+                                  <span> on {formatDateTime(v.override_proposed_at)}</span>
                                 )}.
                               </div>
                               {v.override_proposed_rationale && (
@@ -2742,17 +2546,26 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                         {
                                           method: 'POST',
                                           body: JSON.stringify({
-                                            admin_user: 'admin',
+                                            // The backend derives the approver
+                                            // from the authenticated session;
+                                            // this field carries no identity
+                                            // semantics (schema requires a
+                                            // non-empty value).
+                                            admin_user: 'session',
                                             rationale: docVerOverrideRationale,
                                           }),
                                         }
                                       );
                                       if (resp.ok) {
+                                        const respData = await resp.json().catch(() => ({} as any));
                                         const updatedVerifications = [...(docVerificationSummary.verifications || [])];
                                         updatedVerifications[idx] = {
                                           ...updatedVerifications[idx],
                                           admin_override: true,
-                                          admin_override_by: 'admin',
+                                          admin_override_by: respData.admin_user
+                                            || currentUser?.full_name
+                                            || currentUser?.email
+                                            || 'Admin',
                                           admin_override_rationale: docVerOverrideRationale,
                                           blocked: false,
                                         };
@@ -2766,11 +2579,11 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
                                         setDocVerOverrideModalOpen(null);
                                         setDocVerOverrideRationale('');
                                       } else {
-                                        const err = await resp.json();
-                                        alert(`Override failed: ${err.detail || 'Unknown error'}`);
+                                        const err = await resp.json().catch(() => ({}));
+                                        showToast(`Override failed: ${err.detail || 'Unknown error'}`, 'error');
                                       }
                                     } catch (err: any) {
-                                      alert(`Override error: ${err.message}`);
+                                      showToast(`Override failed: ${err.message || 'Unknown error'}`, 'error');
                                     } finally {
                                       setDocVerOverrideSubmitting(false);
                                     }
@@ -2817,6 +2630,41 @@ const SoFAssessment: React.FC<SoFAssessmentProps> = ({ matterId }) => {
 
         </div>
       )}
+
+      {/* Archive matter - deliberately subdued and separated from the
+          primary workflow actions. Archiving retains all data. */}
+      <div className="pt-8 mt-4 border-t border-zinc-200 flex justify-end">
+        <button
+          type="button"
+          onClick={archiveMatter}
+          className="px-3 py-1.5 text-xs text-zinc-500 hover:text-red-700 border border-zinc-200 hover:border-red-200 rounded hover:bg-red-50 transition-colors"
+        >
+          Archive matter
+        </button>
+      </div>
+
+      {/* Shared rationale-capture modal (replaces window.prompt). */}
+      <RationaleModal
+        isOpen={!!rationaleModal}
+        title={rationaleModal?.title || ''}
+        description={rationaleModal?.description}
+        confirmLabel={rationaleModal?.confirmLabel || 'Confirm'}
+        destructive={rationaleModal?.destructive}
+        onConfirm={rationaleModal?.onConfirm || (async () => {})}
+        onClose={() => setRationaleModal(null)}
+      />
+
+      {/* Shared confirmation modal (replaces window.confirm). */}
+      <ConfirmModal
+        isOpen={!!confirmModal}
+        title={confirmModal?.title || ''}
+        message={confirmModal?.message || ''}
+        confirmLabel={confirmModal?.confirmLabel || 'Confirm'}
+        destructive={confirmModal?.destructive}
+        typedConfirmation={confirmModal?.typedConfirmation}
+        onConfirm={confirmModal?.onConfirm || (async () => {})}
+        onClose={() => setConfirmModal(null)}
+      />
     </div>
   );
 };

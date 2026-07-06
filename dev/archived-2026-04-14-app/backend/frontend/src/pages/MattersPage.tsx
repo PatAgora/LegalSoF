@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { API_BASE_URL, authFetch } from '../lib/api'
+import { formatDate as formatFullDate, formatCurrencyWhole } from '../lib/format'
 import MatterStatusBadge, { MATTER_STATUSES } from '../components/ui/MatterStatusBadge'
+import Modal from '../components/ui/Modal'
 
 export default function MattersPage() {
   const navigate = useNavigate()
@@ -13,6 +15,7 @@ export default function MattersPage() {
   const [error, setError] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   const [newMatter, setNewMatter] = useState({
     client_name: '',
     reference: '',
@@ -20,35 +23,38 @@ export default function MattersPage() {
     risk_level: 'medium',
   })
 
-  // Fetch matters from API
-  useEffect(() => {
-    const fetchMatters = async () => {
-      try {
-        setLoading(true)
-        const response = await authFetch(`${API_BASE_URL}/api/v1/matters`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch matters')
-        }
-        const data = await response.json()
-        setMatters(data)
-      } catch (err) {
-        console.error('Error fetching matters:', err)
-        setError('Failed to load matters. Please try again.')
-      } finally {
-        setLoading(false)
+  // Fetch (or re-fetch) matters from the API.
+  const fetchMatters = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await authFetch(`${API_BASE_URL}/api/v1/matters`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch matters')
       }
+      const data = await response.json()
+      setMatters(data)
+    } catch (err) {
+      console.debug('Error fetching matters:', err)
+      setError('Failed to load matters. Please try again.')
+    } finally {
+      setLoading(false)
     }
+  }
 
+  useEffect(() => {
     fetchMatters()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleCreateMatter = async () => {
     if (!newMatter.client_name.trim()) {
-      alert('Please enter a client name')
+      setCreateError('Please enter a client name.')
       return
     }
 
     setCreating(true)
+    setCreateError(null)
     try {
       const response = await authFetch(`${API_BASE_URL}/api/v1/matters`, {
         method: 'POST',
@@ -71,8 +77,8 @@ export default function MattersPage() {
         throw new Error('Failed to create matter')
       }
     } catch (err) {
-      console.error('Error creating matter:', err)
-      alert('Failed to create matter. Please try again.')
+      console.debug('Error creating matter:', err)
+      setCreateError('The matter could not be created. Please try again.')
     } finally {
       setCreating(false)
     }
@@ -154,7 +160,7 @@ export default function MattersPage() {
         <p className="text-zinc-900 font-semibold text-lg mb-1">Unable to load matters</p>
         <p className="text-zinc-400 text-sm mb-6">{error}</p>
         <button
-          onClick={() => window.location.reload()}
+          onClick={fetchMatters}
           className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-zinc-800 rounded-lg hover:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -334,7 +340,7 @@ export default function MattersPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm tabular-nums text-zinc-900 font-medium">
-                        {'\u00A3'}{(matter.target_amount ?? 0).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        {formatCurrencyWhole(matter.target_amount)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -344,7 +350,7 @@ export default function MattersPage() {
                       {getRiskBadge(matter.risk_rating)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-zinc-400">
+                      <span className="text-sm text-zinc-400" title={formatFullDate(matter.created_at)}>
                         {formatDate(matter.created_at)}
                       </span>
                     </td>
@@ -352,7 +358,7 @@ export default function MattersPage() {
                       <Link
                         to={`/matters/${matter.id}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-sm font-medium text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-zinc-900 transition-all"
+                        className="inline-flex items-center gap-1 text-sm font-medium text-zinc-700 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-zinc-900 transition-all"
                       >
                         Open
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -375,35 +381,48 @@ export default function MattersPage() {
         </div>
       )}
 
-      {/* ───────── Create Matter Modal ───────── */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-zinc-900/40 transition-opacity"
-            onClick={() => setShowCreateModal(false)}
-          />
-          {/* Modal panel */}
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-lg bg-white rounded-md shadow-lg border border-zinc-200">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-zinc-200">
-                <div>
-                  <h2 className="text-lg font-bold text-zinc-900">Create New Matter</h2>
-                  <p className="text-xs text-zinc-400 mt-0.5">Fill in the details below to open a new matter</p>
-                </div>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-lg p-1.5 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-50 transition-colors"
-                  aria-label="Close"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+      {/* ───────── Create Matter Modal - shared Modal gives us a real
+            dialog (focus trap + Escape-to-close via Headless UI). ───────── */}
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => { setShowCreateModal(false); setCreateError(null) }}
+        title="Create New Matter"
+        size="lg"
+        footer={
+          <>
+            <button
+              onClick={() => { setShowCreateModal(false); setCreateError(null) }}
+              className="px-4 py-2.5 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateMatter}
+              disabled={creating}
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-zinc-900 rounded hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {creating ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                </button>
-              </div>
-              {/* Body */}
-              <div className="px-6 py-5 space-y-5">
+                  Creating...
+                </>
+              ) : (
+                'Create Matter'
+              )}
+            </button>
+          </>
+        }
+      >
+              <div className="space-y-5">
+                <p className="text-xs text-zinc-400">Fill in the details below to open a new matter</p>
+                {createError && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {createError}
+                  </div>
+                )}
                 {/* Client Name */}
                 <div>
                   <label className="block text-sm font-medium text-zinc-600 mb-1.5">
@@ -470,36 +489,7 @@ export default function MattersPage() {
                   </div>
                 </div>
               </div>
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-200 bg-zinc-50 rounded-b-card">
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2.5 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateMatter}
-                  disabled={creating}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-zinc-900 rounded hover:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {creating ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Creating...
-                    </>
-                  ) : (
-                    'Create Matter'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   )
 }

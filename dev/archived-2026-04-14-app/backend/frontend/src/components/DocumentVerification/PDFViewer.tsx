@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -30,9 +30,36 @@ export default function PDFViewer({ fileUrl, authToken, highlightPages = [], onP
   }, [onPageCount]);
 
   const onDocumentLoadError = useCallback((error: Error) => {
-    console.error('PDF load error:', error);
-    setLoadError('Failed to load PDF document.');
+    console.debug('PDF load error:', error);
+    setLoadError('The document preview could not be loaded.');
   }, []);
+
+  // react-pdf re-loads the document whenever the options object identity
+  // changes - an inline literal would retrigger a load on every render.
+  const documentOptions = useMemo(
+    () => ({ httpHeaders: { Authorization: `Bearer ${authToken}` } }),
+    [authToken],
+  );
+
+  // Fallback when the inline preview fails: fetch the original file with
+  // the auth header and hand it to the browser as a download.
+  const downloadOriginal = useCallback(async () => {
+    try {
+      const r = await fetch(fileUrl, { headers: { Authorization: `Bearer ${authToken}` } });
+      if (!r.ok) return;
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = decodeURIComponent(fileUrl.split('/').pop() || 'document.pdf');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* download is best-effort */
+    }
+  }, [fileUrl, authToken]);
 
   // Expose scroll-to-page functionality
   const scrollToPage = useCallback((pageNum: number) => {
@@ -64,6 +91,13 @@ export default function PDFViewer({ fileUrl, authToken, highlightPages = [], onP
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <p className="text-sm text-zinc-600">{loadError}</p>
+            <button
+              type="button"
+              onClick={downloadOriginal}
+              className="mt-3 text-sm font-medium text-zinc-900 underline underline-offset-2 hover:text-zinc-700"
+            >
+              Download original
+            </button>
           </div>
         </div>
       ) : (
@@ -71,9 +105,7 @@ export default function PDFViewer({ fileUrl, authToken, highlightPages = [], onP
           file={fileUrl}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
-          options={{
-            httpHeaders: { Authorization: `Bearer ${authToken}` },
-          }}
+          options={documentOptions}
           loading={
             <div className="flex items-center justify-center py-12">
               <div className="text-center">

@@ -24,38 +24,133 @@ function resolveApiBase(): string {
 
 export const API_BASE_URL = resolveApiBase()
 
+// ---------------------------------------------------------------------------
+// Token storage - the single place tokens are read and written.
+// The legacy localStorage keys remain the source of truth so existing
+// reads keep working; the auth store no longer duplicates the tokens.
+// ---------------------------------------------------------------------------
+
+const ACCESS_TOKEN_KEY = 'access_token'
+const REFRESH_TOKEN_KEY = 'refresh_token'
+export const SESSION_EXPIRED_KEY = 'session_expired'
+
+export function getAccessToken(): string | null {
+  return localStorage.getItem(ACCESS_TOKEN_KEY)
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY)
+}
+
+export function setStoredTokens(accessToken: string, refreshToken?: string | null) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken)
+  if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+}
+
+export function clearStoredTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+}
+
+// ---------------------------------------------------------------------------
+// Token refresh - single-flight so concurrent 401s trigger ONE refresh.
+// ---------------------------------------------------------------------------
+
+let refreshInFlight: Promise<boolean> | null = null
+
+/** Attempt to rotate the token pair. Resolves true on success. */
+export function refreshTokens(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async (): Promise<boolean> => {
+      const refreshToken = getRefreshToken()
+      if (!refreshToken) return false
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+        if (!r.ok) return false
+        const data = await r.json().catch(() => null)
+        if (!data?.access_token) return false
+        setStoredTokens(data.access_token, data.refresh_token || refreshToken)
+        return true
+      } catch {
+        return false
+      }
+    })().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+/** Clear auth state, flag the reason, and send the user to the login page. */
+function handleSessionExpired() {
+  clearStoredTokens()
+  localStorage.removeItem('auth-storage')
+  try { sessionStorage.setItem(SESSION_EXPIRED_KEY, '1') } catch { /* private mode */ }
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login'
+  }
+}
+
 export function getAuthHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...extra,
   }
-  const token = localStorage.getItem('access_token')
+  const token = getAccessToken()
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
   return headers
 }
 
-/** Fetch wrapper that automatically adds auth headers and handles expired tokens */
-export async function authFetch(url: string, options?: RequestInit): Promise<Response> {
-  const token = localStorage.getItem('access_token')
+interface AuthFetchConfig {
+  // When true, a 401 is returned to the caller untouched - no refresh
+  // attempt, no redirect. Used by background polls (notifications,
+  // module config) so they never eject a user mid-typing; the next
+  // user-initiated request takes the refresh/redirect path instead.
+  silentAuthFailure?: boolean
+}
+
+function buildRequest(url: string, options?: RequestInit): Promise<Response> {
+  const token = getAccessToken()
   const headers = new Headers(options?.headers)
-  if (token && !headers.has('Authorization')) {
+  if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
   if (!headers.has('Content-Type') && options?.body && typeof options.body === 'string') {
     headers.set('Content-Type', 'application/json')
   }
-  const response = await fetch(url, { ...options, headers })
+  return fetch(url, { ...options, headers })
+}
 
-  // If token expired or invalid, clear auth state and redirect to login
-  if (response.status === 401) {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('auth-storage')
-    window.location.href = '/login'
+/**
+ * Fetch wrapper that adds auth headers and transparently refreshes an
+ * expired access token: on 401 it attempts one token refresh (deduped
+ * across concurrent calls) and retries the original request once. If
+ * the refresh fails the session is treated as expired and the user is
+ * redirected to the login page with an explanatory message.
+ */
+export async function authFetch(
+  url: string,
+  options?: RequestInit,
+  config?: AuthFetchConfig,
+): Promise<Response> {
+  const response = await buildRequest(url, options)
+  if (response.status !== 401) return response
+
+  if (config?.silentAuthFailure) return response
+
+  const refreshed = await refreshTokens()
+  if (refreshed) {
+    const retried = await buildRequest(url, options)
+    if (retried.status !== 401) return retried
   }
 
+  handleSessionExpired()
   return response
 }
 
@@ -71,6 +166,13 @@ class ApiClient {
       throw { response: { data } }
     }
     return response.json()
+  }
+
+  async logout() {
+    // Best-effort server-side logout; local state is cleared regardless.
+    try {
+      await authFetch(`${API_BASE_URL}/api/v1/auth/logout`, { method: 'POST' }, { silentAuthFailure: true })
+    } catch { /* non-blocking */ }
   }
 
   async getCurrentUser() {

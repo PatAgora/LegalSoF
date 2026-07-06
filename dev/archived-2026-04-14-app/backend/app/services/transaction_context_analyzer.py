@@ -1,6 +1,7 @@
 """
 Transaction Context Analyzer
-Gathers comprehensive context from all matter sources for AI analysis
+Gathers comprehensive context from all matter sources for rule-based
+contextual analysis (no AI/LLM involvement — deterministic rules only).
 """
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
@@ -370,7 +371,24 @@ class TransactionContextAnalyzer:
             assessment["overall_sufficiency"] = "PARTIALLY_SUFFICIENT"
         else:
             assessment["overall_sufficiency"] = "INSUFFICIENT"
-        
+
+        # 7b. HARD FAIL: a sanctions screening hit or a prohibited /
+        # sanctioned-jurisdiction alert can never be outweighed by
+        # good documentation elsewhere — force INSUFFICIENT regardless
+        # of the weighted score.
+        sanctions_blocked = bool(kyc.get("sanctions_hit")) or any(
+            ("prohibited" in r.lower() or "sanction" in r.lower())
+            for r in (alert_reasons or [])
+        )
+        if sanctions_blocked:
+            assessment["overall_sufficiency"] = "INSUFFICIENT"
+            assessment["regulatory_concerns"].append(
+                "BLOCKING: Sanctions / prohibited-jurisdiction exposure forces an "
+                "INSUFFICIENT verdict irrespective of documentation completeness."
+            )
+            if "Escalate to MLRO for sanctions review" not in assessment["required_actions"]:
+                assessment["required_actions"].append("Escalate to MLRO for sanctions review")
+
         # 8. Add severity-specific recommendations
         if alert_severity == "CRITICAL":
             if assessment["overall_sufficiency"] != "SUFFICIENT":
@@ -408,8 +426,9 @@ class TransactionContextAnalyzer:
         assessment: Dict[str, Any]
     ) -> str:
         """
-        Generate comprehensive AI rationale considering all available context
-        100% local - no external API calls
+        Generate a comprehensive rule-based contextual analysis rationale
+        considering all available context.
+        100% local, deterministic rules - no AI and no external API calls
         """
         
         summary = context.get("summary", {})

@@ -19,6 +19,9 @@ from app.models.user import User, UserRole
 from app.core.security import get_password_hash, validate_password_policy
 from app.core.config import settings
 
+# Same default admin identity as scripts/init_db.py — override with ADMIN_EMAIL.
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@agora.ai")
+
 
 def generate_secure_password(length: int = 16) -> str:
     """Generate a password that meets the security policy."""
@@ -50,7 +53,7 @@ async def create_admin():
     async with async_session() as session:
         # Check if admin exists
         result = await session.execute(
-            select(User).where(User.email == "admin@example.com")
+            select(User).where(User.email == ADMIN_EMAIL)
         )
         existing_admin = result.scalar_one_or_none()
 
@@ -60,7 +63,7 @@ async def create_admin():
 
         # Create admin user
         admin_user = User(
-            email="admin@example.com",
+            email=ADMIN_EMAIL,
             hashed_password=get_password_hash(password),
             full_name="System Administrator",
             role=UserRole.ADMIN,
@@ -72,7 +75,7 @@ async def create_admin():
         await session.commit()
 
         print("Admin user created successfully")
-        print(f"  Email: admin@example.com")
+        print(f"  Email: {ADMIN_EMAIL}")
         if generated:
             print(f"  Password: {password}")
             print("  (auto-generated — save this and change it after first login)")

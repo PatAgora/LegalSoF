@@ -16,9 +16,8 @@ from typing import List
 from datetime import datetime, timezone
 
 from app.db.session import get_sync_db
-from app.api.dependencies.auth import require_analyst, require_admin
+from app.api.dependencies.auth import require_analyst, require_admin, require_matter_access
 from app.models.user import User
-from app.models import Matter
 from app.models.document_verification import (
     DocumentVerification, DocumentVerificationFlag, DocumentVerificationTransaction,
     VerificationVerdict,
@@ -52,9 +51,7 @@ def _dv_enabled(db: Session) -> bool:
     tags=["document-verification"],
 )
 def list_verifications(matter_id: int, current_user: User = Depends(require_analyst), db: Session = Depends(get_sync_db)):
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(404, "Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     # Document Verification module switched off on the Configuration page.
     if not _dv_enabled(db):
@@ -80,9 +77,7 @@ def list_verifications(matter_id: int, current_user: User = Depends(require_anal
     tags=["document-verification"],
 )
 def get_verification_summary(matter_id: int, current_user: User = Depends(require_analyst), db: Session = Depends(get_sync_db)):
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(404, "Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     # Document Verification module switched off on the Configuration page —
     # report an empty summary so the SoF results tile hides itself.
@@ -104,7 +99,12 @@ def get_verification_summary(matter_id: int, current_user: User = Depends(requir
     likely_tampered = sum(1 for v in verifications if v.verdict == VerificationVerdict.LIKELY_TAMPERED)
     blocked = sum(1 for v in verifications if v.blocked)
     overridden = sum(1 for v in verifications if v.admin_override)
-    avg_score = sum(v.authenticity_score for v in verifications) / len(verifications)
+    # Pending rows (non-PDF supporting docs) carry a placeholder score of 0 and
+    # would drag the average down; exclude them.
+    scored = [v for v in verifications if v.verdict != VerificationVerdict.PENDING]
+    avg_score = (
+        sum(v.authenticity_score for v in scored) / len(scored) if scored else 0.0
+    )
 
     all_flags = []
     for v in verifications:
@@ -145,6 +145,7 @@ def get_verification_summary(matter_id: int, current_user: User = Depends(requir
     tags=["document-verification"],
 )
 def get_verification(matter_id: int, verification_id: int, current_user: User = Depends(require_analyst), db: Session = Depends(get_sync_db)):
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -173,6 +174,7 @@ def propose_override(
     """Step 1 of the 4-eyes flow: any analyst proposes lifting the block,
     with a rationale. A DIFFERENT admin must then call admin-override to
     approve it."""
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -183,12 +185,17 @@ def propose_override(
     if not v.blocked:
         raise HTTPException(409, "Verification is not blocked — nothing to propose")
 
-    v.override_proposed_by = body.admin_user or current_user.email
+    # Actor is ALWAYS the authenticated user — the client-supplied
+    # admin_user field is kept for backward compatibility but never
+    # trusted for identity.
+    proposer = current_user.full_name or current_user.email
+    v.override_proposed_by = proposer
     v.override_proposed_at = datetime.now(timezone.utc)
     v.override_proposed_rationale = body.rationale
 
     db.add(AuditLog(
         matter_id=matter_id,
+        user_id=current_user.id,
         action=AuditLogAction.UPDATED,
         entity_type="document_verification",
         entity_id=verification_id,
@@ -199,6 +206,7 @@ def propose_override(
         details={
             "verification_id": verification_id,
             "proposer": v.override_proposed_by,
+            "admin_user": v.override_proposed_by,
             "rationale": body.rationale,
             "stage": "proposed",
         },
@@ -229,12 +237,15 @@ def admin_override(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_sync_db),
 ):
-    """Step 2 of the 4-eyes flow (or step 1 for single-step legacy use):
-    an admin approves the override and unblocks downstream processing.
+    """Step 2 of the 4-eyes flow: an admin approves a previously proposed
+    override and unblocks downstream processing.
 
-    Four-eyes rule: if `override_proposed_by` is set, the admin
-    approving here must be DIFFERENT from the proposer.
+    Four-eyes rule: an override proposal must already exist
+    (`override_proposed_by` set) and the approving admin must be a
+    DIFFERENT user from the proposer. Both identities come from the
+    authenticated user, never the request body.
     """
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -242,10 +253,24 @@ def admin_override(
     )
     if not v:
         raise HTTPException(404, "Verification not found")
+    if not v.blocked:
+        raise HTTPException(409, "Verification is not blocked — nothing to override")
+    if not v.override_proposed_by:
+        raise HTTPException(
+            409,
+            "Four-eyes rule: an override must first be proposed via "
+            "/propose-override before an admin can approve it.",
+        )
 
-    approver = body.admin_user or current_user.email
+    # Actor is ALWAYS the authenticated admin — the client-supplied
+    # admin_user field is ignored for identity purposes.
+    approver = current_user.full_name or current_user.email
     proposer = v.override_proposed_by
-    if proposer and proposer.strip().lower() == (approver or "").strip().lower():
+    proposer_key = proposer.strip().lower()
+    if proposer_key in {
+        (current_user.email or "").strip().lower(),
+        (current_user.full_name or "").strip().lower(),
+    }:
         raise HTTPException(
             403,
             "Four-eyes rule: the override must be approved by a different "
@@ -263,6 +288,7 @@ def admin_override(
     # Audit log
     audit = AuditLog(
         matter_id=matter_id,
+        user_id=current_user.id,
         action=AuditLogAction.APPROVED,
         entity_type="document_verification",
         entity_id=verification_id,
@@ -318,6 +344,7 @@ def accept_verification(
     the verification tab in the matter detail UI so reviewers can sign
     off Suspicious / Likely-Tampered documents inline rather than going
     through the four-eyes propose+approve flow."""
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -328,7 +355,9 @@ def accept_verification(
     if v.admin_override:
         raise HTTPException(409, "Verification has already been accepted")
 
-    reviewer = body.admin_user or current_user.full_name or current_user.email
+    # Actor is ALWAYS the authenticated user — the client-supplied
+    # admin_user field is ignored for identity purposes.
+    reviewer = current_user.full_name or current_user.email
     previous_verdict = v.verdict.value if v.verdict else "unknown"
 
     v.admin_override = True
@@ -353,6 +382,7 @@ def accept_verification(
             "filename": v.filename,
             "previous_verdict": previous_verdict,
             "reviewer": reviewer,
+            "admin_user": reviewer,
             "rationale": body.rationale,
             "stage": "accepted",
         },
@@ -378,6 +408,7 @@ def get_verification_transactions(
 ):
     """Return all extracted transactions for a verification — used by the
     reviewer UI to preview CSV / statement-only uploads."""
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -421,6 +452,7 @@ def get_verification_audit_trail(
     db: Session = Depends(get_sync_db),
 ):
     """Return the audit log entries for a single verification."""
+    require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -468,9 +500,7 @@ def download_evidence_pack(
     """Generate a PDF report covering the verification: header, all flags
     with severity and details, and the audit trail. Streams the bytes
     directly so we don't write a temp file to disk."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(404, "Matter not found")
+    matter = require_matter_access(matter_id, current_user, db)
     v = (
         db.query(DocumentVerification)
         .filter(DocumentVerification.id == verification_id, DocumentVerification.matter_id == matter_id)
@@ -575,9 +605,7 @@ def serve_document(
     db: Session = Depends(get_sync_db),
 ):
     """Serve an uploaded document file from disk."""
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(404, "Matter not found")
+    require_matter_access(matter_id, current_user, db)
 
     # Sanitize filename to prevent path traversal
     safe_filename = os.path.basename(filename)

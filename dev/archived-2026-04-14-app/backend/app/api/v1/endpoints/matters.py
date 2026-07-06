@@ -3,7 +3,6 @@ Matters API Endpoints
 """
 import json
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from pydantic import BaseModel
@@ -83,8 +82,10 @@ def derive_matter_status(matter, sof_data) -> str:
         return "Verified"
     return "Under Review"
 
-from app.db.session import get_db, get_sync_db, get_sync_session
-from app.api.dependencies.auth import get_current_active_user, require_analyst, require_admin
+from app.db.session import get_sync_session
+from app.api.dependencies.auth import (
+    get_current_active_user, require_analyst, require_admin, require_matter_access,
+)
 from app.models import Matter, MatterStatus, RiskRating, TransactionType
 from app.models.user import User, UserRole
 from app.models.assessment_storage import AssessmentStorage
@@ -94,7 +95,10 @@ from app.models.document_verification import DocumentVerification
 from app.models.statement_validation import StatementValidation
 from app.models.notification import Notification
 
+import structlog
+
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 def _safe_load_storage_db(db) -> Dict:
@@ -148,7 +152,6 @@ class CreateMatterRequest(BaseModel):
 async def create_matter(
     request: CreateMatterRequest,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db)
 ):
     """Create a new matter"""
     SessionLocal = get_sync_session()
@@ -161,7 +164,7 @@ async def create_matter(
             # Get highest matter ID and create new reference
             existing = sync_db.query(Matter).order_by(Matter.id.desc()).first()
             next_num = (existing.id + 1) if existing else 1
-            reference = f"MAT-{datetime.now().year}-{str(next_num).zfill(3)}"
+            reference = f"MAT-{datetime.now(timezone.utc).year}-{str(next_num).zfill(3)}"
         
         # Map risk level string to enum
         risk_map = {
@@ -226,10 +229,12 @@ async def create_matter(
             "created_at": new_matter.created_at.isoformat() if new_matter.created_at else None
         }
     
-    except Exception as e:
+    except Exception:
         sync_db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create matter: {str(e)}")
-    
+        # Never leak internal error detail to the client — log it server-side.
+        logger.error("create_matter_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create matter")
+
     finally:
         sync_db.close()
 
@@ -241,7 +246,6 @@ async def list_matters(
     status: Optional[str] = None,
     risk_rating: Optional[str] = None,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db)
 ):
     """
     List all matters with optional filtering
@@ -305,7 +309,6 @@ async def list_matters(
 async def get_matter(
     matter_id: int,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db)
 ):
     """
     Get a single matter by ID
@@ -313,13 +316,10 @@ async def get_matter(
     # Use shared sync DB session for blocking operations
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
-    
+
     try:
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
-        
+        matter = require_matter_access(matter_id, current_user, sync_db)
+
         # Load SoF assessment data for completion percentage calculation
         sof_data = _safe_load_storage_single(sync_db, matter_id)
         
@@ -378,7 +378,6 @@ async def save_risk_assessment(
     matter_id: int,
     request: RiskAssessmentRequest,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db),
 ):
     """
     Record the matter-level risk assessment.
@@ -392,9 +391,7 @@ async def save_risk_assessment(
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
     try:
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
+        matter = require_matter_access(matter_id, current_user, sync_db)
 
         risk_map = {
             'low': RiskRating.LOW, 'medium': RiskRating.MEDIUM,
@@ -441,7 +438,6 @@ async def save_risk_assessment(
 async def send_to_compliance(
     matter_id: int,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db),
 ):
     """
     Submit the matter to the firm's compliance function for review.
@@ -453,9 +449,7 @@ async def send_to_compliance(
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
     try:
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
+        matter = require_matter_access(matter_id, current_user, sync_db)
 
         submitted_by = current_user.full_name or current_user.email
         now = datetime.now(timezone.utc)
@@ -515,7 +509,6 @@ async def submit_compliance_review(
     matter_id: int,
     request: ComplianceReviewRequest,
     current_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
     """Compliance officer (admin) decision on a matter under review.
 
@@ -529,9 +522,7 @@ async def submit_compliance_review(
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
     try:
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
+        matter = require_matter_access(matter_id, current_user, sync_db)
 
         reviewer = current_user.full_name or current_user.email
         now = datetime.now(timezone.utc)
@@ -591,7 +582,6 @@ async def submit_compliance_review(
 @router.get("/compliance/dashboard")
 async def compliance_dashboard(
     current_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
     """Summary counts for the Compliance Dashboard (admin only)."""
     SessionLocal = get_sync_session()
@@ -637,7 +627,6 @@ async def compliance_dashboard(
 @router.get("/compliance/matters")
 async def compliance_matters(
     current_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
     """Every matter that has been sent to compliance (admin only)."""
     SessionLocal = get_sync_session()
@@ -676,49 +665,50 @@ async def compliance_matters(
 async def delete_matter(
     matter_id: int,
     current_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
     """
-    Hard-delete a matter and every record associated with it: documents,
-    verifications, transactions, assessments, uploaded files on disk.
-    Admin-only. Irreversible.
-    """
-    import os, shutil
+    Archive a matter (admin only).
 
+    MLR 2017 Reg 40 requires CDD records to be retained — matters are
+    therefore ARCHIVED, never hard-deleted. No rows are removed and no
+    uploaded files are deleted; the matter simply disappears from the
+    active matters list (which filters on is_archived).
+    """
     SessionLocal = get_sync_session()
     sync_db = SessionLocal()
 
     try:
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
+        matter = require_matter_access(matter_id, current_user, sync_db)
 
         reference_number = matter.reference_number
+        archived_by = current_user.full_name or current_user.email
 
-        # Tables that DO NOT cascade via Matter's relationships — wipe explicitly.
-        # DocumentVerification and StatementValidation cascade their own
-        # flags/transactions children via ondelete=CASCADE on the FK.
-        sync_db.query(AssessmentStorage).filter(AssessmentStorage.matter_id == matter_id).delete(synchronize_session=False)
-        sync_db.query(DocumentVerification).filter(DocumentVerification.matter_id == matter_id).delete(synchronize_session=False)
-        sync_db.query(StatementValidation).filter(StatementValidation.matter_id == matter_id).delete(synchronize_session=False)
-        sync_db.query(Notification).filter(Notification.matter_id == matter_id).delete(synchronize_session=False)
+        matter.is_archived = True
 
-        # Matter delete cascades through questionnaire_responses, documents,
-        # entities, funds_events, checks, notes, audit_logs, approvals,
-        # status_history, transactions, transaction_alerts, kyc_profile.
-        sync_db.delete(matter)
+        # Audit the archival BEFORE committing so the record and the
+        # state change land in the same transaction.
+        sync_db.add(AuditLog(
+            matter_id=matter.id,
+            user_id=current_user.id,
+            action=AuditLogAction.ARCHIVED,
+            entity_type="matter",
+            entity_id=matter.id,
+            description=(
+                f"Matter {reference_number} archived by {archived_by}. "
+                "All records and uploaded files retained."
+            ),
+            details={
+                "reference": reference_number,
+                "archived_by": archived_by,
+            },
+        ))
         sync_db.commit()
-
-        # Remove any persisted upload files for this matter.
-        upload_dir = f"/app/uploads/{matter_id}"
-        if os.path.isdir(upload_dir):
-            shutil.rmtree(upload_dir, ignore_errors=True)
 
         return {
             "success": True,
             "matter_id": matter_id,
             "reference_number": reference_number,
-            "message": "Matter and all related records deleted",
+            "message": "Matter archived. All records and files have been retained.",
         }
 
     finally:
@@ -729,7 +719,6 @@ async def delete_matter(
 async def generate_matter_report(
     matter_id: int,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db)
 ):
     """
     Generate an SRA-grade Source of Funds / CDD Memorandum as a Word
@@ -754,9 +743,7 @@ async def generate_matter_report(
     sync_db = SessionLocal()
 
     try:
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
+        matter = require_matter_access(matter_id, current_user, sync_db)
 
         sof_data = _safe_load_storage_single(sync_db, matter_id) or {}
         assessment = sof_data.get('assessment_result') or {}
@@ -1586,7 +1573,6 @@ async def update_matter_status(
     matter_id: int,
     request: StatusUpdateRequest,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db)
 ):
     """
     Update matter status with workflow validation and smart transitions
@@ -1604,14 +1590,12 @@ async def update_matter_status(
     sync_db = SessionLocal()
     
     try:
-        # Get matter
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
-        
+        # Get matter (with matter-level authorisation)
+        matter = require_matter_access(matter_id, current_user, sync_db)
+
         # Load SoF assessment data from DB
         sof_data = _safe_load_storage_single(sync_db, matter_id)
-        
+
         # Store previous status
         previous_status = matter.status
         
@@ -1644,7 +1628,7 @@ async def update_matter_status(
 
         # Apply status change
         matter.status = new_status
-        matter.updated_at = datetime.now()
+        matter.updated_at = datetime.now(timezone.utc)
 
         # Apply automatic transitions if requested
         auto_transitions = []
@@ -1718,7 +1702,6 @@ async def update_matter_status(
 async def get_status_suggestions(
     matter_id: int,
     current_user: User = Depends(require_analyst),
-    db: Session = Depends(get_db)
 ):
     """
     Get smart status transition suggestions for a matter
@@ -1732,14 +1715,12 @@ async def get_status_suggestions(
     sync_db = SessionLocal()
     
     try:
-        # Get matter
-        matter = sync_db.query(Matter).filter(Matter.id == matter_id).first()
-        if not matter:
-            raise HTTPException(status_code=404, detail="Matter not found")
-        
+        # Get matter (with matter-level authorisation)
+        matter = require_matter_access(matter_id, current_user, sync_db)
+
         # Load SoF assessment data from DB
         sof_data = _safe_load_storage_single(sync_db, matter_id)
-        
+
         # Get suggestions
         suggestions = get_next_status_suggestions(matter, sof_data)
         

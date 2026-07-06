@@ -106,7 +106,10 @@ class Matter(Base):
     funds_events = relationship("FundsEvent", back_populates="matter", cascade="all, delete-orphan")
     checks = relationship("Check", back_populates="matter", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="matter", cascade="all, delete-orphan")
-    audit_logs = relationship("AuditLog", back_populates="matter", cascade="all, delete-orphan")
+    # Audit logs are immutable compliance records — they must survive the
+    # matter (matters are archived, never hard-deleted). No delete cascade;
+    # passive_deletes="all" stops SQLAlchemy touching child rows at all.
+    audit_logs = relationship("AuditLog", back_populates="matter", passive_deletes="all")
     approvals = relationship("Approval", back_populates="matter", cascade="all, delete-orphan")
     status_history = relationship("MatterStatusHistory", back_populates="matter", cascade="all, delete-orphan")
     

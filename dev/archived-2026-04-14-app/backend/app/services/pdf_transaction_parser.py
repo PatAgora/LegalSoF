@@ -2,10 +2,11 @@
 PDF Transaction Parser Service
 
 Extracts transaction data from bank statement PDFs using multiple parsing strategies.
-Supports various bank formats and uses AI/pattern matching for extraction.
+Supports various bank formats and uses pattern matching for extraction.
 
-This module now uses the comprehensive BankStatementPDFParser as the primary extraction
-method, with fallback to legacy methods if needed.
+This module uses the UniversalFinancialParser
+(app.services.universal_financial_parser) as the primary extraction method,
+with fallback to legacy pdfplumber/PyMuPDF methods if needed.
 """
 
 import re
@@ -19,10 +20,10 @@ from decimal import Decimal
 class PDFTransactionParser:
     """
     Advanced PDF parser for bank statements.
-    
-    Now uses the comprehensive BankStatementPDFParser for improved extraction
-    of UK bank statements including NatWest, HSBC, Barclays, etc.
-    
+
+    Uses the UniversalFinancialParser for extraction of UK bank statements
+    including NatWest, HSBC, Barclays, etc., with legacy fallbacks.
+
     Supports multiple formats:
     - Standard table-based statements
     - Text-based statements with transaction lines
@@ -80,13 +81,16 @@ class PDFTransactionParser:
                         except:
                             txn_date = datetime.now().date()
                     
-                    # Map the transaction format
+                    # Map the transaction format.
+                    # A10: 'unknown' direction is preserved (needs review) —
+                    # it must not be silently coerced into 'in' or 'out'.
+                    direction_map = {'credit': 'in', 'debit': 'out'}
                     mapped_txn = {
                         'id': f"PDF_{customer_id}_{idx+1}",
                         'txn_id': f"PDF_{customer_id}_{idx+1}",
                         'txn_date': txn_date,
                         'customer_id': customer_id,
-                        'direction': 'in' if txn.get('direction') == 'credit' else 'out',
+                        'direction': direction_map.get(txn.get('direction'), 'unknown'),
                         'amount': float(txn.get('amount', 0)),
                         'currency': txn.get('currency', 'GBP'),
                         'country_iso2': 'GB',

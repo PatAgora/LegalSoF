@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { API_BASE_URL, authFetch } from '../../lib/api';
 
 // Country code to full name mapping
@@ -107,16 +108,10 @@ export default function TransactionList({ matterId }: TransactionListProps) {
   const [filterSeverity, setFilterSeverity] = useState<string>('');
   const [filterAccount, setFilterAccount] = useState<string>('');
 
-  // Debug logging
-  console.log('🔍 TransactionList mounted with matterId:', matterId);
-  console.log('🔍 matterId type:', typeof matterId);
-  console.log('🔍 matterId is valid:', matterId && !isNaN(matterId));
-
   useEffect(() => {
     if (matterId && !isNaN(matterId)) {
       fetchData();
     } else {
-      console.error('❌ Invalid matterId:', matterId);
       setLoading(false);
     }
   }, [matterId]);
@@ -125,53 +120,32 @@ export default function TransactionList({ matterId }: TransactionListProps) {
     setLoading(true);
     setError(null);
     try {
-      console.log('🔍 Fetching transaction data for matter:', matterId);
-      console.log('🔍 API Base URL:', API_BASE_URL);
-      
       // Fetch both transactions and alerts
-      const txnUrl = `${API_BASE_URL}/api/v1/matters/${matterId}/transactions`;
-      const alertUrl = `${API_BASE_URL}/api/v1/matters/${matterId}/transaction-alerts`;
-      
-      console.log('🔍 Fetching transactions from:', txnUrl);
-      console.log('🔍 Fetching alerts from:', alertUrl);
-      
       const [txnResponse, alertResponse] = await Promise.all([
-        authFetch(txnUrl),
-        authFetch(alertUrl)
+        authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transactions`),
+        authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/transaction-alerts`),
       ]);
 
-      console.log('📊 Transaction response status:', txnResponse.status);
-      console.log('📊 Alert response status:', alertResponse.status);
-
       if (!txnResponse.ok) {
-        const errorText = await txnResponse.text();
-        console.error('❌ Transaction fetch failed:', txnResponse.status, errorText);
-        setError(`Failed to load transactions: ${txnResponse.status} ${txnResponse.statusText}`);
+        console.debug('Transaction fetch failed:', txnResponse.status);
+        setError('The transactions could not be loaded. Please try again.');
         return;
       }
 
       if (!alertResponse.ok) {
-        const errorText = await alertResponse.text();
-        console.error('❌ Alert fetch failed:', alertResponse.status, errorText);
-        setError(`Failed to load alerts: ${alertResponse.status} ${alertResponse.statusText}`);
+        console.debug('Alert fetch failed:', alertResponse.status);
+        setError('The transaction alerts could not be loaded. Please try again.');
         return;
       }
 
       const txnData = await txnResponse.json();
       const alertData = await alertResponse.json();
-      
-      console.log('✅ Transactions loaded:', txnData.length);
-      console.log('✅ Alerts loaded:', alertData.length);
-      console.log('📝 Sample transaction:', txnData[0]);
-      console.log('📝 Sample alert:', alertData[0]);
-      
+
       setTransactions(txnData);
       setAlerts(alertData);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('❌ Error fetching transaction data:', errorMessage);
-      console.error('❌ Full error:', error);
-      setError(`Error loading data: ${errorMessage}`);
+      console.debug('Error fetching transaction data:', error);
+      setError('The transaction data could not be loaded. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -224,8 +198,6 @@ export default function TransactionList({ matterId }: TransactionListProps) {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-zinc-600 mx-auto mb-4"></div>
           <p className="text-zinc-600">Loading transactions...</p>
-          <p className="text-sm text-zinc-400 mt-2">Matter ID: {matterId}</p>
-          <p className="text-xs text-zinc-400 mt-1">API: {API_BASE_URL}</p>
         </div>
       </div>
     );
@@ -238,12 +210,6 @@ export default function TransactionList({ matterId }: TransactionListProps) {
           <div className="text-red-700 text-5xl mb-4">⚠️</div>
           <h3 className="text-lg font-semibold text-zinc-900 mb-2">Error Loading Data</h3>
           <p className="text-red-700 mb-4">{error}</p>
-          <div className="text-sm text-left bg-zinc-50 p-4 rounded">
-            <p className="font-medium mb-2">Debug Info:</p>
-            <p className="text-zinc-600">Matter ID: {matterId}</p>
-            <p className="text-zinc-600">API Base URL: {API_BASE_URL}</p>
-            <p className="text-zinc-600">Check browser console for details</p>
-          </div>
           <button
             onClick={fetchData}
             className="mt-4 px-4 py-2 bg-zinc-800 text-white rounded hover:bg-zinc-900"
@@ -260,14 +226,16 @@ export default function TransactionList({ matterId }: TransactionListProps) {
       <div className="bg-white rounded-md border border-zinc-200 p-8 text-center">
         <div className="text-zinc-400 text-5xl mb-4">📊</div>
         <h3 className="text-lg font-semibold text-zinc-900 mb-2">No Transactions Yet</h3>
-        <p className="text-zinc-600 mb-4">Upload a CSV or PDF bank statement to get started with AML monitoring.</p>
-        <div className="text-sm text-left bg-zinc-50 p-4 rounded mt-4">
-          <p className="font-medium mb-2">Debug Info:</p>
-          <p className="text-zinc-600">Matter ID: {matterId}</p>
-          <p className="text-zinc-600">API Base URL: {API_BASE_URL}</p>
-          <p className="text-zinc-600">Transactions loaded: {transactions.length}</p>
-          <p className="text-zinc-600">Alerts loaded: {alerts.length}</p>
-        </div>
+        <p className="text-zinc-600 mb-5 max-w-md mx-auto">
+          Transactions appear here once a bank statement has been uploaded.
+          Statements are uploaded on the SoF Assessment tab.
+        </p>
+        <Link
+          to={`/matters/${matterId}?tab=sof-assessment`}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-zinc-900 rounded hover:bg-zinc-800 transition-colors"
+        >
+          Go to SoF Assessment
+        </Link>
       </div>
     );
   }

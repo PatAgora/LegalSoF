@@ -6,24 +6,22 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy import text
 import structlog
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import setup_logging
-from app.db.session import engine
+from app.db.session import engine, get_sync_engine
 from app.db.base import Base
 from app.api.v1 import api_router
 
 # Setup structured logging
 setup_logging()
 logger = structlog.get_logger(__name__)
-
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 
 @asynccontextmanager
@@ -60,8 +58,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Rate limiter state
+# Rate limiter state + enforcement middleware. Per-endpoint limits are
+# applied with @limiter.limit(...) decorators (see auth endpoints).
 app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -93,13 +93,20 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    # Only permit localhost API connections in development — production
+    # traffic must stay same-origin.
+    _connect_src = (
+        "connect-src 'self' http://localhost:* http://127.0.0.1:*"
+        if settings.ENVIRONMENT == "development"
+        else "connect-src 'self'"
+    )
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: blob:; "
-        "connect-src 'self' http://localhost:* http://127.0.0.1:*"
+        + _connect_src
     )
     return response
 
@@ -123,12 +130,22 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "environment": settings.ENVIRONMENT,
-    }
+def health_check():
+    """Health check endpoint — verifies database connectivity.
+
+    Defined as a sync endpoint so FastAPI runs the blocking SELECT 1
+    in its threadpool.
+    """
+    try:
+        with get_sync_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        logger.error("health_check_db_failed", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "database": "unreachable"},
+        )
+    return {"status": "ok", "database": "ok"}
 
 
 # Include API router

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_URL, authFetch } from '../../lib/api';
+import { useCurrentMatter } from '../../stores/currentMatterStore';
+import { formatCurrency, formatCurrencyWhole, formatDateTime } from '../../lib/format';
 
 // Types
 interface Transaction {
@@ -84,8 +86,8 @@ interface FundsLineageProps {
   onLineageComplete?: (summary: LineageSummary, unresolvedItems: any[]) => void;  // Callback when lineage completes
 }
 
-const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sofClaims, onLineageComplete }) => {
-  const [selectedClaimAmount, setSelectedClaimAmount] = useState<number | null>(null);
+const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, onLineageComplete }) => {
+  const currentMatter = useCurrentMatter((s) => s.matter);
   const [targetTransaction, setTargetTransaction] = useState<Transaction | null>(null);
   const [lineageTree, setLineageTree] = useState<LineageNode[]>([]);
   const [lineageSummary, setLineageSummary] = useState<LineageSummary | null>(null);
@@ -93,9 +95,12 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingSaved, setIsLoadingSaved] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The analysis ran but could not be persisted - the user must know
+  // the results on screen are not on the record.
+  const [saveError, setSaveError] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [savedLineageDate, setSavedLineageDate] = useState<string | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [, setHasUnsavedChanges] = useState(false);
 
   // Load saved lineage results on mount
   useEffect(() => {
@@ -148,12 +153,10 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           if (saved.run_at) {
             setSavedLineageDate(saved.run_at);
           }
-          
-          console.log('📊 Loaded saved funds lineage from', saved.run_at);
         }
       }
     } catch (err) {
-      console.error('Error loading saved lineage:', err);
+      console.debug('Error loading saved lineage:', err);
     } finally {
       setIsLoadingSaved(false);
     }
@@ -208,20 +211,21 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
       });
       
       if (response.ok) {
-        const data = await response.json();
-        console.log('✅ Funds lineage saved:', data);
         setSavedLineageDate(new Date().toISOString());
         setHasUnsavedChanges(false);
-        
+        setSaveError(false);
+
         // Notify parent component
         if (onLineageComplete) {
           onLineageComplete(summary, unresolvedItems);
         }
       } else {
-        console.error('Failed to save lineage:', await response.text());
+        console.debug('Failed to save lineage:', response.status);
+        setSaveError(true);
       }
     } catch (err) {
-      console.error('Error saving lineage:', err);
+      console.debug('Error saving lineage:', err);
+      setSaveError(true);
     } finally {
       setIsSaving(false);
     }
@@ -230,14 +234,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
   // Group transactions by account
   const accountSummaries = useMemo((): AccountSummary[] => {
     const accountMap = new Map<string, Transaction[]>();
-    
-    // Debug: Log what we're receiving
-    console.log('🔗 FundsLineage: Received', transactions.length, 'transactions');
-    if (transactions.length > 0) {
-      console.log('🔗 FundsLineage: First transaction:', transactions[0]);
-      console.log('🔗 FundsLineage: First transaction account field:', transactions[0].account);
-    }
-    
+
     transactions.forEach(txn => {
       const accountId = txn.account || 'Unknown Account';
       if (!accountMap.has(accountId)) {
@@ -245,9 +242,6 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
       }
       accountMap.get(accountId)!.push(txn);
     });
-    
-    // Debug: Log grouped accounts
-    console.log('🔗 FundsLineage: Grouped into', accountMap.size, 'accounts:', Array.from(accountMap.keys()));
 
     return Array.from(accountMap.entries()).map(([accountId, txns]) => {
       const credits = txns.filter(t => t.type === 'credit');
@@ -392,7 +386,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         destinationAccount: target.account,
         children: [],
         notes: /salary|employment/i.test(externalCheck.sourceType)
-          ? `Salary of £${Math.abs(target.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} received on ${formatDate(target.date)}`
+          ? `Salary of ${formatCurrency(Math.abs(target.amount))} received on ${formatDate(target.date)}`
           : `✅ Origin identified: ${externalCheck.sourceType}`,
         isOrigin: true
       };
@@ -421,7 +415,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             sourceAccount: account.accountName,
             destinationAccount: target.account,
             children,
-            notes: `✅ Matched: ${account.accountName} sent £${Math.abs(matchedDebit.amount).toLocaleString()} on ${formatDate(matchedDebit.date)}`,
+            notes: `✅ Matched: ${account.accountName} sent ${formatCurrencyWhole(Math.abs(matchedDebit.amount))} on ${formatDate(matchedDebit.date)}`,
             isOrigin: false
           };
         }
@@ -524,14 +518,22 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
 
     traverseNodes(nodes);
 
-    const accumulationDays = earliestDate && latestDate 
-      ? Math.ceil((latestDate.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24))
+    // TS cannot see the closure assignments above, so it narrows the
+    // dates to `never` - assert the type explicitly.
+    const earliest = earliestDate as Date | null;
+    const latest = latestDate as Date | null;
+    const accumulationDays = earliest && latest
+      ? Math.ceil((latest.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
     return {
       totalAmount: targetAmount,
       tracedAmount,
-      untracedAmount: targetAmount - tracedAmount,
+      // Clamped at zero - traced external origins can legitimately sum
+      // to more than the target credit (e.g. many salary credits fund
+      // one transfer). A negative "untraced" figure is meaningless; the
+      // over-tracing is surfaced as a data-quality note instead.
+      untracedAmount: Math.max(0, targetAmount - tracedAmount),
       matchedTransfers,
       externalOrigins,
       requiresEvidence,
@@ -548,6 +550,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
 
     setIsProcessing(true);
     setError(null);
+    setSaveError(false);
 
     try {
       const rootNode = buildLineageTree(targetTransaction, accountSummaries);
@@ -574,6 +577,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
     setLineageTree([]);
     setLineageSummary(null);
     setSavedLineageDate(null);
+    setSaveError(false);
     setHasUnsavedChanges(true);
   };
 
@@ -611,10 +615,10 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
   }, [transactions]);
 
   // Render a lineage node and its children
-  const renderLineageNode = (node: LineageNode, isLast: boolean = false): React.ReactNode => {
+  const renderLineageNode = (node: LineageNode): React.ReactNode => {
     // Defensive: ensure node has required properties
     if (!node || !node.id) {
-      console.warn('Invalid lineage node:', node);
+      console.debug('Invalid lineage node:', node);
       return null;
     }
     
@@ -682,7 +686,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
           <span className="w-24 flex-shrink-0 text-xs text-zinc-500 tabular-nums">{txnDate}</span>
           <span className="flex-1 min-w-0 text-sm text-zinc-800 truncate" title={txnDesc}>{txnDesc}</span>
           <span className="flex-shrink-0 text-sm font-semibold text-zinc-900 tabular-nums">
-            £{Math.abs(txnAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatCurrency(Math.abs(txnAmount))}
           </span>
         </div>
 
@@ -705,17 +709,14 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                 <div className={needsEvidence ? 'text-amber-700' : 'text-green-700'}>{node.notes}</div>
               )}
             </div>
-            {hasChildren && node.children.map((child: LineageNode, idx: number) =>
-              renderLineageNode(child, idx === node.children.length - 1)
+            {hasChildren && node.children.map((child: LineageNode) =>
+              renderLineageNode(child)
             )}
           </>
         )}
       </div>
     );
   };
-
-  // Check if we have multiple accounts (required for proper lineage)
-  const hasMultipleAccounts = accountSummaries.length > 1;
 
   return (
     <div className="space-y-6">
@@ -747,9 +748,9 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                   <div className="font-medium text-zinc-900">{account.accountName}</div>
                   <div className="text-xs text-zinc-400 mb-2">{account.accountId}</div>
                   <div className="text-sm">
-                    <span className="text-red-700">↓ £{account.totalDebits.toLocaleString()}</span>
+                    <span className="text-red-700">↓ {formatCurrencyWhole(account.totalDebits)}</span>
                     <span className="mx-2 text-zinc-400">|</span>
-                    <span className="text-green-700">↑ £{account.totalCredits.toLocaleString()}</span>
+                    <span className="text-green-700">↑ {formatCurrencyWhole(account.totalCredits)}</span>
                   </div>
                   <div className="text-xs text-zinc-400">{account.transactions.length} transactions</div>
                 </div>
@@ -788,7 +789,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                 <option value="">-- Select a credit transaction to trace --</option>
                 {significantCredits.map((txn) => (
                   <option key={txn.id} value={txn.id}>
-                    {formatDate(txn.date)} | {txn.account} | £{Math.abs(txn.amount).toLocaleString()} | {txn.description.slice(0, 40)}...
+                    {formatDate(txn.date)} | {txn.account} | {formatCurrencyWhole(Math.abs(txn.amount))} | {txn.description.slice(0, 40)}...
                   </option>
                 ))}
               </select>
@@ -797,7 +798,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                 <div className="bg-zinc-50 border border-zinc-200 rounded-md p-3 mt-2">
                   <div className="text-sm font-semibold text-zinc-900">Selected Transaction:</div>
                   <div className="text-sm text-zinc-700 mt-1">
-                    <div>• Amount: <strong>£{Math.abs(targetTransaction.amount).toLocaleString()}</strong></div>
+                    <div>• Amount: <strong>{formatCurrency(Math.abs(targetTransaction.amount))}</strong></div>
                     <div>• Date: {formatDate(targetTransaction.date)}</div>
                     <div>• Account: {targetTransaction.account}</div>
                     <div>• Description: {targetTransaction.description}</div>
@@ -833,12 +834,20 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
         </div>
         
         {/* Saved Status Indicator */}
-        {savedLineageDate && (
+        {savedLineageDate && !saveError && (
           <div className="mt-3 flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-md">
             <span>✅</span>
             <span>
-              Analysis saved on {new Date(savedLineageDate).toLocaleDateString('en-GB')} at {new Date(savedLineageDate).toLocaleTimeString('en-GB')}
+              Analysis saved on {formatDateTime(savedLineageDate)}
             </span>
+          </div>
+        )}
+
+        {/* Save failure - the results on screen are NOT on the record. */}
+        {saveError && (
+          <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <span className="font-semibold">Analysis completed but could not be saved</span> — the
+            results shown are not persisted. Re-run the analysis to try saving again.
           </div>
         )}
         
@@ -864,7 +873,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
               <div>
                 <h3 className="text-lg font-bold text-zinc-900">Backward Funds Lineage Ledger</h3>
                 <p className="text-xs text-zinc-600 mt-1">
-                  Tracing origin of £{Math.abs(targetTransaction?.amount || 0).toLocaleString()} credited on {formatDate(targetTransaction?.date)}
+                  Tracing origin of {formatCurrency(Math.abs(targetTransaction?.amount || 0))} credited on {formatDate(targetTransaction?.date)}
                 </p>
               </div>
               <button
@@ -881,19 +890,19 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
               <div>
                 <div className="text-xl font-bold text-zinc-900">
-                  £{lineageSummary.totalAmount.toLocaleString()}
+                  {formatCurrencyWhole(lineageSummary.totalAmount)}
                 </div>
                 <div className="text-xs text-zinc-600">Total Amount</div>
               </div>
               <div>
                 <div className="text-xl font-bold text-green-700">
-                  £{lineageSummary.tracedAmount.toLocaleString()}
+                  {formatCurrencyWhole(lineageSummary.tracedAmount)}
                 </div>
                 <div className="text-xs text-zinc-600">Traced to Origin</div>
               </div>
               <div>
                 <div className="text-xl font-bold text-amber-700">
-                  £{lineageSummary.untracedAmount.toLocaleString()}
+                  {formatCurrencyWhole(Math.max(0, lineageSummary.untracedAmount))}
                 </div>
                 <div className="text-xs text-zinc-600">Requires Evidence</div>
               </div>
@@ -918,12 +927,23 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                 <div className="text-xs text-zinc-600">Statement Period</div>
               </div>
             </div>
+            {/* Data-quality note - identified external origins can sum to
+                more than the traced credit (e.g. many salary credits feeding
+                one transfer). Flag it rather than showing a negative gap. */}
+            {lineageSummary.tracedAmount > lineageSummary.totalAmount && (
+              <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 text-left">
+                <span className="font-semibold">Data-quality note:</span> the identified external
+                origins total {formatCurrencyWhole(lineageSummary.tracedAmount)}, which exceeds the{' '}
+                {formatCurrencyWhole(lineageSummary.totalAmount)} credit being traced. Review the
+                matched origins - some credits may relate to other spending rather than this transfer.
+              </div>
+            )}
           </div>
 
           {/* Lineage Tree */}
           <div className="px-6 py-4">
             <div className="space-y-2">
-              {lineageTree.map((node, idx) => renderLineageNode(node, idx === lineageTree.length - 1))}
+              {lineageTree.map((node) => renderLineageNode(node))}
             </div>
           </div>
 
@@ -957,14 +977,14 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             };
             walk(lineageTree);
 
-            const untraced = lineageSummary.untracedAmount || 0;
+            const untraced = Math.max(0, lineageSummary.untracedAmount || 0);
             const total    = lineageSummary.totalAmount    || 0;
             const untracedPct = total > 0 ? (untraced / total) * 100 : 0;
 
             const noIssues = untraced <= 0 && evidenceNodes.length === 0 && gapNodes.length === 0;
             if (noIssues) return null;
 
-            const fmtMoney = (n: number) => `£${Math.round(n).toLocaleString()}`;
+            const fmtMoney = (n: number) => formatCurrencyWhole(n);
 
             return (
               <div className="px-6 py-5 bg-amber-50 border-t border-amber-200">
@@ -999,7 +1019,7 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                             {formatDate(n.transaction?.date || n.date)}
                             {(n.transaction?.account || n.account) && ` - ${n.transaction?.account || n.account}`}
                             {(n.transaction?.description || n.description) && (
-                              <span className="text-zinc-500"> · {(n.transaction?.description || n.description).slice(0, 60)}</span>
+                              <span className="text-zinc-500"> · {(n.transaction?.description || n.description || '').slice(0, 60)}</span>
                             )}
                           </li>
                         ))}
@@ -1037,7 +1057,10 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
             );
           })()}
 
-          {/* Compliance Footer */}
+          {/* Compliance Footer - the matter reference is the REAL
+              reference from the matter record (never a fabricated
+              MAT-{id}), and the timestamp is the analysis run time
+              from the saved payload, not the render time. */}
           <div className="px-6 py-4 bg-zinc-50 border-t border-zinc-200">
             <div className="text-xs text-zinc-600">
               <div className="font-semibold mb-1">📜 Compliance Statement</div>
@@ -1047,7 +1070,9 @@ const FundsLineage: React.FC<FundsLineageProps> = ({ matterId, transactions, sof
                 Unmatched transactions require additional source documentation.
               </p>
               <div className="mt-2 text-zinc-400">
-                Generated: {new Date().toLocaleString('en-GB')} | Matter: MAT-{matterId}
+                Analysis run: {savedLineageDate ? formatDateTime(savedLineageDate) : 'not yet saved'}
+                {' | '}
+                Matter: {currentMatter?.reference_number || `Matter ID ${matterId}`}
               </div>
             </div>
           </div>

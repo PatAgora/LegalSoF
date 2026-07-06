@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-sof_platform}
     ports:
-      - "5433:5432"
+      # Bound to localhost only — the database must not be reachable
+      # from other machines on the network.
+      - "127.0.0.1:5433:5432"
     volumes:
       - sof-postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -29,6 +31,7 @@ services:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:?err}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-sof_platform}
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - CORS_ORIGINS=["http://localhost","http://localhost:8080","http://127.0.0.1","http://127.0.0.1:8080"]
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:

@@ -6,6 +6,10 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import re
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 
 class DocumentVerifier:
     """
@@ -131,57 +135,53 @@ class DocumentVerifier:
         expected_amount = claim['expected_amount']
         checks_passed = []
         issues = []
-        
-        print(f"\n=== INHERITANCE VERIFICATION DEBUG ===")
-        print(f"Expected amount: £{expected_amount:,.2f}")
-        print(f"Supporting docs count: {len(supporting_docs)}")
-        for idx, doc in enumerate(supporting_docs):
-            print(f"  Doc {idx}: type={doc.get('document_type')}")
-        
+
+        logger.debug("inheritance_verification_start",
+                     supporting_docs_count=len(supporting_docs))
+
         # Find probate document
         probate_doc = None
         for doc in supporting_docs:
             if doc.get('document_type') == 'Probate grant':
                 probate_doc = doc
                 break
-        
+
         if not probate_doc:
-            print("❌ No probate grant found in supporting docs")
+            logger.debug("inheritance_verification_no_probate_grant")
             issues.append("No probate grant document provided")
             result['missing_documents'].append("Probate grant or letters of administration")
             result['verified'] = False
             result['issues'] = issues
             return result
-        
-        print(f"✅ Found probate grant: {probate_doc.get('filename')}")
-        
+
+        logger.debug("inheritance_verification_probate_found")
+
         # AUDIT TRAIL: Record which document was used for verification
         result['verification_details']['document_used'] = {
             'filename': probate_doc.get('filename', 'Unknown'),
             'document_type': probate_doc.get('document_type'),
             'uploaded_at': probate_doc.get('uploaded_at'),
         }
-        
+
         extracted = probate_doc.get('extracted_data', {})
-        print(f"Extracted data keys: {list(extracted.keys())}")
-        print(f"Distributions: {extracted.get('distributions', [])}")
-        
+        logger.debug("inheritance_verification_extracted",
+                     extracted_field_count=len(extracted),
+                     distribution_count=len(extracted.get('distributions', [])))
+
         # Check 1: Distribution amount matches claim
         distributions = extracted.get('distributions', [])
         matching_distribution = None
-        
+
         for dist in distributions:
             dist_amount = dist.get('amount', 0)
-            print(f"  Checking distribution: {dist.get('beneficiary')} - £{dist_amount:,.2f}")
             # Allow 1% tolerance for amount matching
             if expected_amount > 0 and abs(dist_amount - expected_amount) / expected_amount < 0.01:
                 matching_distribution = dist
                 checks_passed.append("Distribution amount matches claim")
-                print(f"  ✅ MATCH FOUND!")
                 break
-        
+
         if not matching_distribution:
-            print("❌ No matching distribution found")
+            logger.debug("inheritance_verification_no_matching_distribution")
             # Check if expected amount is close to any distribution
             closest_dist = min(distributions, key=lambda d: abs(d.get('amount', 0) - expected_amount)) if distributions else None
             if closest_dist:
@@ -214,21 +214,24 @@ class DocumentVerifier:
             
             if matching_transaction:
                 # INFORMATIONAL: Bank transaction found (doesn't affect document verification)
-                checks_passed.append(f"Bank transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
+                if matching_transaction.get('date_verified'):
+                    checks_passed.append(f"Bank transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
+                else:
+                    checks_passed.append(
+                        f"Bank transaction found (amount match only — date not corroborated): "
+                        f"£{matching_transaction['amount']:,.2f} on {matching_transaction['date']}"
+                    )
                 result['verification_details']['matching_transaction'] = matching_transaction
             # NOTE: We don't add an issue if no bank match - that's handled by the assessment engine
             # The document itself is valid regardless of bank statement matching
         else:
             issues.append("Bank account details incomplete in probate document")
-        
+
         # Check 5: Probate reference exists
         probate_ref = extracted.get('probate_reference')
         if probate_ref:
             checks_passed.append(f"Probate reference: {probate_ref}")
             result['verification_details']['document_used']['probate_reference'] = probate_ref
-        probate_ref = extracted.get('probate_reference')
-        if probate_ref:
-            checks_passed.append(f"Probate reference: {probate_ref}")
         else:
             issues.append("No probate reference number found")
         
@@ -314,58 +317,50 @@ class DocumentVerifier:
         expected_amount = claim['expected_amount']
         checks_passed = []
         issues = []
-        
-        print(f"\n=== PROPERTY VERIFICATION DEBUG ===")
-        print(f"Expected amount: £{expected_amount:,.2f}")
-        print(f"Supporting docs count: {len(supporting_docs)}")
-        for idx, doc in enumerate(supporting_docs):
-            print(f"  Doc {idx}: type={doc.get('document_type')}")
-        
+
+        logger.debug("property_verification_start",
+                     supporting_docs_count=len(supporting_docs))
+
         # Find completion statement
         completion_doc = None
         for doc in supporting_docs:
             if doc.get('document_type') == 'completion statement':
                 completion_doc = doc
                 break
-        
+
         if not completion_doc:
-            print("❌ No completion statement found in supporting docs")
+            logger.debug("property_verification_no_completion_statement")
             issues.append("No completion statement provided")
             result['missing_documents'].append("Property completion statement")
             result['verified'] = False
             result['issues'] = issues
             return result
-        
-        print(f"✅ Found completion statement: {completion_doc.get('filename')}")
-        
+
+        logger.debug("property_verification_completion_found")
+
         # AUDIT TRAIL: Record which document was used for verification
         result['verification_details']['document_used'] = {
             'filename': completion_doc.get('filename', 'Unknown'),
             'document_type': completion_doc.get('document_type'),
             'uploaded_at': completion_doc.get('uploaded_at'),
         }
-        
+
         extracted = completion_doc.get('extracted_data', {})
-        print(f"Extracted data keys: {list(extracted.keys())}")
-        print(f"Extracted data: {extracted}")
-        
+        logger.debug("property_verification_extracted",
+                     extracted_field_count=len(extracted))
+
         # Check 1: Net proceeds or payment amount matches claim
         net_proceeds = extracted.get('net_proceeds') or extracted.get('payment_amount')
-        print(f"Net proceeds/payment amount: {net_proceeds}")
-        
+
         if net_proceeds:
             diff_pct = abs(net_proceeds - expected_amount) / expected_amount if expected_amount > 0 else 1
-            print(f"Amount difference: {diff_pct*100:.2f}%")
             # Allow 1% tolerance
             if diff_pct < 0.01:
                 checks_passed.append(f"Net proceeds match claim: £{net_proceeds:,.2f}")
-                print("✅ Amount matches (within 1%)")
             else:
                 issues.append(f"Amount mismatch: document shows £{net_proceeds:,.2f}, claim is £{expected_amount:,.2f}")
-                print(f"❌ Amount mismatch: {diff_pct*100:.2f}% difference")
         else:
             issues.append("No net proceeds amount found in completion statement")
-            print("❌ No net proceeds found")
         
         # Check 2: Completion/transfer date
         completion_date = extracted.get('completion_date') or extracted.get('transfer_date')
@@ -399,7 +394,13 @@ class DocumentVerifier:
             
             if matching_transaction:
                 # INFORMATIONAL: Bank transaction found (doesn't affect document verification)
-                checks_passed.append(f"Bank transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
+                if matching_transaction.get('date_verified'):
+                    checks_passed.append(f"Bank transaction found: £{matching_transaction['amount']:,.2f} on {matching_transaction['date']}")
+                else:
+                    checks_passed.append(
+                        f"Bank transaction found (amount match only — date not corroborated): "
+                        f"£{matching_transaction['amount']:,.2f} on {matching_transaction['date']}"
+                    )
                 result['verification_details']['matching_transaction'] = matching_transaction
             # NOTE: We don't add an issue if no bank match - that's handled by the assessment engine
             # The document itself is valid regardless of bank statement matching
@@ -1004,52 +1005,67 @@ class DocumentVerifier:
         expected_date: Optional[str],
         account_last_4: Optional[str]
     ) -> Optional[Dict[str, Any]]:
-        """Find a transaction that matches the expected criteria"""
-        
+        """Find a transaction that matches the expected criteria.
+
+        Returns a copy of the matching transaction with an added
+        ``date_verified`` key: True when the transaction date was checked
+        and falls within ±7 days of the expected date; False when the
+        match is on amount/account only because the date check could not
+        be evaluated (missing or unparseable dates). Callers must surface
+        that distinction rather than presenting an amount-only match as
+        date-corroborated.
+        """
+
         # Guard against division by zero
         if expected_amount <= 0:
             return None
-        
+
+        # Strip ordinal suffixes from digits only ("21st August 2025" ->
+        # "21 August 2025"). A blanket .replace('st', '') mangled month
+        # names ("August" -> "Augu") and broke date parsing entirely.
+        exp_date = None
+        if expected_date:
+            cleaned = re.sub(r'(\d)(st|nd|rd|th)\b', r'\1', expected_date).strip()
+            for fmt in ['%d %B %Y', '%d %b %Y', '%Y-%m-%d', '%d/%m/%Y']:
+                try:
+                    exp_date = datetime.strptime(cleaned, fmt)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
         for txn in bank_statements:
             # Check amount (allow 1% tolerance)
             if abs(txn.get('amount', 0) - expected_amount) / expected_amount > 0.01:
                 continue
-            
+
             # Check direction (should be credit for incoming funds)
             if txn.get('direction') != 'credit':
                 continue
-            
+
             # Check account if provided
             if account_last_4:
                 account_id = txn.get('account_id', '')
                 if account_last_4 not in account_id:
                     continue
-            
-            # Check date if provided (allow ±7 days)
-            if expected_date:
-                try:
-                    txn_date = datetime.strptime(txn.get('date', ''), '%Y-%m-%d')
-                    # Parse expected date (various formats)
-                    for fmt in ['%d %B %Y', '%d %b %Y', '%Y-%m-%d', '%d/%m/%Y']:
-                        try:
-                            exp_date = datetime.strptime(expected_date.replace('st', '').replace('nd', '').replace('rd', '').replace('th', ''), fmt)
-                            break
-                        except:
-                            continue
-                    else:
-                        # Couldn't parse date, skip date check
-                        return txn
-                    
-                    # Check if within 7 days
-                    if abs((txn_date - exp_date).days) <= 7:
-                        return txn
-                except:
-                    # Date parsing failed, return the transaction anyway if amount matches
-                    return txn
-            else:
-                # No date to check, return if amount matches
-                return txn
-        
+
+            # Check date if it can be evaluated (allow ±7 days)
+            txn_date = None
+            try:
+                txn_date = datetime.strptime(txn.get('date', ''), '%Y-%m-%d')
+            except (ValueError, TypeError):
+                txn_date = None
+
+            if exp_date and txn_date:
+                if abs((txn_date - exp_date).days) <= 7:
+                    return {**txn, 'date_verified': True}
+                # Amount matched but date clearly disagrees — not a match.
+                continue
+
+            # Date check cannot be evaluated (no expected date, or a date
+            # failed to parse) — return the amount/account match but mark
+            # it as NOT date-corroborated.
+            return {**txn, 'date_verified': False}
+
         return None
     
     def _extract_field_name(self, issue: str) -> str:

@@ -10,7 +10,9 @@ from datetime import date, datetime, timedelta, timezone
 import io
 from collections import defaultdict
 
-from app.api.dependencies.auth import get_current_active_user, require_analyst, require_admin
+from app.api.dependencies.auth import (
+    get_current_active_user, require_analyst, require_admin, require_matter_access
+)
 from app.models.user import User
 from app.db.session import get_db, get_sync_db
 from app.models import (
@@ -119,41 +121,77 @@ async def upload_transactions(
     
     Requires authenticated user with analyst role or above.
     """
-    # Verify matter exists
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
-    
-    # Read file content
-    file_content = await file.read()
-    
+    from app.core.config import settings
+
+    # Verify matter exists AND the current user may access it
+    matter = require_matter_access(matter_id, current_user, db)
+
+    # ---- Upload size enforcement (before reading the whole file) ----
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    size_error = HTTPException(
+        status_code=413,
+        detail=f"File too large. Maximum allowed size is {settings.MAX_UPLOAD_SIZE_MB} MB.",
+    )
+
+    # Content-Length precheck (cheap rejection for honest clients)
+    declared_size = getattr(file, 'size', None)
+    if declared_size and declared_size > max_bytes:
+        raise size_error
+
+    # Chunked read with a hard cap (protects against lying/absent headers)
+    chunks = []
+    bytes_read = 0
+    while True:
+        chunk = await file.read(1024 * 1024)  # 1 MB chunks
+        if not chunk:
+            break
+        bytes_read += len(chunk)
+        if bytes_read > max_bytes:
+            raise size_error
+        chunks.append(chunk)
+    file_content = b''.join(chunks)
+
+    if not file_content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
     # Determine file type and parse accordingly
     filename = file.filename.lower() if file.filename else ""
-    
+
+    # ---- Magic-byte validation (A18) ----
+    # The claimed type (extension) must match the actual file signature.
+    from app.services.file_processor import file_processor as _fp
+    valid, validation_error = _fp._validate_content_signature(
+        file_content, filename, file.content_type or ''
+    )
+    if not valid:
+        raise HTTPException(status_code=400, detail=validation_error)
+
     try:
         if filename.endswith('.pdf'):
             # Parse PDF bank statement
             pdf_parser = PDFTransactionParser()
             parsed_transactions = pdf_parser.parse_pdf(file_content, customer_id)
-            
+
             if not parsed_transactions:
                 raise HTTPException(
-                    status_code=400, 
+                    status_code=400,
                     detail="No transactions found in PDF. Please ensure it's a valid bank statement."
                 )
-            
+
         elif filename.endswith('.csv'):
             # Parse CSV file
             csv_str = file_content.decode('utf-8')
             csv_parser = TransactionCSVParser()
             parsed_transactions = csv_parser.parse_csv(csv_str, customer_id)
-            
+
         else:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="Unsupported file type. Please upload a CSV or PDF file."
             )
             
+    except HTTPException:
+        raise  # Preserve intended status codes (400/413) instead of masking as 500
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"File parsing error: {str(e)}")
     except Exception as e:
@@ -270,7 +308,9 @@ async def get_transactions(
                     matter_id=matter_id,
                     txn_date=txn_date_obj,
                     customer_id=account_id,  # Use actual account ID from statement
-                    direction=stmt.get('direction', 'credit'),
+                    # A10: missing direction is 'unknown' (needs review), never
+                    # a fabricated credit
+                    direction=stmt.get('direction') or 'unknown',
                     amount=float(stmt.get('amount', 0)),
                     currency=stmt.get('currency', 'GBP'),
                     base_amount=float(stmt.get('amount', 0)),  # Assume same as amount for GBP
@@ -497,7 +537,11 @@ async def get_transaction_alerts(
                         amount = float(stmt.get('amount', 0))
                     except (ValueError, TypeError):
                         amount = 0.0
-                    direction = stmt.get('direction', 'credit')
+                    # A10: unknown direction stays unknown; the cash-alert
+                    # checks below rely on the narrative to establish the
+                    # money flow, so 'unknown' still triggers alerts
+                    # (conservative: more review, never less).
+                    direction = stmt.get('direction') or 'unknown'
                     cash_threshold = 7500.0  # £7,500 threshold
                     
                     # Detect cash deposit
@@ -512,7 +556,7 @@ async def get_transaction_alerts(
                     ]) or ('CASH' in narrative and 'WITHDRAWAL' in narrative) or \
                        ('ATM' in narrative and direction in ('out', 'debit'))
                     
-                    if is_cash_deposit and amount >= cash_threshold and direction in ('in', 'credit'):
+                    if is_cash_deposit and amount >= cash_threshold and direction in ('in', 'credit', 'unknown'):
                         excess = amount - cash_threshold
                         cash_alert = {
                             'id': 30000 + idx,
@@ -540,7 +584,7 @@ async def get_transaction_alerts(
                             if not (status and cash_alert['status'] != status):
                                 result.append(TransactionAlertResponse(**cash_alert))
                     
-                    elif is_cash_withdrawal and amount >= cash_threshold and direction in ('out', 'debit'):
+                    elif is_cash_withdrawal and amount >= cash_threshold and direction in ('out', 'debit', 'unknown'):
                         excess = amount - cash_threshold
                         cash_alert = {
                             'id': 40000 + idx,
@@ -635,9 +679,8 @@ async def run_transaction_checks(
     """
     Manually trigger AML checks for all transactions in a matter
     """
-    matter = db.query(Matter).filter(Matter.id == matter_id).first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
+    # Verify matter exists AND the current user may access it
+    matter = require_matter_access(matter_id, current_user, db)
     
     # Delete existing alerts to regenerate
     db.query(TransactionAlert).filter(TransactionAlert.matter_id == matter_id).delete()
@@ -678,7 +721,9 @@ async def get_transaction_dashboard(
             for idx, stmt in enumerate(bank_statements):
                 bank_transactions.append({
                     'id': f"SOF-{matter_id}-{idx+1}",
-                    'direction': stmt.get('direction', 'credit'),
+                    # A10: 'unknown' stays unknown — excluded from both the
+                    # credit (in) and debit (out) totals below
+                    'direction': stmt.get('direction') or 'unknown',
                     'base_amount': float(stmt.get('amount', 0)),
                     'country_iso2': stmt.get('country_iso2') or 'GB',  # Default to GB for UK bank statements
                 })

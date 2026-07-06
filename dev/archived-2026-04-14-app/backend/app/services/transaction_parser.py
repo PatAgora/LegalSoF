@@ -104,11 +104,15 @@ class TransactionCSVParser:
                 direction_val = direction_val.strip().lower()
                 if direction_val in ('out', 'debit', 'dr', 'withdrawal', 'payment'):
                     direction = 'out'
-                else:
+                elif direction_val in ('in', 'credit', 'cr', 'deposit'):
                     direction = 'in'
+                else:
+                    direction = 'unknown'
             else:
-                direction = 'in'  # Default to incoming
-            
+                # A10: no sign and no direction column — 'unknown' (needs
+                # review), never a fabricated incoming credit
+                direction = 'unknown'
+
             amount = float(amount_str)
         
         # Currency (default GBP)

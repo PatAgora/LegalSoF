@@ -46,6 +46,9 @@ try:
 except ImportError:
     PDF2IMAGE_AVAILABLE = False
 
+# Shared amount/date parsing helpers (single source of truth)
+from app.services.amount_parser import parse_amount, parse_date, detect_currency
+
 
 class UniversalFinancialParser:
     """
@@ -70,10 +73,12 @@ class UniversalFinancialParser:
         ]
         
         # Amount patterns (multi-currency)
+        # NOTE (A5): symbols restricted to unambiguous currency glyphs only.
+        # Bare letters like 'R' matched reference numbers ("REF 123456").
         self.amount_patterns = [
             # With currency symbols
-            r'([£$€¥₹฿R])\s*([\d,]+\.?\d*)',
-            r'([\d,]+\.?\d*)\s*([£$€¥₹฿])',
+            r'([£$€¥₹])\s*([\d,]+\.?\d*)',
+            r'([\d,]+\.?\d*)\s*([£$€¥₹])',
             # With currency codes
             r'(GBP|USD|EUR|JPY|INR|AUD|CAD|CHF|CNY)\s*([\d,]+\.?\d*)',
             r'([\d,]+\.?\d*)\s*(GBP|USD|EUR|JPY|INR|AUD|CAD|CHF|CNY)',
@@ -81,11 +86,10 @@ class UniversalFinancialParser:
             r'([\d,]+\.\d{2})',
             r'([\d,]+\.\d{1,2})',
         ]
-        
+
         # Currency mappings
         self.currency_symbols = {
-            '£': 'GBP', '$': 'USD', '€': 'EUR', '¥': 'JPY', 
-            '₹': 'INR', '฿': 'THB', 'R': 'ZAR'
+            '£': 'GBP', '$': 'USD', '€': 'EUR', '¥': 'JPY', '₹': 'INR'
         }
         
         # Month mappings
@@ -274,27 +278,34 @@ class UniversalFinancialParser:
         
         # Transaction type keywords (expanded for all banks)
         # IMPORTANT: Include directional variants (to/from) for accurate detection
+        # NOTE (A11): keyword lists tightened.
+        #  - No bare substrings that hit false positives ('dr' -> "DR SMITH",
+        #    'purchase' -> "PURCHASE LEDGER REFUND", 'credit' -> "CREDIT CARD",
+        #    'cash' -> "CASH DEPOSIT" which is a CREDIT).
         self.debit_keywords = [
             # Generic
-            'debit', 'dr', 'withdrawal', 'payment', 'purchase', 'bought',
-            'paid', 'sent', 'transfer out', 'outgoing', 'expense',
+            'debit', 'withdrawal', 'payment', 'card purchase', 'purchase at',
+            'bought', 'paid', 'sent', 'transfer out', 'outgoing', 'expense',
+            # Cash going out (specific — bare 'cash' would wrongly match deposits)
+            'cash withdrawal', 'atm',
             # UK specific - with directional indicators
-            'direct debit', 'dd', 'standing order to', 'so to', 
+            'direct debit', 'standing order to', 'so to',
             'faster payment to', 'fp to', 'card payment', 'contactless', 'chip and pin',
             'chaps to', 'bacs to', 'payment to', 'transfer to',
             # Digital banks
             'pot transfer', 'to pot', 'declined',
-            # Credit cards  
-            'charge', 'transaction', 'spend',
+            # Credit cards
+            'charge', 'spend',
             # US specific
             'check', 'cheque', 'ach debit', 'wire out',
             # Money out indicators
             'money out', 'paid out',
         ]
-        
+
         self.credit_keywords = [
-            # Generic
-            'credit', 'cr', 'deposit', 'received', 'income', 'refund',
+            # Generic (bare 'credit' removed — it matched "CREDIT CARD")
+            'counter credit', 'bank credit', 'giro credit',
+            'deposit', 'cash deposit', 'received', 'income', 'refund',
             'transfer in', 'incoming', 'receipt',
             # UK specific - with directional indicators
             'faster payment from', 'fp from', 'standing order from', 'so from',
@@ -435,8 +446,13 @@ class UniversalFinancialParser:
                 'balance_checks_passed': 0,
                 'balance_checks_failed': 0,
                 'balance_validated': False
-            }
+            },
+            'rejected_row_count': 0,
+            'rejected_row_samples': [],
+            'unknown_direction_count': 0,
+            'potential_duplicates': 0,
         }
+        parse_stats = self._new_parse_stats()
         
         # Detect bank from PDF
         bank = self._detect_bank_from_pdf(content)
@@ -455,7 +471,7 @@ class UniversalFinancialParser:
         
         # Strategy 1: Native text extraction with tables (using bank config)
         print("\n📊 Trying native PDF extraction...")
-        native_txns = self._extract_pdf_native(content, metadata, bank_config)
+        native_txns = self._extract_pdf_native(content, metadata, bank_config, parse_stats)
         
         if native_txns and len(native_txns) >= 3:
             print(f"   ✅ Native extraction: {len(native_txns)} transactions")
@@ -491,23 +507,70 @@ class UniversalFinancialParser:
                 txn['account_type'] = account_info.get('account_type', 'Unknown')
                 txn['bank_name'] = account_info.get('bank_name', bank or 'Unknown')
                 txn['sort_code'] = account_info.get('sort_code', '')
-        
-        # Deduplicate
-        transactions = self._deduplicate(transactions)
-        
+
+        # Assign a GLOBAL running index across the whole document (A12):
+        # transactions are accumulated in document order, so this gives a
+        # stable ordering key that does not reset per page/table.
+        for seq, txn in enumerate(transactions):
+            txn['seq'] = seq
+
+        # Deduplicate (cross-strategy only; same-strategy dupes are real)
+        transactions, dup_count = self._deduplicate(transactions)
+        metadata['potential_duplicates'] = dup_count
+
         # Validate balances if we have balance data
         if transactions:
             transactions, validation_result = self._validate_balances(transactions)
             metadata['validation'] = validation_result
+            metadata['balance_check'] = {
+                'checked': validation_result['balance_validated'],
+                'passed': validation_result['balance_checks_passed'],
+                'failed': validation_result['balance_checks_failed'],
+            }
             if validation_result['balance_validated']:
                 print(f"   ✅ Balance validation: {validation_result['balance_checks_passed']} passed, {validation_result['balance_checks_failed']} failed")
-        
+
+        self._merge_parse_stats(metadata, parse_stats, transactions)
+
         return {
             'success': len(transactions) > 0,
             'transactions': transactions,
             'metadata': metadata,
             'error': None if transactions else 'No transactions could be extracted from PDF'
         }
+
+    # ------------------------------------------------------------------
+    # Parse statistics (silent row-loss accounting)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _new_parse_stats() -> Dict[str, Any]:
+        return {'rejected_row_count': 0, 'rejected_row_samples': []}
+
+    @staticmethod
+    def _record_rejected_row(stats: Optional[Dict], raw_row) -> None:
+        """Count a row that looked like data but could not be parsed."""
+        if stats is None:
+            return
+        stats['rejected_row_count'] += 1
+        if len(stats['rejected_row_samples']) < 5:
+            try:
+                sample = ' | '.join(str(c) for c in raw_row) if isinstance(raw_row, (list, tuple)) else str(raw_row)
+            except Exception:
+                sample = '<unprintable row>'
+            stats['rejected_row_samples'].append(sample[:200])
+
+    @staticmethod
+    def _merge_parse_stats(metadata: Dict, stats: Dict, transactions: List[Dict]) -> None:
+        """Surface rejected-row and unknown-direction counts in metadata."""
+        metadata['rejected_row_count'] = stats.get('rejected_row_count', 0)
+        metadata['rejected_row_samples'] = stats.get('rejected_row_samples', [])
+        metadata['unknown_direction_count'] = sum(
+            1 for t in transactions if t.get('direction') == 'unknown'
+        )
+        if metadata['rejected_row_count']:
+            total = len(transactions) + metadata['rejected_row_count']
+            print(f"   ⚠️ Parsed {len(transactions)} of {total} candidate rows "
+                  f"({metadata['rejected_row_count']} rejected)")
     
     def _extract_account_info(self, content: bytes) -> Dict[str, Any]:
         """Extract account information from PDF header (account number, sort code, type, bank)."""
@@ -605,28 +668,29 @@ class UniversalFinancialParser:
         
         return account_info
     
-    def _extract_pdf_native(self, content: bytes, metadata: Dict, bank_config: Dict) -> List[Dict]:
+    def _extract_pdf_native(self, content: bytes, metadata: Dict, bank_config: Dict,
+                            parse_stats: Optional[Dict] = None) -> List[Dict]:
         """Extract transactions from native PDF text using bank-specific rules."""
         transactions = []
-        
+
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             metadata['pages'] = len(pdf.pages)
-            
+
             for page_num, page in enumerate(pdf.pages, 1):
                 page_transactions = []
-                
+
                 # Try table extraction first
                 tables = page.extract_tables()
-                
+
                 print(f"   📄 Page {page_num}: Found {len(tables) if tables else 0} tables")
-                
+
                 for table_idx, table in enumerate(tables or []):
                     if table and len(table) >= 2:
                         # Debug: show table structure
                         if table_idx == 0 and len(table) > 0:
                             print(f"      Table {table_idx}: {len(table)} rows, first row cols: {len(table[0]) if table[0] else 0}")
-                        
-                        table_txns = self._parse_table_with_bank_config(table, page_num, bank_config)
+
+                        table_txns = self._parse_table_with_bank_config(table, page_num, bank_config, parse_stats)
                         page_transactions.extend(table_txns)
                 
                 # If table parsing returned nothing (e.g., single-cell with withdrawals/deposits), 
@@ -740,14 +804,15 @@ class UniversalFinancialParser:
                 amount_x = amounts_with_pos[0][1]
                 balance = amounts_with_pos[-1][0] if len(amounts_with_pos) > 1 else None
                 
-                # Determine direction: if amount is closer to withdrawal_x, it's debit
-                direction = 'credit'  # Default
-                
+                # Determine direction: if amount is closer to withdrawal_x, it's debit.
+                # A10: no positional evidence -> 'unknown', never a fabricated credit.
+                direction = 'unknown'
+
                 if withdrawal_x and deposit_x:
                     # Both columns detected - use position
                     dist_to_withdrawal = abs(amount_x - withdrawal_x) if withdrawal_x else float('inf')
                     dist_to_deposit = abs(amount_x - deposit_x) if deposit_x else float('inf')
-                    
+
                     if dist_to_withdrawal < dist_to_deposit:
                         direction = 'debit'
                         print(f"      📤 DEBIT (position x={amount_x:.0f} near withdrawal): £{amount:,.2f}")
@@ -758,6 +823,10 @@ class UniversalFinancialParser:
                     # Only withdrawal column detected
                     if abs(amount_x - withdrawal_x) < 50:  # Within 50 pixels
                         direction = 'debit'
+                elif deposit_x:
+                    # Only deposit column detected
+                    if abs(amount_x - deposit_x) < 50:  # Within 50 pixels
+                        direction = 'credit'
                 
                 txn = {
                     'account_id': f'PDF_P{page_num}',
@@ -845,13 +914,21 @@ class UniversalFinancialParser:
         # Convert back to PIL Image
         return Image.fromarray(binary)
     
-    def _parse_table_with_bank_config(self, table: List[List], page_num: int, bank_config: Dict) -> List[Dict]:
+    def _parse_table_with_bank_config(self, table: List[List], page_num: int, bank_config: Dict,
+                                      parse_stats: Optional[Dict] = None) -> List[Dict]:
         """Parse a table using bank-specific configuration."""
         if not table or len(table) < 2:
             return []
-        
+
         transactions = []
-        skip_keywords = bank_config.get('skip_rows_containing', [])
+        # A19: always skip balance b/f-c/f rows, even for banks without a
+        # specific config (previously only per-bank configs had these guards).
+        skip_keywords = list(bank_config.get('skip_rows_containing', []))
+        for guard in ('balance brought forward', 'balance carried forward',
+                      'brought forward', 'carried forward'):
+            if guard not in skip_keywords:
+                skip_keywords.append(guard)
+        in_pending_section = False
         
         # DEBUG: Show table structure
         print(f"\n   🔍 TABLE DEBUG (Page {page_num}):")
@@ -888,19 +965,26 @@ class UniversalFinancialParser:
                 if not row or not row[0]:
                     continue
                 line = str(row[0]).strip()
-                
+
                 # Skip header rows and unwanted lines
                 line_lower = line.lower()
                 if any(skip in line_lower for skip in skip_keywords):
                     continue
                 if 'date' in line_lower and 'description' in line_lower:
                     continue
-                
+
+                # A19: detect "Pending transactions" section headers
+                if 'pending' in line_lower and not self._extract_date_from_text(line):
+                    in_pending_section = True
+                    continue
+
                 # Try to parse this line as a transaction
                 txn = self._parse_single_cell_row(line, page_num, row_idx)
                 if txn:
+                    if in_pending_section:
+                        txn['transaction_type'] = 'pending'
                     transactions.append(txn)
-            
+
             return transactions
         
         # Standard multi-column parsing with bank config
@@ -932,43 +1016,61 @@ class UniversalFinancialParser:
         
         for row_idx in range(start_row, len(table)):
             row = [str(cell).strip() if cell else '' for cell in table[row_idx]]
-            
+
             # Skip rows containing unwanted content
             row_text = ' '.join(row).lower()
             if any(skip in row_text for skip in skip_keywords):
                 continue
-            
-            txn = self._parse_row_with_bank_config(row, col_map, row_idx, bank_config)
+
+            # A19: detect "Pending transactions" section headers
+            if 'pending' in row_text and not any(self._extract_date_from_text(c) for c in row if c):
+                in_pending_section = True
+                continue
+
+            txn = self._parse_row_with_bank_config(row, col_map, row_idx, bank_config, parse_stats)
             if txn:
                 txn['source'] = f'pdf_page{page_num}_row{row_idx}'
+                if in_pending_section:
+                    txn['transaction_type'] = 'pending'
                 transactions.append(txn)
-        
+
         return transactions
     
     def _parse_text_with_bank_config(self, text: str, page_num: int, bank_config: Dict) -> List[Dict]:
         """Parse transactions from text using bank-specific rules."""
         transactions = []
         lines = text.split('\n')
-        skip_keywords = bank_config.get('skip_rows_containing', [])
-        
+        # A19: always guard against balance b/f-c/f rows in the generic path
+        skip_keywords = list(bank_config.get('skip_rows_containing', []))
+        for guard in ('balance brought forward', 'balance carried forward',
+                      'brought forward', 'carried forward'):
+            if guard not in skip_keywords:
+                skip_keywords.append(guard)
+
         current_txn = None
         multiline = bank_config.get('multiline_descriptions', False)
-        
+        in_pending_section = False
+
         for line_idx, line in enumerate(lines):
             line = line.strip()
             if not line or len(line) < 8:
                 continue
-            
+
             # Skip obvious non-transaction lines
             line_lower = line.lower()
             if any(skip in line_lower for skip in skip_keywords):
                 continue
             if any(skip in line_lower for skip in ['page', 'statement', 'account number', 'sort code']):
                 continue
-            
+
+            # A19: detect "Pending transactions" section headers
+            if 'pending' in line_lower and not self._extract_date_from_text(line):
+                in_pending_section = True
+                continue
+
             # Try to find a date at the start of the line
             date_match = self._extract_date_from_text(line)
-            
+
             if date_match:
                 # Save previous transaction
                 if current_txn and current_txn.get('amount'):
@@ -987,18 +1089,20 @@ class UniversalFinancialParser:
                     
                     # Determine direction using bank config
                     direction = self._determine_direction(description, amounts, bank_config)
-                    
+
                     current_txn = {
                         'account_id': f'PDF_P{page_num}',
                         'date': parsed_date,
                         'amount': amounts[0] if amounts else None,
-                        'currency': 'GBP',
+                        'currency': detect_currency(line, 'GBP'),  # A17
                         'direction': direction,
                         'description': description[:500],
                         'counterparty_name': '',
                         'balance': amounts[-1] if len(amounts) > 1 else None,
                         'source': f'text_page{page_num}_line{line_idx}'
                     }
+                    if in_pending_section:
+                        current_txn['transaction_type'] = 'pending'
             elif current_txn and multiline:
                 # Continuation line - add to description
                 if not self._extract_amounts_from_text(line):
@@ -1083,85 +1187,107 @@ class UniversalFinancialParser:
         
         return col_map
     
-    def _parse_row_with_bank_config(self, row: List[str], col_map: Dict[str, int], row_idx: int, bank_config: Dict) -> Optional[Dict]:
+    def _parse_row_with_bank_config(self, row: List[str], col_map: Dict[str, int], row_idx: int,
+                                    bank_config: Dict, parse_stats: Optional[Dict] = None) -> Optional[Dict]:
         """Parse a single row using bank-specific configuration."""
         try:
             # Get date
             date_str = None
             if col_map['date'] is not None and col_map['date'] < len(row):
                 date_str = row[col_map['date']].strip()
-            
+
             if not date_str:
                 return None
-            
+
             parsed_date = self._parse_date_with_format(date_str, bank_config.get('date_format', 'dmy'))
             if not parsed_date:
                 return None
-            
-            # Get amount and direction
+
+            # Get amount and direction.
+            # A10: direction stays None until there is actual EVIDENCE
+            # (signed amount, debit/credit column, keyword). Unknown is never
+            # silently promoted to 'credit'.
             amount = None
-            direction = 'credit'
-            
+            direction = None
+            currency = 'GBP'
+
             # Try single amount column first
             if col_map['amount'] is not None and col_map['amount'] < len(row):
                 amt_str = row[col_map['amount']].strip()
                 amount = self._parse_amount_universal(amt_str)
-                if amount:
-                    if '-' in amt_str or '(' in amt_str:
+                if amount is not None:
+                    currency = detect_currency(amt_str, 'GBP')  # A17
+                    if amount < 0 or '(' in amt_str:
                         direction = 'debit'
                         amount = abs(amount)
-            
+                    elif amt_str.lstrip().startswith('+') or re.search(r'\bCR\b', amt_str, re.IGNORECASE):
+                        direction = 'credit'
+
             # Try split debit/credit columns
             if amount is None:
                 if col_map['debit'] is not None and col_map['debit'] < len(row):
                     debit_str = row[col_map['debit']].strip()
                     if debit_str and debit_str not in ['-', '', '0', '0.00']:
                         amount = self._parse_amount_universal(debit_str)
-                        if amount:
+                        if amount is not None:
+                            currency = detect_currency(debit_str, 'GBP')  # A17
                             direction = 'debit'
-                
+                            amount = abs(amount)
+
                 if amount is None and col_map['credit'] is not None and col_map['credit'] < len(row):
                     credit_str = row[col_map['credit']].strip()
                     if credit_str and credit_str not in ['-', '', '0', '0.00']:
                         amount = self._parse_amount_universal(credit_str)
-                        if amount:
+                        if amount is not None:
+                            currency = detect_currency(credit_str, 'GBP')  # A17
                             direction = 'credit'
-            
+                            amount = abs(amount)
+
             if amount is None or amount == 0:
+                # Row had a valid date but no parseable amount — count it
+                # instead of losing it silently.
+                self._record_rejected_row(parse_stats, row)
                 return None
-            
+
             # Get description
             description = ''
             if col_map['description'] is not None and col_map['description'] < len(row):
                 description = row[col_map['description']].strip()
-            
+
             if not description:
                 for idx, cell in enumerate(row):
-                    if idx not in [col_map['date'], col_map['amount'], col_map['debit'], 
+                    if idx not in [col_map['date'], col_map['amount'], col_map['debit'],
                                    col_map['credit'], col_map['balance']]:
                         cell_str = cell.strip()
                         if cell_str and not self._is_amount(cell_str) and len(cell_str) > 2:
                             description += ' ' + cell_str
                 description = description.strip()
-            
+
+            # No column evidence: fall back to description keywords, which may
+            # legitimately return 'unknown' (A10).
+            if direction is None:
+                direction = self._determine_direction(description, [amount], bank_config)
+
             # Get balance
             balance = None
             if col_map['balance'] is not None and col_map['balance'] < len(row):
                 balance = self._parse_amount_universal(row[col_map['balance']])
-            
+
             return {
                 'account_id': 'PDF_IMPORT',
                 'date': parsed_date,
-                'amount': float(amount),
-                'currency': 'GBP',
+                'amount': float(abs(amount)),
+                'currency': currency,
                 'direction': direction,
                 'description': description[:500] if description else 'Transaction',
                 'counterparty_name': '',
-                'balance': float(balance) if balance else None,
+                'balance': float(balance) if balance is not None else None,
                 'source': f'pdf_row_{row_idx}'
             }
-            
-        except Exception as e:
+
+        except Exception:
+            # Keep the resilience, but account for the lost row.
+            self._record_rejected_row(parse_stats, row)
             return None
     
     def _parse_date_with_format(self, date_str: str, format_hint: str = 'dmy') -> Optional[str]:
@@ -1229,27 +1355,39 @@ class UniversalFinancialParser:
         indicators ('to', 'out') that take precedence over generic credit keywords.
         """
         desc_lower = description.lower()
-        
-        # Check DEBIT keywords FIRST - these have clear directional indicators
-        debit_keywords = ['card payment', 'withdrawal', 'transfer out', 'purchase', 
-                         'faster payment to', 'fp to', 'direct debit', 'standing order to', 
-                         'bill payment', 'atm', 'cash', 'payment to', 'chaps to', 'bacs to',
+
+        # A11: check CREDIT-specific cash phrases BEFORE debit keywords, so
+        # "CASH DEPOSIT" / "COUNTER CREDIT" never match a debit keyword first.
+        credit_priority = ['cash deposit', 'counter credit', 'bank credit', 'giro credit']
+        if any(kw in desc_lower for kw in credit_priority):
+            print(f"      📥 Direction=CREDIT (keyword): {description[:50]}...")
+            return 'credit'
+
+        # Check DEBIT keywords - these have clear directional indicators.
+        # A11: bare 'cash' removed (matched CASH DEPOSIT); bare 'purchase'
+        # replaced by 'card purchase' / 'purchase at'.
+        debit_keywords = ['card payment', 'withdrawal', 'transfer out',
+                         'card purchase', 'purchase at',
+                         'faster payment to', 'fp to', 'direct debit', 'standing order to',
+                         'bill payment', 'atm', 'cash withdrawal', 'payment to', 'chaps to', 'bacs to',
                          'transfer to', 'money out', 'paid out']
-        
+
         if any(kw in desc_lower for kw in debit_keywords):
             print(f"      📤 Direction=DEBIT (keyword): {description[:50]}...")
             return 'debit'
-        
-        # Then check CREDIT keywords
-        credit_keywords = ['interest', 'deposit', 'transfer in', 'salary', 'refund', 
-                          'faster payment from', 'fp from', 'standing order from', 
-                          'dividend', 'bonus', 'credit', 'incoming', 'wages', 'pension',
+
+        # Then check CREDIT keywords.
+        # A11: bare 'credit' removed (matched CREDIT CARD) in favour of the
+        # specific 'counter credit' / 'bank credit' / 'giro credit' above.
+        credit_keywords = ['interest', 'deposit', 'transfer in', 'salary', 'refund',
+                          'faster payment from', 'fp from', 'standing order from',
+                          'dividend', 'bonus', 'incoming', 'wages', 'pension',
                           'transfer from', 'payment from', 'received', 'money in', 'paid in']
-        
+
         if any(kw in desc_lower for kw in credit_keywords):
             print(f"      📥 Direction=CREDIT (keyword): {description[:50]}...")
             return 'credit'
-        
+
         # For BACS - check context (BACS alone is usually salary/credit, but BACS TO is debit)
         if 'bacs' in desc_lower:
             if ' to ' in desc_lower:
@@ -1258,63 +1396,97 @@ class UniversalFinancialParser:
             else:
                 print(f"      📥 Direction=CREDIT (bacs): {description[:50]}...")
                 return 'credit'
-        
-        # Default to credit (most unspecified transactions are deposits)
-        print(f"      ❓ Direction=CREDIT (default): {description[:50]}...")
-        return 'credit'
+
+        # A10: no evidence — do NOT fabricate a credit. Callers/engine treat
+        # 'unknown' as needs-review (balance reconciliation may still resolve it).
+        print(f"      ❓ Direction=UNKNOWN (no evidence): {description[:50]}...")
+        return 'unknown'
     
     def _validate_balances(self, transactions: List[Dict]) -> Tuple[List[Dict], Dict]:
-        """Validate transaction balances and flag discrepancies."""
+        """Validate transaction balances and flag discrepancies.
+
+        A12: ordering uses the GLOBAL running index ('seq') assigned across
+        the whole document, not the trailing integer of the per-table source
+        string (which reset on every page/table and scrambled the order).
+        """
         validation_result = {
             'balance_checks_passed': 0,
             'balance_checks_failed': 0,
             'balance_validated': False,
             'discrepancies': []
         }
-        
-        # Sort by date AND by source line number for same-date transactions
+
+        # Ordering is unambiguous only when every transaction carries the
+        # global running index. Fall back to the (legacy) source suffix
+        # otherwise, and disable auto-correction in that case.
+        ordering_unambiguous = all(t.get('seq') is not None for t in transactions)
+
         def sort_key(t):
             date = t.get('date', '')
+            if t.get('seq') is not None:
+                return (date, t['seq'])
             source = t.get('source', '')
-            # Extract line/row number from source like 'pdf_page1_row5'
             line_num = 0
             if source:
                 match = re.search(r'(\d+)$', source)
                 if match:
                     line_num = int(match.group(1))
             return (date, line_num)
-        
+
         sorted_txns = sorted(transactions, key=sort_key)
-        
-        # Check if we have balance data
-        txns_with_balance = [t for t in sorted_txns if t.get('balance') is not None]
-        
+
+        # Check if we have balance data (A19: pending rows are excluded from
+        # reconciliation — they don't affect the running balance yet).
+        txns_with_balance = [
+            t for t in sorted_txns
+            if t.get('balance') is not None and t.get('transaction_type') != 'pending'
+        ]
+
         if len(txns_with_balance) < 2:
             return sorted_txns, validation_result
-        
+
         validation_result['balance_validated'] = True
-        
+
         # Validate consecutive balances
         for i in range(1, len(txns_with_balance)):
             prev_txn = txns_with_balance[i - 1]
             curr_txn = txns_with_balance[i]
-            
+
             prev_balance = prev_txn.get('balance', 0)
             curr_balance = curr_txn.get('balance', 0)
             amount = curr_txn.get('amount', 0)
-            direction = curr_txn.get('direction', 'credit')
-            
+            direction = curr_txn.get('direction', 'unknown')
+
+            # Allow small tolerance for rounding
+            tolerance = 0.05
+
+            # A10: derive unknown directions from the balance movement —
+            # the most reliable signal available.
+            if direction == 'unknown':
+                delta = curr_balance - prev_balance
+                if abs(delta - amount) <= tolerance:
+                    curr_txn['direction'] = 'credit'
+                    curr_txn['direction_derived_from_balance'] = True
+                    direction = 'credit'
+                elif abs(delta + amount) <= tolerance:
+                    curr_txn['direction'] = 'debit'
+                    curr_txn['direction_derived_from_balance'] = True
+                    direction = 'debit'
+
             # Calculate expected balance
             if direction == 'credit':
                 expected_balance = prev_balance + amount
-            else:
+            elif direction == 'debit':
                 expected_balance = prev_balance - amount
-            
-            # Allow small tolerance for rounding
-            tolerance = 0.05
-            
+            else:
+                # Still unknown and balance movement inconclusive — flag,
+                # don't guess.
+                validation_result['balance_checks_failed'] += 1
+                curr_txn['balance_validated'] = False
+                continue
+
             balance_diff = abs(curr_balance - expected_balance)
-            
+
             # Debug logging for large transactions
             if amount >= 10000:
                 print(f"   💰 BALANCE CHECK: {curr_txn.get('description', '')[:40]}...")
@@ -1322,7 +1494,7 @@ class UniversalFinancialParser:
                 print(f"      Prev balance: £{prev_balance:,.2f}")
                 print(f"      Expected: £{expected_balance:,.2f}, Actual: £{curr_balance:,.2f}")
                 print(f"      Diff: £{balance_diff:,.2f}")
-            
+
             if balance_diff <= tolerance:
                 validation_result['balance_checks_passed'] += 1
                 curr_txn['balance_validated'] = True
@@ -1332,25 +1504,26 @@ class UniversalFinancialParser:
                 # Check if direction was wrong (discrepancy = 2 * amount)
                 direction_error_amount = 2 * amount
                 actual_diff = curr_balance - expected_balance
-                
+
                 if amount >= 10000:
                     print(f"      ❌ BALANCE MISMATCH - checking direction...")
                     print(f"      Direction error would be: £{direction_error_amount:,.2f}")
                     print(f"      Actual diff: £{abs(actual_diff):,.2f}")
-                
-                # Only auto-correct if we're VERY confident (exact match within tolerance)
-                if abs(abs(actual_diff) - direction_error_amount) <= tolerance:
+
+                # A12: only auto-correct when the ordering is unambiguous AND
+                # the mismatch is exactly a flipped direction.
+                if ordering_unambiguous and abs(abs(actual_diff) - direction_error_amount) <= tolerance:
                     # Direction was definitely wrong, flip it
                     old_direction = curr_txn['direction']
                     curr_txn['direction'] = 'debit' if direction == 'credit' else 'credit'
                     curr_txn['direction_corrected'] = True
-                    
+
                     # Re-validate with corrected direction
                     if curr_txn['direction'] == 'credit':
                         new_expected = prev_balance + amount
                     else:
                         new_expected = prev_balance - amount
-                    
+
                     if abs(curr_balance - new_expected) <= tolerance:
                         validation_result['balance_checks_passed'] += 1
                         curr_txn['balance_validated'] = True
@@ -1381,7 +1554,7 @@ class UniversalFinancialParser:
                     })
                     if amount >= 10000:
                         print(f"      ⚠️ Balance discrepancy - not a simple direction error")
-        
+
         return sorted_txns, validation_result
     
     def _extract_pdf_ocr(self, content: bytes, metadata: Dict) -> List[Dict]:
@@ -1439,8 +1612,11 @@ class UniversalFinancialParser:
             
             # Parse transactions from OCR text
             transactions = self._parse_text_universal(text, 1)
-            transactions = self._deduplicate(transactions)
-            
+            transactions, dup_count = self._deduplicate(transactions)
+            metadata['potential_duplicates'] = dup_count
+            metadata['unknown_direction_count'] = sum(
+                1 for t in transactions if t.get('direction') == 'unknown')
+
             print(f"✅ Extracted {len(transactions)} transactions from image")
             
             return {
@@ -1535,18 +1711,21 @@ class UniversalFinancialParser:
             metadata['columns_detected'].update(col_map)
             
             # Parse transactions
+            parse_stats = self._new_parse_stats()
             transactions = []
             for row_idx in range(header_idx + 1, len(rows)):
                 row = rows[row_idx]
                 if not row or all(not cell.strip() for cell in row):
                     continue
-                
-                txn = self._parse_csv_row(row, col_map, row_idx)
+
+                txn = self._parse_csv_row(row, col_map, row_idx, parse_stats)
                 if txn:
                     transactions.append(txn)
-            
-            transactions = self._deduplicate(transactions)
-            
+
+            transactions, dup_count = self._deduplicate(transactions)
+            metadata['potential_duplicates'] = dup_count
+            self._merge_parse_stats(metadata, parse_stats, transactions)
+
             print(f"✅ Extracted {len(transactions)} transactions from CSV")
             
             return {
@@ -1657,100 +1836,127 @@ class UniversalFinancialParser:
         
         return col_map
     
-    def _parse_csv_row(self, row: List[str], col_map: Dict[str, int], row_idx: int) -> Optional[Dict]:
+    def _parse_csv_row(self, row: List[str], col_map: Dict[str, int], row_idx: int,
+                       parse_stats: Optional[Dict] = None) -> Optional[Dict]:
         """Parse a single CSV row into a transaction."""
         try:
             # Get date
             date_str = None
             if col_map['date'] is not None and col_map['date'] < len(row):
                 date_str = row[col_map['date']].strip()
-            
+
             if not date_str:
                 return None
-            
+
             parsed_date = self._parse_date_universal(date_str)
             if not parsed_date:
                 return None
-            
-            # Get amount and direction
+
+            # Get amount and direction.
+            # A10: direction only set when there is EVIDENCE.
             amount = None
-            direction = 'credit'
-            
+            direction = None
+            amount_raw = ''
+
             # Try single amount column first
             if col_map['amount'] is not None and col_map['amount'] < len(row):
                 amt_str = row[col_map['amount']].strip()
                 amount = self._parse_amount_universal(amt_str)
-                if amount:
+                if amount is not None:
+                    amount_raw = amt_str
                     # Determine direction from sign
-                    if '-' in amt_str or '(' in amt_str:
+                    if amount < 0 or '(' in amt_str:
                         direction = 'debit'
                         amount = abs(amount)
-            
+                    elif amt_str.lstrip().startswith('+') or re.search(r'\bCR\b', amt_str, re.IGNORECASE):
+                        direction = 'credit'
+
             # Try split debit/credit columns
             if amount is None:
                 if col_map['debit'] is not None and col_map['debit'] < len(row):
                     debit_str = row[col_map['debit']].strip()
                     if debit_str and debit_str not in ['-', '', '0', '0.00']:
                         amount = self._parse_amount_universal(debit_str)
-                        if amount:
+                        if amount is not None:
+                            amount_raw = debit_str
                             direction = 'debit'
-                
+                            amount = abs(amount)
+
                 if amount is None and col_map['credit'] is not None and col_map['credit'] < len(row):
                     credit_str = row[col_map['credit']].strip()
                     if credit_str and credit_str not in ['-', '', '0', '0.00']:
                         amount = self._parse_amount_universal(credit_str)
-                        if amount:
+                        if amount is not None:
+                            amount_raw = credit_str
                             direction = 'credit'
-            
+                            amount = abs(amount)
+
             if amount is None or amount == 0:
+                # Row had a date but no parseable amount — count it.
+                self._record_rejected_row(parse_stats, row)
                 return None
-            
+
             # Get description
             description = ''
             if col_map['description'] is not None and col_map['description'] < len(row):
                 description = row[col_map['description']].strip()
-            
+
             # If no description column, concatenate other text columns
             if not description:
                 for idx, cell in enumerate(row):
-                    if idx not in [col_map['date'], col_map['amount'], col_map['debit'], 
+                    if idx not in [col_map['date'], col_map['amount'], col_map['debit'],
                                    col_map['credit'], col_map['balance']]:
                         cell_str = cell.strip()
                         if cell_str and not self._is_amount(cell_str) and len(cell_str) > 2:
                             description += ' ' + cell_str
                 description = description.strip()
-            
-            # Infer direction from description if we have a single amount column
-            if col_map['amount'] is not None and col_map['debit'] is None:
+
+            # Explicit direction column takes priority when present
+            if col_map.get('direction') is not None and col_map['direction'] < len(row):
+                dir_val = row[col_map['direction']].strip().lower()
+                if dir_val in ('credit', 'in', 'cr', 'deposit'):
+                    direction = 'credit'
+                elif dir_val in ('debit', 'out', 'dr', 'withdrawal'):
+                    direction = 'debit'
+
+            # Infer direction from description if still unresolved
+            if direction is None:
                 desc_lower = description.lower()
                 if any(kw in desc_lower for kw in self.debit_keywords):
                     direction = 'debit'
                 elif any(kw in desc_lower for kw in self.credit_keywords):
                     direction = 'credit'
-            
+
+            # A10: genuinely no evidence — mark unknown, never assume credit.
+            if direction is None:
+                direction = 'unknown'
+
             # Get balance
             balance = None
             if col_map['balance'] is not None and col_map['balance'] < len(row):
                 balance = self._parse_amount_universal(row[col_map['balance']])
-            
-            # Get currency
-            currency = 'GBP'  # Default
+
+            # Get currency (A17: fall back to the symbol in the amount cell)
+            currency = detect_currency(amount_raw, 'GBP')
             if col_map['currency'] is not None and col_map['currency'] < len(row):
-                currency = row[col_map['currency']].strip().upper()
-            
+                cur_val = row[col_map['currency']].strip().upper()
+                if cur_val:
+                    currency = cur_val
+
             return {
                 'account_id': 'CSV_IMPORT',
                 'date': parsed_date,
-                'amount': float(amount),
+                'amount': float(abs(amount)),
                 'currency': currency,
                 'direction': direction,
                 'description': description[:500] if description else 'Transaction',
                 'counterparty_name': '',
-                'balance': float(balance) if balance else None,
+                'balance': float(balance) if balance is not None else None,
                 'source': f'csv_row_{row_idx}'
             }
-            
-        except Exception as e:
+
+        except Exception:
+            self._record_rejected_row(parse_stats, row)
             return None
     
     def _parse_excel(self, content: bytes) -> Dict[str, Any]:
@@ -1779,19 +1985,22 @@ class UniversalFinancialParser:
             # Use CSV parsing logic
             header_idx, header = self._find_csv_header(rows)
             col_map = self._map_csv_columns(header)
-            
+
+            parse_stats = self._new_parse_stats()
             transactions = []
             for row_idx in range(header_idx + 1, len(rows)):
                 row = rows[row_idx]
                 if not row or all(not str(cell).strip() for cell in row):
                     continue
-                
-                txn = self._parse_csv_row(row, col_map, row_idx)
+
+                txn = self._parse_csv_row(row, col_map, row_idx, parse_stats)
                 if txn:
                     transactions.append(txn)
-            
-            transactions = self._deduplicate(transactions)
-            
+
+            transactions, dup_count = self._deduplicate(transactions)
+            metadata['potential_duplicates'] = dup_count
+            self._merge_parse_stats(metadata, parse_stats, transactions)
+
             return {
                 'success': len(transactions) > 0,
                 'transactions': transactions,
@@ -1933,43 +2142,46 @@ class UniversalFinancialParser:
         # - If there are 2 amounts: first is debit/credit, second is balance
         # - If there are 3 amounts: first is withdrawal, second is deposit, third is balance
         
-        direction = 'credit'  # Default
         amount = parsed_amounts[0]
         balance = parsed_amounts[-1] if len(parsed_amounts) > 1 else None
-        
+
         # Check direction based on description keywords
         desc_lower = description.lower()
-        
-        # DEBIT keywords - check these FIRST (outgoing money)
-        # These indicate money leaving the account
-        if any(kw in desc_lower for kw in ['card payment', 'withdrawal', 'transfer out', 
-                                            'purchase', 'faster payment to', 'fp to',
+
+        # A11: credit-specific cash phrases FIRST (CASH DEPOSIT is a credit)
+        if any(kw in desc_lower for kw in ['cash deposit', 'counter credit',
+                                            'bank credit', 'giro credit']):
+            direction = 'credit'
+            print(f"      📥 CREDIT (keyword match): {description[:50]}...")
+        # DEBIT keywords - outgoing money (bare 'cash'/'purchase' removed - A11)
+        elif any(kw in desc_lower for kw in ['card payment', 'withdrawal', 'transfer out',
+                                            'card purchase', 'purchase at', 'faster payment to', 'fp to',
                                             'direct debit', 'standing order to', 'bill payment',
-                                            'atm', 'cash', 'payment to', 'chaps to', 'bacs to']):
+                                            'atm', 'cash withdrawal', 'payment to', 'chaps to', 'bacs to']):
             direction = 'debit'
             print(f"      📤 DEBIT (keyword match): {description[:50]}...")
-        # CREDIT keywords - incoming money
-        elif any(kw in desc_lower for kw in ['interest', 'deposit', 'transfer in', 'salary', 
+        # CREDIT keywords - incoming money (bare 'credit' removed - A11)
+        elif any(kw in desc_lower for kw in ['interest', 'deposit', 'transfer in', 'salary',
                                               'refund', 'faster payment from', 'fp from',
                                               'standing order from', 'dividend', 'bonus',
-                                              'credit', 'incoming', 'payment from', 'received']):
+                                              'incoming', 'payment from', 'received']):
             direction = 'credit'
             print(f"      📥 CREDIT (keyword match): {description[:50]}...")
         else:
-            print(f"      ❓ DEFAULT credit (no keyword): {description[:50]}...")
-        
-        # For statements where balance grows with deposits:
-        # We can sometimes infer direction from balance changes, but that requires previous balance
-        
+            # A10: no evidence — mark unknown; balance reconciliation may
+            # resolve it downstream, otherwise it needs review.
+            direction = 'unknown'
+            print(f"      ❓ UNKNOWN direction (no keyword): {description[:50]}...")
+
         return {
             'account_id': '',  # Will be populated from PDF header extraction in _parse_pdf()
             'date': parsed_date,
             'amount': float(amount),
-            'currency': 'GBP',
+            'currency': detect_currency(line, 'GBP'),  # A17
             'direction': direction,
             'description': description[:500] if description else 'Transaction',
             'counterparty_name': '',
-            'balance': float(balance) if balance else None,
+            'balance': float(balance) if balance is not None else None,
             'source': f'pdf_page{page_num}_row{row_idx}'
         }
     
@@ -2014,16 +2226,20 @@ class UniversalFinancialParser:
                         description = re.sub(r'[£$€]?\s*' + re.escape(f"{amt:,.2f}".replace(',', ',?')), '', description)
                     description = ' '.join(description.split())
                     
-                    # Determine direction
-                    direction = 'credit'
-                    if any(kw in description.lower() for kw in self.debit_keywords):
+                    # Determine direction (A10: unknown when no evidence)
+                    desc_lower = description.lower()
+                    if any(kw in desc_lower for kw in self.debit_keywords):
                         direction = 'debit'
-                    
+                    elif any(kw in desc_lower for kw in self.credit_keywords):
+                        direction = 'credit'
+                    else:
+                        direction = 'unknown'
+
                     current_txn = {
                         'account_id': f'PDF_P{page_num}',
                         'date': parsed_date,
                         'amount': amounts[0] if amounts else None,
-                        'currency': 'GBP',
+                        'currency': detect_currency(line, 'GBP'),  # A17
                         'direction': direction,
                         'description': description[:500],
                         'counterparty_name': '',
@@ -2056,77 +2272,17 @@ class UniversalFinancialParser:
                 return match.group()
         return None
     
-    def _parse_date_universal(self, date_str: str) -> Optional[str]:
-        """Parse any date format to YYYY-MM-DD."""
-        if not date_str:
-            return None
-        
-        date_str = date_str.strip()
-        current_year = datetime.now().year
-        
-        for pattern, fmt_type in self.date_patterns:
-            match = re.match(pattern, date_str, re.IGNORECASE)
-            if not match:
-                continue
-            
-            try:
-                if fmt_type == 'uk_text':
-                    day = int(match.group(1))
-                    month_str = match.group(2).lower()
-                    month = self.month_map.get(month_str[:3])
-                    year = int(match.group(3)) if match.group(3) else current_year
-                    if year < 100:
-                        year += 2000 if year < 50 else 1900
-                
-                elif fmt_type == 'us_text':
-                    month_str = match.group(1).lower()
-                    month = self.month_map.get(month_str[:3])
-                    day = int(match.group(2))
-                    year = int(match.group(3)) if match.group(3) else current_year
-                    if year < 100:
-                        year += 2000 if year < 50 else 1900
-                
-                elif fmt_type == 'dmy_or_mdy':
-                    part1 = int(match.group(1))
-                    part2 = int(match.group(2))
-                    year = int(match.group(3))
-                    if year < 100:
-                        year += 2000 if year < 50 else 1900
-                    
-                    # Determine if DMY or MDY
-                    if part1 > 12:  # Must be day
-                        day, month = part1, part2
-                    elif part2 > 12:  # Must be day
-                        month, day = part1, part2
-                    else:
-                        # Assume DMY for non-US
-                        day, month = part1, part2
-                
-                elif fmt_type == 'iso':
-                    year = int(match.group(1))
-                    month = int(match.group(2))
-                    day = int(match.group(3))
-                
-                elif fmt_type == 'compact':
-                    compact = match.group(1)
-                    # Try YYYYMMDD first
-                    if int(compact[:4]) > 1900:
-                        year = int(compact[:4])
-                        month = int(compact[4:6])
-                        day = int(compact[6:8])
-                    else:
-                        # Try DDMMYYYY
-                        day = int(compact[:2])
-                        month = int(compact[2:4])
-                        year = int(compact[4:8])
-                
-                if month and 1 <= day <= 31 and 1 <= month <= 12:
-                    return f"{year:04d}-{month:02d}-{day:02d}"
-                    
-            except Exception:
-                continue
-        
-        return None
+    def _parse_date_universal(self, date_str: str, default_year: Optional[int] = None,
+                              period_hint: Optional[Tuple[str, str]] = None) -> Optional[str]:
+        """Parse any date format to YYYY-MM-DD via the shared helper.
+
+        A7/A8: missing-year dates ("04 Jan") use the statement period hint /
+        default year when available; otherwise a >30-days-in-the-future
+        result is rolled back one year (statements describe the past).
+        Two-digit years pivot at 70 (<70 -> 2000s).
+        Returns None on failure — never the input string.
+        """
+        return parse_date(date_str, default_year=default_year, period_hint=period_hint)
     
     def _extract_amounts_from_text(self, text: str) -> List[float]:
         """Extract all amounts from text."""
@@ -2150,36 +2306,14 @@ class UniversalFinancialParser:
         return amounts
     
     def _parse_amount_universal(self, text: str) -> Optional[float]:
-        """Parse amount from text, handling various formats."""
-        if not text:
-            return None
-        
-        text = text.strip()
-        
-        # Remove currency symbols and codes
-        text = re.sub(r'[£$€¥₹฿]', '', text)
-        text = re.sub(r'(GBP|USD|EUR|JPY|INR|AUD|CAD|CHF|CNY)\s*', '', text, flags=re.IGNORECASE)
-        
-        # Handle negative formats
-        is_negative = False
-        if text.startswith('(') and text.endswith(')'):
-            is_negative = True
-            text = text[1:-1]
-        elif text.startswith('-') or text.endswith('-'):
-            is_negative = True
-            text = text.replace('-', '')
-        elif text.endswith('DR') or text.endswith('D'):
-            is_negative = True
-            text = re.sub(r'DR?$', '', text)
-        
-        # Clean and parse
-        text = text.replace(',', '').replace(' ', '').strip()
-        
-        try:
-            amount = float(text)
-            return -amount if is_negative else amount
-        except:
-            return None
+        """Parse amount from text via the shared helper.
+
+        A2: delegates to app.services.amount_parser.parse_amount so that
+        "1,234.56 CR" parses (positive) instead of being dropped, and only a
+        whole trailing DR/D token negates the value (not any token ending D).
+        Returns a SIGNED float, or None when the text is not an amount.
+        """
+        return parse_amount(text)
     
     def _is_amount(self, text: str) -> bool:
         """Check if text looks like an amount."""
@@ -2237,23 +2371,55 @@ class UniversalFinancialParser:
         
         return None
     
-    def _deduplicate(self, transactions: List[Dict]) -> List[Dict]:
-        """Remove duplicate transactions."""
-        seen = set()
+    @staticmethod
+    def _strategy_of(txn: Dict) -> str:
+        """Extraction strategy for a transaction, derived from its source
+        string with the numeric parts stripped (e.g. 'pdf_page1_row5' and
+        'pdf_page2_row9' are the same strategy; 'text_page1_line3' is not)."""
+        source = txn.get('source', '') or ''
+        return re.sub(r'\d+', '', source)
+
+    def _deduplicate(self, transactions: List[Dict]) -> Tuple[List[Dict], int]:
+        """Remove CROSS-STRATEGY duplicate transactions (A13).
+
+        The purpose of dedup is to collapse the same statement row found by
+        two different extraction strategies (table vs text vs position).
+        Two identical rows produced by the SAME strategy are genuine
+        duplicates printed on the statement (e.g. two identical same-day
+        card payments) — they are KEPT and counted as potential_duplicates
+        for downstream flagging.
+
+        Returns (unique_transactions, potential_duplicate_count).
+        """
+        seen = {}  # content key -> set of strategies that produced it
         unique = []
-        
+        potential_duplicates = 0
+
         for txn in transactions:
             key = (
                 txn.get('date'),
-                round(txn.get('amount', 0), 2),
-                txn.get('description', '')[:50]
+                round(txn.get('amount', 0) or 0, 2),
+                (txn.get('description') or '')[:50],
+                round(txn['balance'], 2) if txn.get('balance') is not None else None,
             )
-            
-            if key not in seen:
-                seen.add(key)
+            strategy = self._strategy_of(txn)
+
+            if key in seen:
+                if strategy in seen[key]:
+                    # Same strategy saw the same values twice: a real
+                    # duplicate on the statement — keep it, flag it.
+                    potential_duplicates += 1
+                    txn['potential_duplicate'] = True
+                    unique.append(txn)
+                    seen[key].add(strategy)
+                else:
+                    # Different strategy re-found the same row: drop it.
+                    seen[key].add(strategy)
+            else:
+                seen[key] = {strategy}
                 unique.append(txn)
-        
-        return unique
+
+        return unique, potential_duplicates
 
 
 # Singleton instance

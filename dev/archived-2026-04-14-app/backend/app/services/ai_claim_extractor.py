@@ -31,7 +31,8 @@ from app.core.config import settings
 _ALLOWED_SOURCE_TYPES = [
     "property_sale", "business_sale", "savings", "inheritance", "gift",
     "pension", "salary", "investment", "loan", "compensation",
-    "insurance", "lottery", "other",
+    "insurance", "lottery", "gambling_winnings", "crypto", "dividend",
+    "other",
 ]
 
 _PROMPT = (
@@ -116,7 +117,7 @@ def extract_sources(explanation: str, timeout: float = 25.0) -> Optional[List[Di
 
     if raw_items is None:
         return None
-    return _normalise(raw_items)
+    return _normalise(raw_items, source_text=text)
 
 
 # ---------------------------------------------------------------------------
@@ -224,10 +225,54 @@ def _call_gemini(text: str, timeout: float) -> Optional[List[Any]]:
 # Output normalisation
 # ---------------------------------------------------------------------------
 
-def _normalise(items: List[Any]) -> List[Dict[str, Any]]:
+def _amount_grounded(amount: float, source_text: str) -> bool:
+    """Grounding check: the amount the model returned must actually
+    appear in the client's text (as digits, allowing comma / decimal
+    formatting and k/m shorthand). A hallucinated figure fails this and
+    the claim is dropped rather than presented as the client's words."""
+    if amount <= 0:
+        return True  # "source named, no amount given" entries are legitimate
+    if not source_text:
+        return True
+
+    text = source_text.casefold()
+    # A comma-stripped copy so "269,280" grounds amount 269280.
+    stripped = text.replace(",", "")
+
+    candidates = set()
+    if float(amount).is_integer():
+        i = int(amount)
+        candidates.add(str(i))
+        candidates.add(f"{i:.2f}")          # 50000.00
+        # k / m shorthand the prompt explicitly asks the model to expand
+        if i and i % 1000 == 0:
+            candidates.add(f"{i // 1000}k")
+        if i and i % 1_000_000 == 0:
+            candidates.add(f"{i // 1_000_000}m")
+            candidates.add(f"{i // 1_000_000} million")
+        if i and i % 100_000 == 0:
+            candidates.add(f"{i / 1_000_000:g}m")
+            candidates.add(f"{i / 1_000_000:g} million")
+        if i and i % 100 == 0 and i < 1_000_000:
+            candidates.add(f"{i / 1000:g}k")
+        if i and i % 1000 == 0 and i >= 1000:
+            candidates.add(f"{i // 1000} thousand")
+    else:
+        candidates.add(f"{amount:.2f}")
+        candidates.add(f"{amount:g}")
+
+    return any(c in stripped for c in candidates)
+
+
+def _normalise(items: List[Any], source_text: str = "") -> List[Dict[str, Any]]:
     """Coerce model output into clean source dicts the engine's
-    parse_structured_sof() can consume."""
+    parse_structured_sof() can consume.
+
+    Each returned entry carries extraction_method='ai' so downstream
+    reports can state provenance. Entries whose amount cannot be found
+    in the source text (grounding failure) are dropped and counted."""
     out: List[Dict[str, Any]] = []
+    dropped_ungrounded = 0
     for it in items:
         if not isinstance(it, dict):
             continue
@@ -240,6 +285,13 @@ def _normalise(items: List[Any]) -> List[Dict[str, Any]]:
             amount = 0.0
         if amount < 0:
             amount = 0.0
+        # Grounding validation: drop claims whose amount does not
+        # appear anywhere in the client's own words.
+        if not _amount_grounded(amount, source_text):
+            dropped_ungrounded += 1
+            print(f"[ai_extract] dropped ungrounded claim: {source_type} "
+                  f"amount {amount} not found in source text")
+            continue
         # A £0 entry is kept on purpose — a source the client named
         # without an amount must still surface as a claim row so the
         # reviewer is aware of it (it just won't auto-match evidence).
@@ -248,6 +300,7 @@ def _normalise(items: List[Any]) -> List[Dict[str, Any]]:
             "amount": amount,
             "currency": (str(it.get("currency") or "GBP").strip().upper() or "GBP"),
             "description": str(it.get("description") or "").strip(),
+            "extraction_method": "ai",
         }
         date = str(it.get("date") or "").strip()
         if date:
@@ -256,4 +309,7 @@ def _normalise(items: List[Any]) -> List[Dict[str, Any]]:
             entry["completion_date"] = date
             entry["distribution_date"] = date
         out.append(entry)
+    if dropped_ungrounded:
+        print(f"[ai_extract] grounding validation dropped {dropped_ungrounded} "
+              f"claim(s) whose amounts were not present in the source text")
     return out

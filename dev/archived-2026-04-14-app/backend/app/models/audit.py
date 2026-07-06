@@ -1,7 +1,7 @@
 """
 Note, Approval, and AuditLog models.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, JSON, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, JSON, Enum as SQLEnum, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -88,15 +88,27 @@ class AuditLogAction(str, enum.Enum):
     MATTER_CREATED = "matter_created"
     REPORT_GENERATED = "report_generated"
     ALERT_REVIEWED = "alert_reviewed"
+    ARCHIVED = "archived"
+    LOGIN = "login"
+    LOGIN_FAILED = "login_failed"
+    LOGOUT = "logout"
 
 
 class AuditLog(Base):
-    """Audit log for tracking all actions."""
+    """Audit log for tracking all actions.
+
+    Rows are immutable and must survive the archival of their matter —
+    the matter_id FK is nullable and the Matter relationship does NOT
+    cascade deletes onto this table.
+    """
     __tablename__ = "audit_logs"
-    
+    __table_args__ = (
+        Index("ix_audit_logs_entity_type_entity_id", "entity_type", "entity_id"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    matter_id = Column(Integer, ForeignKey("matters.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
+    matter_id = Column(Integer, ForeignKey("matters.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     
     action = Column(SQLEnum(AuditLogAction), nullable=False)
     entity_type = Column(String(50))  # document, check, event, etc.

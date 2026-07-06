@@ -1,10 +1,14 @@
 """
 Application configuration using Pydantic settings.
 """
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+import logging
 import os
+
+# Known insecure development default — never allowed outside development.
+_DEFAULT_SECRET_KEY = "agora-dev-secret-key-change-in-production"
 
 
 class Settings(BaseSettings):
@@ -36,7 +40,25 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Agora Consulting AI"
     
     # Security
-    SECRET_KEY: str = os.environ.get("SECRET_KEY", "agora-dev-secret-key-change-in-production")
+    SECRET_KEY: str = os.environ.get("SECRET_KEY", _DEFAULT_SECRET_KEY)
+
+    @model_validator(mode="after")
+    def _enforce_secret_key(self):
+        """Refuse to start in production/staging with a missing or default
+        SECRET_KEY; warn (but continue) in development."""
+        insecure = not self.SECRET_KEY or self.SECRET_KEY == _DEFAULT_SECRET_KEY
+        if insecure:
+            if self.ENVIRONMENT.lower() in ("production", "staging"):
+                raise RuntimeError(
+                    "SECRET_KEY is unset or still the insecure development default. "
+                    "Set a strong random SECRET_KEY environment variable before "
+                    f"running in {self.ENVIRONMENT}."
+                )
+            logging.getLogger(__name__).warning(
+                "SECRET_KEY is using the insecure development default — "
+                "set SECRET_KEY before deploying beyond development."
+            )
+        return self
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # 30 minutes
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     ALGORITHM: str = "HS256"

@@ -9,6 +9,7 @@ import ComplianceMattersPage from './pages/ComplianceMattersPage'
 import RCADashboardPage from './pages/RCADashboardPage'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
+import AdminRoute from './components/AdminRoute'
 
 function App() {
   return (
@@ -26,10 +27,10 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="matters" element={<MattersPage />} />
           <Route path="matters/:id" element={<MatterDetailPage />} />
-          <Route path="configuration" element={<ConfigurationPage />} />
-          <Route path="compliance" element={<ComplianceDashboardPage />} />
-          <Route path="compliance/matters" element={<ComplianceMattersPage />} />
-          <Route path="rca" element={<RCADashboardPage />} />
+          <Route path="configuration" element={<AdminRoute><ConfigurationPage /></AdminRoute>} />
+          <Route path="compliance" element={<AdminRoute><ComplianceDashboardPage /></AdminRoute>} />
+          <Route path="compliance/matters" element={<AdminRoute><ComplianceMattersPage /></AdminRoute>} />
+          <Route path="rca" element={<AdminRoute><RCADashboardPage /></AdminRoute>} />
         </Route>
       </Routes>
     </BrowserRouter>

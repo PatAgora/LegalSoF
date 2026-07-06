@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
-import { api } from '../lib/api'
+import { api, setStoredTokens, SESSION_EXPIRED_KEY } from '../lib/api'
 import { Button, Alert } from '../components/ui'
 
 export default function LoginPage() {
@@ -11,6 +11,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  // Set by authFetch when a token refresh fails mid-session.
+  const [sessionExpired, setSessionExpired] = useState<boolean>(() => {
+    try { return sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1' } catch { return false }
+  })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -19,9 +23,11 @@ export default function LoginPage() {
 
     try {
       const response = await api.login(email, password)
-      localStorage.setItem('access_token', response.access_token)
+      setStoredTokens(response.access_token, response.refresh_token)
       const user = await api.getCurrentUser()
       login(response.access_token, response.refresh_token, user)
+      try { sessionStorage.removeItem(SESSION_EXPIRED_KEY) } catch { /* */ }
+      setSessionExpired(false)
       navigate('/')
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please try again.')
@@ -39,6 +45,9 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {sessionExpired && !error && (
+            <Alert variant="info">Your session has expired — please sign in again.</Alert>
+          )}
           {error && (
             <Alert variant="error">{error}</Alert>
           )}

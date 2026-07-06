@@ -2,7 +2,8 @@ import { Outlet, Link, useNavigate, useLocation, useSearchParams } from 'react-r
 import { useState, useEffect, useRef } from 'react'
 import { useAuthStore } from '../stores/authStore'
 import { useCurrentMatter } from '../stores/currentMatterStore'
-import { API_BASE_URL, authFetch } from '../lib/api'
+import { API_BASE_URL, api, authFetch } from '../lib/api'
+import { Toaster } from '../lib/toast'
 
 interface NotificationItem {
   id: number
@@ -14,11 +15,13 @@ interface NotificationItem {
   created_at: string | null
 }
 
-// Sidebar links table - primary navigation lives here.
-const NAV_LINKS: { href: string; label: string }[] = [
+// Sidebar links table - primary navigation lives here. Configuration
+// is admin-only (adminOnly links are hidden for other roles; the route
+// itself is also guarded by AdminRoute).
+const NAV_LINKS: { href: string; label: string; adminOnly?: boolean }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/matters', label: 'Matters' },
-  { href: '/configuration', label: 'Configuration' },
+  { href: '/configuration', label: 'Configuration', adminOnly: true },
 ]
 
 // Tabs shown in the sidebar when the user is INSIDE a matter. Each
@@ -101,7 +104,11 @@ export default function Layout() {
   const fromCompliance = searchParams.get('from') === 'compliance'
   const [disabledTabs, setDisabledTabs] = useState<Set<string>>(new Set())
 
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
+
   const handleLogout = () => {
+    // Best-effort server-side logout, then clear local state.
+    api.logout()
     logout()
     navigate('/login')
   }
@@ -119,7 +126,9 @@ export default function Layout() {
     let cancelled = false
     ;(async () => {
       try {
-        const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config`)
+        // Silent on auth errors - a background check must never eject
+        // the user; the next user-initiated request handles refresh.
+        const r = await authFetch(`${API_BASE_URL}/api/v1/transaction-config`, undefined, { silentAuthFailure: true })
         if (!r.ok) return
         const cfg = await r.json()
         const off = new Set<string>()
@@ -141,7 +150,9 @@ export default function Layout() {
   useEffect(() => {
     const fetchUnreadCount = async () => {
       try {
-        const res = await authFetch(`${API_BASE_URL}/api/v1/notifications/unread-count`)
+        // Background poll - fail silently on auth errors (never hard-eject
+        // the user mid-typing because a poll hit an expired token).
+        const res = await authFetch(`${API_BASE_URL}/api/v1/notifications/unread-count`, undefined, { silentAuthFailure: true })
         if (res.ok) {
           const data = await res.json()
           setUnreadCount(data.unread_count || 0)
@@ -160,7 +171,7 @@ export default function Layout() {
     if (!showDropdown) return
     const fetchNotifications = async () => {
       try {
-        const res = await authFetch(`${API_BASE_URL}/api/v1/notifications?limit=20`)
+        const res = await authFetch(`${API_BASE_URL}/api/v1/notifications?limit=20`, undefined, { silentAuthFailure: true })
         if (res.ok) setNotifications(await res.json())
       } catch {/* */}
     }
@@ -276,7 +287,7 @@ export default function Layout() {
             Workspace
           </div>
           <div className="flex flex-col">
-            {NAV_LINKS.map(link => (
+            {NAV_LINKS.filter(link => !link.adminOnly || isAdmin).map(link => (
               <SidebarLink
                 key={link.href}
                 href={link.href}
@@ -423,6 +434,9 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Toast host - non-blocking notifications (replaces alert()). */}
+      <Toaster />
     </div>
   )
 }

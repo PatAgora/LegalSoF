@@ -28,7 +28,7 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -124,30 +124,61 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     ],
 }
 
+# Resource bounds — very long documents are analysed up to this many pages
+# (an info flag records the truncation), and files above the size cap are
+# not analysed at all (verdict Pending).
+MAX_ANALYSIS_PAGES = 200
+MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+def compute_verdict(
+    authenticity_score: float,
+    flag_severities: List[str],
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Standard verdict rule, shared with orchestrators that add flags
+    after the pipeline has run (e.g. cross-document corroboration):
+    any critical flag or a score below the suspicious threshold forces
+    LikelyTampered; >=2 high flags or a score below the verified
+    threshold means Suspicious; otherwise Verified."""
+    cfg = {**DEFAULT_CONFIG, **(config or {})}
+    has_critical = any(s == "critical" for s in flag_severities)
+    high_count = sum(1 for s in flag_severities if s == "high")
+    if has_critical or authenticity_score < cfg["suspicious_threshold"]:
+        return "LikelyTampered"
+    if high_count >= 2 or authenticity_score < cfg["verified_threshold"]:
+        return "Suspicious"
+    return "Verified"
+
 
 # ---------------------------------------------------------------------------
 # Known bank signature expectations
 # ---------------------------------------------------------------------------
 
+# NOTE: expects_signature is currently False for the big four — most UK
+# online-banking statement downloads are unsigned, so penalising the
+# absence of a signature produced false positives on genuine statements.
+# The table structure is kept so the expectation can be re-enabled per
+# bank once signed-download coverage is confirmed.
 BANK_SIGNATURE_EXPECTATIONS: Dict[str, Dict[str, Any]] = {
     "HSBC": {
         "keywords": ["hsbc", "hsbc uk", "first direct"],
-        "expects_signature": True,
+        "expects_signature": False,
         "common_producers": ["hsbc", "xerox", "canon"],
     },
     "Barclays": {
         "keywords": ["barclays", "barclaycard"],
-        "expects_signature": True,
+        "expects_signature": False,
         "common_producers": ["barclays", "xerox"],
     },
     "NatWest": {
         "keywords": ["natwest", "national westminster"],
-        "expects_signature": True,
+        "expects_signature": False,
         "common_producers": ["natwest", "xerox"],
     },
     "Lloyds": {
         "keywords": ["lloyds", "lloyds bank", "halifax", "bank of scotland"],
-        "expects_signature": True,
+        "expects_signature": False,
         "common_producers": ["lloyds", "xerox"],
     },
     "Santander": {
@@ -198,14 +229,32 @@ class DocumentVerificationPipeline:
         -------
         VerificationResult with score, verdict, flags.
         """
-        if config:
-            self.cfg = {**self.cfg, **config}
+        # Per-call config merge. Never assign onto self.cfg — this class is
+        # used as a module singleton and mutating it would leak one call's
+        # overrides into every subsequent verification.
+        cfg = {**self.cfg, **(config or {})}
 
         result = VerificationResult()
         result.file_hash_sha256 = hashlib.sha256(file_bytes).hexdigest()
         result.file_size_bytes = len(file_bytes)
         result.filename = filename
         result.file_category = file_category
+
+        # Resource guard — refuse to analyse oversized files rather than
+        # tie up a worker; verdict stays Pending for manual handling.
+        if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+            result.authenticity_score = 0.0
+            result.verdict = "Pending"
+            result.flags.append(VerificationFlag(
+                "metadata", "FILE_TOO_LARGE", "high",
+                f"File is {len(file_bytes) / (1024 * 1024):.1f} MB, above the "
+                f"{MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB verification limit. "
+                "Structural verification was not run.",
+                {"file_size_bytes": len(file_bytes),
+                 "limit_bytes": MAX_FILE_SIZE_BYTES},
+            ))
+            result.metadata_result = {"score": 0, "note": "File too large — verification skipped"}
+            return result
 
         # Non-PDF files: structural analysis not applicable
         # CSVs will be verified by the statement validation pipeline instead
@@ -233,90 +282,176 @@ class DocumentVerificationPipeline:
             ))
             return result
 
+        # Password-protected PDFs cannot be inspected — page access would
+        # raise. Record the fact and return without attempting analysis.
+        if getattr(doc, "needs_pass", False):
+            result.authenticity_score = 0.0
+            result.verdict = "Suspicious"
+            result.flags.append(VerificationFlag(
+                "metadata", "PASSWORD_PROTECTED", "high",
+                "PDF is password-protected; its contents cannot be inspected. "
+                "Request an unprotected copy from the client.",
+                {"needs_pass": True},
+            ))
+            result.metadata_result = {"score": 0, "note": "Password-protected — verification skipped"}
+            doc.close()
+            return result
+
         try:
-            # Stage 1 - PDF Metadata Analysis
-            self._stage_metadata_analysis(doc, result)
-
-            # Stage 2 - Structural Integrity
-            self._stage_structural_integrity(doc, file_bytes, result)
-
-            # Stage 3 - Font & Text Analysis
-            self._stage_font_text_analysis(doc, result)
-
-            # Stage 4 - Image Analysis
-            self._stage_image_analysis(doc, result)
-
-            # Extract text for content-based stages
-            text_content = ""
-            for page in doc:
-                text_content += page.get_text() + "\n"
-
-            # Stage 5 - Content Consistency
-            self._stage_content_consistency(doc, text_content, result)
-
-            # Stage 6 - Digital Signature Check
-            self._stage_signature_check(doc, text_content, file_bytes, result)
-
-            # Stage 7 - Annotation & Form Analysis
-            self._stage_annotation_form_analysis(doc, result)
-
-            # Stage 8 - Hidden Content Detection
-            self._stage_hidden_content_detection(doc, result)
-
-            # Stage 8b - OCR vs text-layer consistency check.
-            # Catches text-over-image tampering where the producer/creator
-            # metadata looks clean but the visible glyphs disagree with the
-            # PDF text layer (a classic forgery technique).
-            self._stage_ocr_consistency(doc, result)
-
-            # Stage 8c - Image-level forensics (ELA, JPEG quant tables, pHash).
-            # Stays scoring-weight-neutral; flags feed verdict via severity.
             try:
-                from app.services.image_forensics import run_image_forensics
-                result.flags.extend(run_image_forensics(file_bytes))
-            except Exception as exc:
-                result.flags.append(VerificationFlag(
-                    "image_forensics", "IMAGE_FORENSICS_ERROR", "info",
-                    f"Image forensics raised an unexpected error: {exc}",
-                ))
+                # Resource guard — cap per-page analysis on very long documents.
+                if doc.page_count > MAX_ANALYSIS_PAGES:
+                    result.flags.append(VerificationFlag(
+                        "structural", "PAGE_LIMIT_EXCEEDED", "info",
+                        f"PDF has {doc.page_count} pages; structural analysis was "
+                        f"capped at the first {MAX_ANALYSIS_PAGES}.",
+                        {"page_count": doc.page_count, "analysed_pages": MAX_ANALYSIS_PAGES},
+                    ))
 
-            # Stage 8d - PDF digital signature validation.
-            try:
-                from app.services.pdf_signature_validator import validate_pdf_signature
-                result.flags.extend(validate_pdf_signature(file_bytes))
-            except Exception as exc:
-                result.flags.append(VerificationFlag(
-                    "signature_validation", "SIGNATURE_CHECK_ERROR", "info",
-                    f"Signature validation raised an unexpected error: {exc}",
-                ))
+                # Stage 1 - PDF Metadata Analysis
+                self._stage_metadata_analysis(doc, result, cfg)
 
-            # Stage 8e - Bank template visual fingerprint match.
-            try:
-                from app.services.template_fingerprint import check_template_match
-                bank = getattr(result, "identified_bank_template", None)
-                # Many call sites don't populate this; pull from signature
-                # stage result instead if available.
-                if not bank and result.signature_result:
-                    bank = result.signature_result.get("identified_bank") if isinstance(result.signature_result, dict) else None
-                result.flags.extend(check_template_match(file_bytes, bank))
-            except Exception as exc:
-                result.flags.append(VerificationFlag(
-                    "template_fingerprint", "TEMPLATE_CHECK_ERROR", "info",
-                    f"Template fingerprint check raised an unexpected error: {exc}",
-                ))
+                # Stage 2 - Structural Integrity
+                self._stage_structural_integrity(doc, file_bytes, result)
 
-            # Stage 9 - Authenticity Scoring
-            self._stage_scoring(result)
+                # Stage 3 - Font & Text Analysis
+                self._stage_font_text_analysis(doc, result)
+
+                # Stage 4 - Image Analysis
+                self._stage_image_analysis(doc, result)
+
+                # Extract text for content-based stages
+                text_parts: List[str] = []
+                for page_num in self._page_range(doc):
+                    try:
+                        text_parts.append(doc[page_num].get_text() or "")
+                    except Exception:
+                        continue
+                text_content = "\n".join(text_parts) + "\n"
+
+                # Stage 5 - Content Consistency
+                self._stage_content_consistency(doc, text_content, result)
+
+                # Stage 6 - Digital Signature Check
+                self._stage_signature_check(doc, text_content, file_bytes, result)
+
+                # Stage 7 - Annotation & Form Analysis
+                self._stage_annotation_form_analysis(doc, result)
+
+                # Stage 8 - Hidden Content Detection
+                self._stage_hidden_content_detection(doc, result)
+
+                # Stage 8b - OCR vs text-layer consistency check.
+                # Catches text-over-image tampering where the producer/creator
+                # metadata looks clean but the visible glyphs disagree with the
+                # PDF text layer (a classic forgery technique).
+                self._stage_ocr_consistency(doc, result)
+
+                # Stage 8c - Image-level forensics (ELA, JPEG quant tables, pHash).
+                # Stays scoring-weight-neutral; flags feed verdict via severity.
+                try:
+                    from app.services.image_forensics import run_image_forensics
+                    result.flags.extend(run_image_forensics(file_bytes))
+                except Exception as exc:
+                    result.flags.append(VerificationFlag(
+                        "image_forensics", "IMAGE_FORENSICS_ERROR", "info",
+                        f"Image forensics raised an unexpected error: {exc}",
+                    ))
+
+                # Stage 8d - PDF digital signature validation.
+                try:
+                    from app.services.pdf_signature_validator import validate_pdf_signature
+                    result.flags.extend(validate_pdf_signature(file_bytes))
+                except Exception as exc:
+                    result.flags.append(VerificationFlag(
+                        "signature_validation", "SIGNATURE_CHECK_ERROR", "info",
+                        f"Signature validation raised an unexpected error: {exc}",
+                    ))
+
+                # Reconcile stage 6's cheap substring detection against stage
+                # 8d's real signature-field validator. A bare "/ByteRange" or
+                # "/Sig" in the byte stream is trivially spoofable, so the
+                # signature-score boost only applies when 8d confirms an
+                # actual signature field/object exists.
+                self._reconcile_signature_marker(result)
+
+                # Stage 8e - Bank template visual fingerprint match.
+                try:
+                    from app.services.template_fingerprint import check_template_match
+                    bank = getattr(result, "identified_bank_template", None)
+                    # Many call sites don't populate this; pull from signature
+                    # stage result instead if available.
+                    if not bank and result.signature_result:
+                        bank = result.signature_result.get("identified_bank") if isinstance(result.signature_result, dict) else None
+                    result.flags.extend(check_template_match(file_bytes, bank))
+                except Exception as exc:
+                    result.flags.append(VerificationFlag(
+                        "template_fingerprint", "TEMPLATE_CHECK_ERROR", "info",
+                        f"Template fingerprint check raised an unexpected error: {exc}",
+                    ))
+
+                # Stage 9 - Authenticity Scoring
+                self._stage_scoring(result, cfg)
+            except Exception as exc:
+                # verify_document must never throw — an unexpected stage
+                # failure degrades to a blocked result the reviewer can see,
+                # never a 500 or a silently missing verification.
+                result.authenticity_score = 0.0
+                result.verdict = "LikelyTampered"
+                result.flags.append(VerificationFlag(
+                    "scoring", "PIPELINE_ERROR", "critical",
+                    f"Verification pipeline failed with {type(exc).__name__}: {exc}. "
+                    "Document could not be verified — treat as unverified.",
+                    {"exception_type": type(exc).__name__},
+                ))
         finally:
             doc.close()
 
         return result
 
+    @staticmethod
+    def _page_range(doc) -> range:
+        """Iterate at most MAX_ANALYSIS_PAGES pages of *doc*."""
+        return range(min(doc.page_count, MAX_ANALYSIS_PAGES))
+
+    def _reconcile_signature_marker(self, result: VerificationResult):
+        """Apply the stage-6 signature bonus only when stage 8d's validator
+        also found a real signature field/object (see verify_document)."""
+        sig_res = result.signature_result if isinstance(result.signature_result, dict) else {}
+        if not sig_res.get("has_signature"):
+            return
+
+        validator_codes = {
+            f.code for f in result.flags
+            if f.pipeline_stage == "signature_validation"
+        }
+        validator_confirms = bool(validator_codes & {
+            "SIGNATURE_VALID", "SIGNATURE_PRESENT_UNVERIFIED", "SIGNATURE_INVALID",
+        })
+
+        if validator_confirms:
+            result.flags.append(VerificationFlag(
+                "signature", "DIGITAL_SIGNATURE_PRESENT", "info",
+                "PDF contains a digital signature."
+            ))
+            result.signature_score = 100.0
+            sig_res["score"] = 100.0
+        else:
+            result.flags.append(VerificationFlag(
+                "signature", "SIGNATURE_MARKER_CONTRADICTION", "info",
+                "PDF byte stream contains signature markers (/Sig or /ByteRange) "
+                "but no actual signature field/object was found by the signature "
+                "validator. The marker may be residual or spoofed; no signature "
+                "score bonus applied.",
+                {"validator_codes": sorted(validator_codes)},
+            ))
+
     # ------------------------------------------------------------------
     # STAGE 1 - PDF Metadata Analysis
     # ------------------------------------------------------------------
 
-    def _stage_metadata_analysis(self, doc, result: VerificationResult):
+    def _stage_metadata_analysis(self, doc, result: VerificationResult, cfg: Optional[Dict[str, Any]] = None):
+        cfg = cfg or self.cfg
         flags: List[VerificationFlag] = []
         score = 100.0
 
@@ -334,7 +469,7 @@ class DocumentVerificationPipeline:
         }
 
         # Check for suspicious creators/producers
-        for suspicious in self.cfg["suspicious_creators"]:
+        for suspicious in cfg["suspicious_creators"]:
             if suspicious in creator or suspicious in producer:
                 flags.append(VerificationFlag(
                     "metadata", "SUSPICIOUS_CREATOR", "high",
@@ -481,7 +616,22 @@ class DocumentVerificationPipeline:
 
         # Count %%EOF markers (incremental saves)
         eof_count = file_bytes.count(b"%%EOF")
-        if eof_count > 1:
+        # A digitally-signed PDF legitimately carries exactly one incremental
+        # save (the act of signing appends a revision), so 2 %%EOF markers
+        # plus a signature marker is expected — do not penalise that shape.
+        has_signature_marker = (
+            b"/ByteRange" in file_bytes
+            or b"/Type /Sig" in file_bytes
+            or b"/Type/Sig" in file_bytes
+        )
+        if eof_count == 2 and has_signature_marker:
+            flags.append(VerificationFlag(
+                "structural", "MULTIPLE_EOF", "info",
+                "PDF has 2 %%EOF markers alongside a digital-signature marker — "
+                "consistent with the incremental save produced by signing. Not penalised.",
+                {"eof_count": eof_count, "signed_incremental_save": True}
+            ))
+        elif eof_count > 1:
             flags.append(VerificationFlag(
                 "structural", "MULTIPLE_EOF", "medium",
                 f"PDF has {eof_count} %%EOF markers indicating {eof_count - 1} incremental save(s). "
@@ -512,7 +662,7 @@ class DocumentVerificationPipeline:
         # Count form XObjects (can indicate overlaid content)
         xobject_count = 0
         try:
-            for page_num in range(doc.page_count):
+            for page_num in self._page_range(doc):
                 page = doc[page_num]
                 xobjects = page.get_images(full=True)
                 xobject_count += len(xobjects)
@@ -579,20 +729,10 @@ class DocumentVerificationPipeline:
         except Exception:
             pass
 
-        # Linearization check
-        try:
-            is_linearized = getattr(doc, "is_fast_web_access", False)
-            if is_linearized and eof_count > 1:
-                flags.append(VerificationFlag(
-                    "structural", "LINEARIZED_MULTI_EOF", "low",
-                    f"PDF is linearized (fast web access) but has {eof_count} %%EOF markers. "
-                    "Linearized PDFs should have a single revision. "
-                    "This contradictory state suggests post-creation editing.",
-                    {"is_linearized": True, "eof_count": eof_count}
-                ))
-                score -= 5
-        except Exception:
-            pass
+        # NOTE: the old LINEARIZED_MULTI_EOF check was removed — linearized
+        # ("fast web view") PDFs legitimately contain 2 %%EOF markers by
+        # construction, so flagging that combination penalised genuine
+        # bank statement downloads.
 
         # Cross-reference integrity
         xref_info = {}
@@ -634,7 +774,7 @@ class DocumentVerificationPipeline:
                 size_per_page = file_size / doc.page_count
                 # Determine if document is primarily text or image based
                 total_images = 0
-                for pn in range(doc.page_count):
+                for pn in self._page_range(doc):
                     try:
                         total_images += len(doc[pn].get_images(full=True))
                     except Exception:
@@ -741,7 +881,7 @@ class DocumentVerificationPipeline:
         font_names = set()
         text_over_image_pages = 0
         text_over_image_page_list: List[int] = []
-        total_pages = doc.page_count
+        total_pages = min(doc.page_count, MAX_ANALYSIS_PAGES)
 
         for page_num in range(total_pages):
             page = doc[page_num]
@@ -752,7 +892,7 @@ class DocumentVerificationPipeline:
                 for f in fonts:
                     # f is a tuple: (xref, ext, type, basefont, name, encoding, ref-info)
                     if len(f) >= 4:
-                        font_names.add(f[3])
+                        font_names.add(self._normalise_font_name(f[3]))
             except Exception:
                 pass
 
@@ -835,7 +975,7 @@ class DocumentVerificationPipeline:
                     try:
                         for f in page.get_fonts():
                             if len(f) >= 4:
-                                page_fonts.add(f[3])
+                                page_fonts.add(self._normalise_font_name(f[3]))
                     except Exception:
                         pass
                     profile = {
@@ -891,11 +1031,15 @@ class DocumentVerificationPipeline:
         except Exception:
             pass
 
-        # Watermark/header consistency check
+        # Watermark/header consistency check.
+        # Page 0 is exempt: page 1 of a genuine statement always carries a
+        # different, larger header (logo, address block) than the
+        # continuation pages, so it must not be compared against them.
+        # Only flag when CONTINUATION pages disagree with each other.
         try:
-            if total_pages >= 2:
-                header_texts: List[str] = []
-                for page_num in range(total_pages):
+            if total_pages >= 3:
+                header_texts: Dict[int, str] = {}
+                for page_num in range(1, total_pages):
                     page = doc[page_num]
                     try:
                         # Extract text from top 15% of each page
@@ -908,17 +1052,17 @@ class DocumentVerificationPipeline:
                         normalized = re.sub(r"\bpage\s*\d+\b", "", normalized, flags=re.IGNORECASE)
                         normalized = re.sub(r"^\s*\d+\s*$", "", normalized, flags=re.MULTILINE)
                         normalized = re.sub(r"\s+", " ", normalized).strip()
-                        header_texts.append(normalized)
+                        header_texts[page_num] = normalized
                     except Exception:
-                        header_texts.append("")
+                        header_texts[page_num] = ""
 
-                # Compare headers: find majority header
-                non_empty_headers = [h for h in header_texts if h]
+                # Compare continuation-page headers: find majority header
+                non_empty_headers = [h for h in header_texts.values() if h]
                 if len(non_empty_headers) >= 2:
                     header_counter: Counter = Counter(non_empty_headers)
                     majority_header, majority_count = header_counter.most_common(1)[0]
                     differing_pages = []
-                    for idx, h in enumerate(header_texts):
+                    for idx, h in sorted(header_texts.items()):
                         if h and h != majority_header:
                             differing_pages.append(idx)
 
@@ -926,9 +1070,10 @@ class DocumentVerificationPipeline:
                     if differing_pages and len(differing_pages) < len(non_empty_headers):
                         flags.append(VerificationFlag(
                             "font_text", "HEADER_INCONSISTENCY", "high",
-                            f"Pages {differing_pages} have different header/watermark text "
-                            f"compared to the majority ({majority_count} pages). "
-                            "This may indicate pages sourced from different documents.",
+                            f"Continuation pages {differing_pages} have different header/"
+                            f"watermark text compared to the majority ({majority_count} pages). "
+                            "This may indicate pages sourced from different documents. "
+                            "(Page 1 is exempt — its header legitimately differs.)",
                             {"differing_pages": differing_pages,
                              "page_numbers": differing_pages,
                              "total_pages": total_pages,
@@ -961,7 +1106,7 @@ class DocumentVerificationPipeline:
         dpis: List[float] = []
         image_count = 0
 
-        for page_num in range(doc.page_count):
+        for page_num in self._page_range(doc):
             page = doc[page_num]
             try:
                 images = page.get_images(full=True)
@@ -1059,7 +1204,7 @@ class DocumentVerificationPipeline:
                     continue
 
             # Map color spaces per page
-            for page_num in range(doc.page_count):
+            for page_num in self._page_range(doc):
                 try:
                     page = doc[page_num]
                     page_images = page.get_images(full=True)
@@ -1107,12 +1252,13 @@ class DocumentVerificationPipeline:
         metadata = doc.metadata or {}
         creation_date_str = metadata.get("creationDate") or ""
 
-        # Extract dates from content
+        # Extract dates from content. Word boundaries keep long reference
+        # numbers (e.g. "1201/01/20261") from parsing as dates.
         date_patterns = [
-            r"\d{2}/\d{2}/\d{4}",
-            r"\d{2}\s+\w{3}\s+\d{4}",
-            r"\d{2}-\d{2}-\d{4}",
-            r"\d{4}-\d{2}-\d{2}",
+            r"\b\d{2}/\d{2}/\d{4}\b",
+            r"\b\d{2}\s+\w{3}\s+\d{4}\b",
+            r"\b\d{2}-\d{2}-\d{4}\b",
+            r"\b\d{4}-\d{2}-\d{2}\b",
         ]
 
         content_dates: List[datetime] = []
@@ -1146,14 +1292,18 @@ class DocumentVerificationPipeline:
                 # Content dates significantly before creation date is normal
                 # (statement generated after the period it covers)
 
-                # Check for future dates in content
-                now = datetime.now()
-                future_dates = [d for d in content_dates if d > now]
+                # Check for future dates in content. Genuine statements
+                # legitimately carry near-future dates (payment due date,
+                # next statement date), so allow up to 45 days ahead.
+                future_cutoff = datetime.now() + timedelta(days=45)
+                future_dates = [d for d in content_dates if d > future_cutoff]
                 if future_dates:
                     flags.append(VerificationFlag(
                         "content_consistency", "FUTURE_DATES", "high",
-                        f"Document contains {len(future_dates)} date(s) in the future.",
-                        {"future_date_count": len(future_dates)}
+                        f"Document contains {len(future_dates)} date(s) more than "
+                        "45 days in the future.",
+                        {"future_date_count": len(future_dates),
+                         "allowance_days": 45}
                     ))
                     score -= 20
 
@@ -1228,11 +1378,12 @@ class DocumentVerificationPipeline:
                 break
 
         if has_signature:
-            flags.append(VerificationFlag(
-                "signature", "DIGITAL_SIGNATURE_PRESENT", "info",
-                "PDF contains a digital signature."
-            ))
-            score = 100.0
+            # Marker only — a bare "/Sig" or "/ByteRange" substring is
+            # spoofable, so the DIGITAL_SIGNATURE_PRESENT flag and the
+            # score boost to 100 are deferred until stage 8d's validator
+            # confirms a real signature field/object exists (see
+            # _reconcile_signature_marker in verify_document).
+            pass
         else:
             if identified_bank and BANK_SIGNATURE_EXPECTATIONS[identified_bank]["expects_signature"]:
                 flags.append(VerificationFlag(
@@ -1267,16 +1418,28 @@ class DocumentVerificationPipeline:
         total_annotations = 0
         freetext_count = 0
         redact_count = 0
+        link_count = 0
         annotation_types: Counter = Counter()
         is_form = False
         widget_count = 0
+        signature_widget_count = 0
         text_input_count = 0
         freetext_annotation_pages: List[int] = []
         redact_annotation_pages: List[int] = []
         text_input_field_pages: List[int] = []
         fake_redaction_pages: List[int] = []
 
-        for page_num in range(doc.page_count):
+        # PyMuPDF widget-type constants (fall back to the documented values
+        # if an older fitz build lacks the names): TEXT=7, SIGNATURE=6.
+        try:
+            import fitz as _fitz_const
+            WIDGET_TYPE_TEXT = getattr(_fitz_const, "PDF_WIDGET_TYPE_TEXT", 7)
+            WIDGET_TYPE_SIGNATURE = getattr(_fitz_const, "PDF_WIDGET_TYPE_SIGNATURE", 6)
+        except Exception:
+            WIDGET_TYPE_TEXT = 7
+            WIDGET_TYPE_SIGNATURE = 6
+
+        for page_num in self._page_range(doc):
             page = doc[page_num]
 
             # Annotation detection
@@ -1296,6 +1459,10 @@ class DocumentVerificationPipeline:
                                 redact_count += 1
                                 if page_num not in redact_annotation_pages:
                                     redact_annotation_pages.append(page_num)
+                            elif annot_type == "Link":
+                                # Hyperlinks are near-universal in genuine
+                                # bank PDFs — whitelisted below.
+                                link_count += 1
                         except Exception:
                             total_annotations += 1
                             continue
@@ -1309,17 +1476,17 @@ class DocumentVerificationPipeline:
                     for widget in widgets:
                         try:
                             widget_count += 1
-                            # field_type: 0=unknown, 1=Button, 2=CheckBox, 3=RadioButton,
-                            #             4=Text, 5=ListBox, 6=ComboBox, 7=Signature
+                            # PyMuPDF field types: 0=unknown, 1=Button,
+                            # 2=CheckBox, 3=ComboBox, 4=ListBox,
+                            # 5=RadioButton, 6=Signature, 7=Text
                             ft = getattr(widget, "field_type", None)
-                            if ft == 7:
-                                pass  # Signature fields are normal
-                            elif ft == 4:
+                            if ft == WIDGET_TYPE_SIGNATURE:
+                                signature_widget_count += 1  # Signature fields are normal
+                            elif ft == WIDGET_TYPE_TEXT:
                                 text_input_count += 1
                                 if page_num not in text_input_field_pages:
                                     text_input_field_pages.append(page_num)
                         except Exception:
-                            widget_count += 1
                             continue
             except Exception:
                 pass
@@ -1352,7 +1519,12 @@ class DocumentVerificationPipeline:
                                 clip = _fitz.Rect(d_rect)
                                 # Check for text underneath the black rectangle
                                 text_under = page.get_text("text", clip=clip).strip()
-                                if text_under and len(text_under) > 2:
+                                # Z-order check: a black fill BEHIND text (e.g. a
+                                # dark table-cell background) is legitimate. Only
+                                # flag when a render of the region shows the text
+                                # is actually hidden by the fill.
+                                if (text_under and len(text_under) > 2
+                                        and self._covered_text_hidden(page, clip, expect_dark=True)):
                                     fake_redaction_pages.append(page_num)
                                     break  # One per page is enough
                     except Exception:
@@ -1379,15 +1551,28 @@ class DocumentVerificationPipeline:
             ))
             score -= 40
 
-        if total_annotations > 0 and freetext_count == 0 and redact_count == 0:
+        # Link annotations (hyperlinks) are near-universal in genuine bank
+        # PDFs, so they are whitelisted: a document whose only annotations
+        # are Links gets an info note, not a penalty.
+        non_link_other = total_annotations - freetext_count - redact_count - link_count
+        if non_link_other > 0 and freetext_count == 0 and redact_count == 0:
             flags.append(VerificationFlag(
                 "annotation_form", "HAS_ANNOTATIONS", "medium",
-                f"PDF contains {total_annotations} annotation(s) of types: "
-                f"{dict(annotation_types)}. Annotations are unusual on bank statements.",
+                f"PDF contains {non_link_other} annotation(s) of types: "
+                f"{dict(annotation_types)}. Annotations (other than hyperlinks) "
+                "are unusual on bank statements.",
                 {"total_annotations": total_annotations,
+                 "link_count": link_count,
                  "annotation_types": dict(annotation_types)}
             ))
             score -= 5
+        elif link_count > 0 and non_link_other == 0 and freetext_count == 0 and redact_count == 0:
+            flags.append(VerificationFlag(
+                "annotation_form", "ANNOTATIONS_OK", "info",
+                f"PDF contains {link_count} hyperlink annotation(s) only — "
+                "normal for bank statements.",
+                {"link_count": link_count}
+            ))
 
         # Score form fields
         if text_input_count > 0:
@@ -1400,12 +1585,15 @@ class DocumentVerificationPipeline:
                  "page_numbers": text_input_field_pages}
             ))
             score -= 40
-        elif widget_count > 0:
+        elif widget_count - signature_widget_count > 0:
+            # Signature fields are normal; only non-signature widgets count.
             flags.append(VerificationFlag(
                 "annotation_form", "HAS_FORM_FIELDS", "high",
-                f"PDF contains {widget_count} form field(s). "
+                f"PDF contains {widget_count - signature_widget_count} form field(s) "
+                "(excluding signature fields). "
                 "Bank statements should not contain form fields.",
-                {"widget_count": widget_count}
+                {"widget_count": widget_count,
+                 "signature_widget_count": signature_widget_count}
             ))
             score -= 25
 
@@ -1448,8 +1636,10 @@ class DocumentVerificationPipeline:
             "annotation_types": dict(annotation_types),
             "freetext_count": freetext_count,
             "redact_count": redact_count,
+            "link_count": link_count,
             "is_form_pdf": is_form,
             "widget_count": widget_count,
+            "signature_widget_count": signature_widget_count,
             "text_input_count": text_input_count,
             "fake_redaction_pages": sorted(set(fake_redaction_pages)),
         }
@@ -1502,7 +1692,7 @@ class DocumentVerificationPipeline:
         # Whited-out content detection
         whiteout_pages: List[int] = []
         try:
-            for page_num in range(doc.page_count):
+            for page_num in self._page_range(doc):
                 page = doc[page_num]
                 try:
                     drawings = page.get_drawings()
@@ -1545,7 +1735,13 @@ class DocumentVerificationPipeline:
                                                         for span in line.get("spans", []):
                                                             text_under += span.get("text", "")
                                         text_under = text_under.strip()
-                                        if text_under and len(text_under) > 2:
+                                        # Z-order check: white fills BEHIND text
+                                        # (table-cell backgrounds, zebra stripes)
+                                        # are ubiquitous in genuine statements.
+                                        # Only flag when a render shows the text
+                                        # is actually hidden by the fill.
+                                        if (text_under and len(text_under) > 2
+                                                and self._covered_text_hidden(page, clip, expect_dark=False)):
                                             whiteout_pages.append(page_num)
                                             break  # One per page is enough
                         except Exception:
@@ -1700,8 +1896,8 @@ class DocumentVerificationPipeline:
     # STAGE 9 - Scoring & Classification
     # ------------------------------------------------------------------
 
-    def _stage_scoring(self, result: VerificationResult):
-        w = self.cfg
+    def _stage_scoring(self, result: VerificationResult, cfg: Optional[Dict[str, Any]] = None):
+        w = cfg or self.cfg
         weighted_score = (
             result.metadata_score              * w["weight_metadata"] +
             result.structural_score            * w["weight_structural"] +
@@ -1715,16 +1911,13 @@ class DocumentVerificationPipeline:
 
         result.authenticity_score = round(weighted_score, 1)
 
-        # Critical flags can force LikelyTampered regardless of score
-        critical_flags = [f for f in result.flags if f.severity == "critical"]
-        high_flags = [f for f in result.flags if f.severity == "high"]
-
-        if critical_flags or result.authenticity_score < w["suspicious_threshold"]:
-            result.verdict = "LikelyTampered"
-        elif len(high_flags) >= 2 or result.authenticity_score < w["verified_threshold"]:
-            result.verdict = "Suspicious"
-        else:
-            result.verdict = "Verified"
+        # Shared verdict rule — critical flags force LikelyTampered
+        # regardless of score; >=2 high flags force Suspicious.
+        result.verdict = compute_verdict(
+            result.authenticity_score,
+            [f.severity for f in result.flags],
+            w,
+        )
 
         result.flags.append(VerificationFlag(
             "scoring", "FINAL_SCORE", "info",
@@ -1744,6 +1937,56 @@ class DocumentVerificationPipeline:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalise_font_name(name: str) -> str:
+        """Strip PDF subset-font prefixes (e.g. 'ABCDEF+Frutiger' ->
+        'Frutiger') so the same face embedded as multiple subsets is
+        counted once."""
+        if not name:
+            return name
+        return re.sub(r"^[A-Z]{6}\+", "", name)
+
+    @staticmethod
+    def _covered_text_hidden(page, clip, expect_dark: bool) -> bool:
+        """Visibility (z-order) test for fake-redaction / white-out checks.
+
+        The text layer says there is text inside *clip* and the drawing list
+        says a black/white fill covers the same rect — but the fill may be
+        painted BEHIND the text (table-cell background), which is legitimate.
+        Rasterise the clip region at ~72 dpi: if the render is a near-uniform
+        block (pixel std-dev below a small threshold) with a mean matching
+        the fill colour, the text really is hidden and we should flag; if
+        glyphs are visible (contrast present) we must not flag.
+
+        Returns True only when the text is genuinely hidden. Any render
+        failure returns False (conservative — don't flag what we can't see).
+        """
+        try:
+            import fitz as _fitz
+            rect = _fitz.Rect(clip)
+            if rect.is_empty or rect.width <= 0 or rect.height <= 0:
+                return False
+            pix = page.get_pixmap(clip=rect, dpi=72, alpha=False)
+            if pix.width == 0 or pix.height == 0:
+                return False
+            gray = _fitz.Pixmap(_fitz.csGRAY, pix) if pix.n > 1 else pix
+            samples = bytes(gray.samples)
+            n = len(samples)
+            if n == 0:
+                return False
+            # Sample at most ~20k pixels to bound cost on large rects
+            step = max(1, n // 20000)
+            sampled = samples[::step]
+            count = len(sampled)
+            mean = sum(sampled) / count
+            variance = sum((s - mean) ** 2 for s in sampled) / count
+            std = variance ** 0.5
+            uniform = std < 8.0
+            matches_fill = (mean <= 80.0) if expect_dark else (mean >= 175.0)
+            return uniform and matches_fill
+        except Exception:
+            return False
 
     @staticmethod
     def _parse_pdf_date(date_str: str) -> Optional[datetime]:

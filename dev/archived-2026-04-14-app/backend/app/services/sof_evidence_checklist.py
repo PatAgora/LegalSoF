@@ -108,6 +108,18 @@ _CHECKLIST: Dict[str, Dict[str, List[str]]] = {
             "Evidence of the original source of funds invested",
         ],
     },
+    "business_loan": {
+        "base": [
+            "Business loan agreement setting out the amount and repayment terms",
+            "Confirmation of the lender's identity and regulated status (FCA register check), or for a private lender their verified identity",
+            "Evidence of the lender's own source of funds where the lender is private / non-regulated",
+            "Bank statement showing the loan advance received",
+        ],
+        "enhanced": [
+            "Board minutes / director authorisation for the borrowing",
+            "Confirmation of the lender's relationship to the client or business (private loans)",
+        ],
+    },
     "loan": {
         "base": [
             "Loan or mortgage agreement",
@@ -155,16 +167,46 @@ _CHECKLIST: Dict[str, Dict[str, List[str]]] = {
             "Company accounts supporting the distribution",
         ],
     },
+    "gambling_winnings": {
+        "base": [
+            "Operator (casino / bookmaker / lottery) statement or account history showing the win",
+            "Evidence of the winnings being paid out (payout confirmation or receipt)",
+            "Bank statement showing the winnings credited",
+        ],
+        "enhanced": [
+            "Operator payout records / cheque copy",
+            "Evidence of the funds originally staked",
+        ],
+    },
+    "crypto": {
+        "base": [
+            "Exchange transaction history showing the acquisition and disposal of the cryptoassets",
+            "Wallet statements / addresses evidencing the holding",
+            "Evidence of the fiat off-ramp — the exchange withdrawal matching the bank credit",
+            "Bank statement showing the proceeds credited",
+        ],
+        "enhanced": [
+            "Evidence of the original source of funds used to purchase the cryptoassets",
+            "Exchange KYC confirmation that the account belongs to the client",
+        ],
+    },
 }
 
-# Fallback for an unrecognised / 'other' source type.
+# Fallback for an unrecognised / 'other' source type. An unclassified
+# source is itself a risk indicator — it must not pass with generic
+# paperwork: the solicitor must obtain and record a documented
+# explanation of exactly what the source is before it can be accepted.
 _DEFAULT = {
     "base": [
-        "Documentary evidence of the origin of the funds",
+        "REQUIRED: Solicitor to obtain and record a documented explanation "
+        "from the client of exactly what this source of funds is — an "
+        "'other'/unclassified source cannot be accepted without one",
+        "Documentary evidence of the origin of the funds, specific to the explained source",
         "Bank statement showing the funds received",
     ],
     "enhanced": [
         "Independent corroboration of the stated source",
+        "MLRO sign-off recording why the unclassified source was accepted",
     ],
 }
 

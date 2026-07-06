@@ -19,6 +19,9 @@ from decimal import Decimal, InvalidOperation
 import pdfplumber
 import fitz  # PyMuPDF
 
+# Shared amount/date parsing helpers (single source of truth)
+from app.services.amount_parser import parse_date as shared_parse_date
+
 
 class NatWestStatementParser:
     """
@@ -876,33 +879,17 @@ class NatWestStatementParser:
         return None
     
     def _parse_date(self, date_str: str) -> Optional[str]:
-        """Parse NatWest date format to ISO."""
+        """Parse NatWest date format ("15 Dec", "02 Jan 24") to ISO.
+
+        A7: missing-year dates are no longer blindly anchored to the current
+        year — the shared parser rolls a date more than 30 days in the
+        future back one year (statements describe the past, so a December
+        statement parsed in January resolves Dec dates to LAST year).
+        A8: two-digit years pivot at 70 (<70 -> 2000s).
+        """
         if not date_str:
             return None
-        
-        for pattern in self.date_patterns:
-            match = re.match(pattern, date_str, re.IGNORECASE)
-            if match:
-                day = int(match.group(1))
-                month_str = match.group(2).lower()
-                month = self.month_map.get(month_str[:3], 1)
-                
-                # Year might be in group 3
-                year = None
-                if match.group(3):
-                    year = int(match.group(3))
-                    if year < 100:
-                        year += 2000 if year < 50 else 1900
-                
-                if not year:
-                    year = datetime.now().year
-                
-                try:
-                    return f"{year:04d}-{month:02d}-{day:02d}"
-                except:
-                    return None
-        
-        return None
+        return shared_parse_date(date_str.strip())
     
     def _extract_amount_from_row(self, row: List[str]) -> Tuple[Optional[float], str]:
         """Extract amount and direction from table row."""

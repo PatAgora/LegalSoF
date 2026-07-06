@@ -48,7 +48,7 @@ echo ""
 echo "[2/2] Frontend dependency audit (npm audit)"
 echo "---------------------------------------------"
 
-FRONTEND_DIR="$APP_DIR/frontend"
+FRONTEND_DIR="$APP_DIR/backend/frontend"
 if [ -f "$FRONTEND_DIR/package-lock.json" ]; then
     echo "[*] Scanning: $FRONTEND_DIR"
     echo ""

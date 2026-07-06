@@ -3,9 +3,11 @@ import { Dialog } from '@headlessui/react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import PDFViewer, { scrollPDFToPage } from './PDFViewer';
 import { translateFlag } from './flagTranslations';
-import { API_BASE_URL, authFetch } from '../../lib/api';
+import { API_BASE_URL, authFetch, getAccessToken } from '../../lib/api';
 import { StatusChip, Button } from '../ui';
-import { useAuthStore } from '../../stores/authStore';
+import { RationaleModal } from '../ui/RationaleModal';
+import { showToast } from '../../lib/toast';
+import { formatDateTime } from '../../lib/format';
 
 interface VerificationData {
   id: number;
@@ -66,59 +68,44 @@ type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
 export default function DocumentVerificationModal({ verification: incoming, isOpen, onClose, onAccepted }: Props) {
   const [verification, setVerification] = useState<VerificationData>(incoming);
   useEffect(() => { setVerification(incoming); }, [incoming]);
-  const currentUser = useAuthStore((s) => s.user);
   const [activeFlagIdx, setActiveFlagIdx] = useState<number | null>(null);
   const [highlightPages, setHighlightPages] = useState<number[]>([]);
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [downloadingPack, setDownloadingPack] = useState(false);
-  const [accepting, setAccepting] = useState(false);
+  const [showAcceptModal, setShowAcceptModal] = useState(false);
 
-  const acceptVerification = async () => {
-    if (verification.admin_override) return;
-    const rationale = window.prompt(
-      `Add a rationale for accepting "${verification.filename}". Required - please include enough detail for the audit log.`,
-      '',
+  const acceptVerification = async (rationale: string) => {
+    const r = await authFetch(
+      `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/accept`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          // The backend derives the acting reviewer from the
+          // authenticated session; this field carries no identity
+          // semantics (kept only because the request schema requires
+          // a non-empty value).
+          admin_user: 'session',
+          rationale,
+        }),
+      },
     );
-    if (rationale === null) return;
-    const trimmed = rationale.trim();
-    if (trimmed.length < 10) {
-      alert('Rationale must be at least 10 characters.');
-      return;
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || r.statusText || 'The document could not be accepted.');
     }
-    setAccepting(true);
-    try {
-      const r = await authFetch(
-        `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/accept`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            admin_user: currentUser?.full_name || currentUser?.email || 'Reviewer',
-            rationale: trimmed,
-          }),
-        },
-      );
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(`Could not accept: ${err.detail || r.statusText}`);
-        return;
-      }
-      const updated = await r.json();
-      setVerification((v) => ({ ...v, ...updated }));
-      if (onAccepted) onAccepted({ ...verification, ...updated });
-    } catch (e: any) {
-      alert(`Could not accept: ${e?.message || 'Unknown error'}`);
-    } finally {
-      setAccepting(false);
-    }
+    const updated = await r.json();
+    setVerification((v) => ({ ...v, ...updated }));
+    if (onAccepted) onAccepted({ ...verification, ...updated });
+    setShowAcceptModal(false);
   };
 
   const isPDF = verification.verification_phase !== 'statement_only';
   const fileUrl = verification.disk_filename
     ? `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/documents/${verification.disk_filename}`
     : null;
-  const authToken = localStorage.getItem('access_token') || '';
+  const authToken = getAccessToken() || '';
 
   // Load audit trail + (statement-only) transactions when the modal opens
   useEffect(() => {
@@ -180,7 +167,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
         `${API_BASE_URL}/api/v1/matters/${verification.matter_id}/document-verifications/${verification.id}/evidence-pack.pdf`
       );
       if (!r.ok) {
-        alert('Evidence pack download failed.');
+        showToast('The evidence pack could not be downloaded. Please try again.', 'error');
         return;
       }
       const blob = await r.blob();
@@ -231,15 +218,6 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
         return { dot: 'bg-zinc-400', bg: 'bg-white', border: 'border-zinc-200', text: 'text-zinc-600', label: severity.toUpperCase() };
     }
   };
-
-  const verdictLabel = verification.verdict === 'Verified' ? 'VERIFIED'
-    : verification.verdict === 'Suspicious' ? 'SUSPICIOUS - REVIEW BEFORE APPROVING'
-    : verification.verdict === 'LikelyTampered' ? 'LIKELY TAMPERED - DO NOT ACCEPT'
-    : verification.verdict;
-
-  const verdictColor = verification.verdict === 'Verified' ? 'bg-green-100 text-green-700'
-    : verification.verdict === 'Suspicious' ? 'bg-amber-100 text-amber-700'
-    : 'bg-red-100 text-red-700';
 
   // Top-issue action hint - shown above the flag list to point reviewers
   // at the highest-severity flag without needing to scroll.
@@ -323,12 +301,11 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
             <div className="flex items-center gap-2">
               {!verification.admin_override && (
                 <button
-                  onClick={acceptVerification}
-                  disabled={accepting}
+                  onClick={() => setShowAcceptModal(true)}
                   title="Mark this verification as accepted with a rationale; the action is captured in the audit log."
-                  className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-wait transition-colors"
+                  className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-green-600 text-white hover:bg-green-700 transition-colors"
                 >
-                  {accepting ? 'Saving…' : 'Accept document'}
+                  Accept document
                 </button>
               )}
               <Button
@@ -362,12 +339,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
                 <div className="text-xs leading-snug text-green-900">
                   <div className="font-semibold tracking-wide">
                     Document accepted by {verification.admin_override_by || 'Reviewer'}
-                    {verification.admin_override_at && (() => {
-                      const d = new Date(verification.admin_override_at);
-                      return isNaN(d.getTime())
-                        ? ''
-                        : ` · ${d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
-                    })()}
+                    {verification.admin_override_at ? ` · ${formatDateTime(verification.admin_override_at)}` : ''}
                   </div>
                   {verification.admin_override_rationale && (
                     <div className="mt-1 italic text-green-800">"{verification.admin_override_rationale}"</div>
@@ -596,7 +568,7 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
                     {audit.map((e) => (
                       <li key={e.id} className="text-[11px] text-zinc-600">
                         <span className="font-mono text-zinc-400">
-                          {e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}
+                          {e.timestamp ? formatDateTime(e.timestamp) : ''}
                         </span>
                         {' · '}
                         <span className="font-semibold text-zinc-900">{e.action || 'event'}</span>
@@ -613,6 +585,15 @@ export default function DocumentVerificationModal({ verification: incoming, isOp
           </div>
         </Dialog.Panel>
       </div>
+
+      <RationaleModal
+        isOpen={showAcceptModal}
+        title={`Accept "${verification.filename}"`}
+        description="Add a rationale for accepting this document. Required - please include enough detail for the audit log."
+        confirmLabel="Accept document"
+        onConfirm={acceptVerification}
+        onClose={() => setShowAcceptModal(false)}
+      />
     </Dialog>
   );
 }
