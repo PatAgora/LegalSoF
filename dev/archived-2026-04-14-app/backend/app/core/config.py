@@ -18,6 +18,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        # Deployment env files carry vars consumed outside Settings
+        # (e.g. ADMIN_EMAIL/ADMIN_PASSWORD read by scripts/init_db.py).
+        extra="ignore",
     )
 
     @field_validator("DATABASE_URL", mode="after")
