@@ -10,7 +10,7 @@ Provides:
 """
 import os
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timezone
@@ -29,6 +29,7 @@ from app.schemas.document_verification import (
     VerificationSummaryResponse, VerificationFlagResponse,
 )
 from app.services.evidence_pack_builder import build_evidence_pack
+from app.services.crypto import decrypt_bytes
 
 router = APIRouter()
 
@@ -617,7 +618,16 @@ def serve_document(
 
     file_path = os.path.join(UPLOAD_ROOT, str(matter_id), safe_filename)
     if os.path.isfile(file_path):
-        return FileResponse(file_path, media_type=media_type, filename=safe_filename)
+        # Files written after encryption-at-rest was enabled are stored
+        # encrypted (SOFENC1 prefix); decrypt_bytes is a passthrough for
+        # legacy plaintext files, so both serve correctly.
+        with open(file_path, "rb") as fh:
+            disk_bytes = fh.read()
+        return Response(
+            content=decrypt_bytes(disk_bytes),
+            media_type=media_type,
+            headers={"Content-Disposition": f'inline; filename="{safe_filename}"'},
+        )
 
     # Fall back to the copy held in the database. The upload directory
     # on the host is ephemeral — files uploaded before a redeploy are
@@ -638,8 +648,11 @@ def serve_document(
         .first()
     )
     if dv is not None and dv.file_bytes:
+        # file_bytes is an EncryptedLargeBinary column, so it is already
+        # decrypted on load; decrypt_bytes here is belt-and-braces (a
+        # no-op on plaintext) in case raw ciphertext ever reaches us.
         return Response(
-            content=bytes(dv.file_bytes),
+            content=decrypt_bytes(bytes(dv.file_bytes)),
             media_type=media_type,
             headers={"Content-Disposition": f'inline; filename="{safe_filename}"'},
         )

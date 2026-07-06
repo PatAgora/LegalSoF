@@ -82,6 +82,7 @@ def derive_matter_status(matter, sof_data) -> str:
         return "Verified"
     return "Under Review"
 
+from app.core.config import settings
 from app.db.session import get_sync_session
 from app.api.dependencies.auth import (
     get_current_active_user, require_analyst, require_admin, require_matter_access,
@@ -443,6 +444,89 @@ async def list_matters(
 
         return result
     
+    finally:
+        sync_db.close()
+
+
+# ── Retention automation (SRA / MLR 2017 Reg 40) ──────────────────────
+def _add_years(start: date, years: int) -> date:
+    """start + N calendar years, clamping 29 Feb to 28 Feb when the
+    target year is not a leap year."""
+    try:
+        return start.replace(year=start.year + years)
+    except ValueError:  # 29 Feb → non-leap year
+        return start.replace(year=start.year + years, day=28)
+
+
+# NOTE: this route MUST be declared before GET /matters/{matter_id} —
+# FastAPI matches routes in declaration order, and "retention-report"
+# would otherwise be captured as a matter_id path parameter.
+@router.get("/matters/retention-report")
+async def retention_report(
+    current_user: User = Depends(require_admin),
+):
+    """Retention report for archived matters (admin only).
+
+    Lists every archived matter with its retention_until date (set at
+    archival to archive date + settings.RETENTION_YEARS — SRA / MLR
+    2017 Reg 40 record-keeping, 6 years by default) and flags those
+    past retention.
+
+    This endpoint performs NO automatic deletion. Disposal of client
+    records after the retention period is a human legal decision — a
+    solicitor must review each matter (litigation holds, ongoing
+    obligations, client instructions) before anything is destroyed.
+    The report exists solely to surface matters due for that review.
+    """
+    SessionLocal = get_sync_session()
+    sync_db = SessionLocal()
+    try:
+        matters = (
+            sync_db.query(Matter)
+            .filter(Matter.is_archived == True)
+            .order_by(Matter.retention_until.asc().nullslast(), Matter.id.asc())
+            .all()
+        )
+
+        # Best-effort archived_at from the audit trail (ARCHIVED action).
+        archived_at_map: Dict[int, datetime] = {}
+        try:
+            from sqlalchemy import func as sa_func
+            rows = (
+                sync_db.query(AuditLog.matter_id, sa_func.max(AuditLog.created_at))
+                .filter(AuditLog.action == AuditLogAction.ARCHIVED)
+                .group_by(AuditLog.matter_id)
+                .all()
+            )
+            archived_at_map = {mid: ts for mid, ts in rows if mid is not None}
+        except Exception:
+            pass
+
+        today = date.today()
+        report = []
+        for m in matters:
+            archived_at = archived_at_map.get(m.id)
+            report.append({
+                "matter_id": m.id,
+                "reference": m.reference_number,
+                "client_name": m.client_name,
+                "archived_at": archived_at.isoformat() if archived_at else None,
+                "retention_until": (
+                    m.retention_until.isoformat() if m.retention_until else None
+                ),
+                # Past retention only when a retention date exists and has
+                # passed — matters archived before retention tracking was
+                # added have no date and need one set, not disposal.
+                "past_retention": bool(m.retention_until and m.retention_until < today),
+            })
+
+        return {
+            "retention_years": settings.RETENTION_YEARS,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "total_archived": len(report),
+            "past_retention_count": sum(1 for r in report if r["past_retention"]),
+            "matters": report,
+        }
     finally:
         sync_db.close()
 
@@ -992,6 +1076,12 @@ async def delete_matter(
 
         matter.is_archived = True
 
+        # SRA / MLR 2017 Reg 40 retention: archived records must be kept
+        # for RETENTION_YEARS (default 6) from archival before disposal
+        # may even be considered. Disposal itself is never automated —
+        # see GET /matters/retention-report.
+        matter.retention_until = _add_years(date.today(), settings.RETENTION_YEARS)
+
         # Audit the archival BEFORE committing so the record and the
         # state change land in the same transaction.
         sync_db.add(AuditLog(
@@ -1007,6 +1097,8 @@ async def delete_matter(
             details={
                 "reference": reference_number,
                 "archived_by": archived_by,
+                "retention_until": matter.retention_until.isoformat(),
+                "retention_years": settings.RETENTION_YEARS,
             },
         ))
         sync_db.commit()
@@ -1015,6 +1107,7 @@ async def delete_matter(
             "success": True,
             "matter_id": matter_id,
             "reference_number": reference_number,
+            "retention_until": matter.retention_until.isoformat(),
             "message": "Matter archived. All records and files have been retained.",
         }
 

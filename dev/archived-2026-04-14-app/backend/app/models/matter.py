@@ -96,6 +96,12 @@ class Matter(Base):
     # Archive flag (replaces hardcoded EXCLUDED_REFERENCES list)
     is_archived = Column(Boolean, default=False, nullable=False)
 
+    # Record retention: date until which the archived matter's records
+    # must be retained (SRA / MLR 2017 Reg 40 — 6 years, configurable
+    # via settings.RETENTION_YEARS). Set by the archive flow; disposal
+    # after this date is a human legal decision, never automated.
+    retention_until = Column(Date, nullable=True)
+
     # Metadata
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

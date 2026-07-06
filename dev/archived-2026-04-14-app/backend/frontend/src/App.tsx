@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage'
 import ComplianceDashboardPage from './pages/ComplianceDashboardPage'
 import ComplianceMattersPage from './pages/ComplianceMattersPage'
 import RCADashboardPage from './pages/RCADashboardPage'
+import PortalUploadPage from './pages/PortalUploadPage'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
@@ -17,6 +18,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Public client evidence-upload portal — no auth, no Layout. */}
+        <Route path="/portal/:token" element={<PortalUploadPage />} />
         <Route
           path="/"
           element={

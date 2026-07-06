@@ -103,6 +103,8 @@ _SCHEMA_STATEMENTS: list[str] = [
     "ALTER TABLE matters ADD COLUMN IF NOT EXISTS target_completion_date DATE",
     "CREATE INDEX IF NOT EXISTS ix_matters_assigned_analyst_id ON matters (assigned_analyst_id)",
     "CREATE INDEX IF NOT EXISTS ix_matters_target_completion_date ON matters (target_completion_date) WHERE target_completion_date IS NOT NULL",
+    # Record retention for archived matters (SRA / MLR 2017 Reg 40, added 2026-07)
+    "ALTER TABLE matters ADD COLUMN IF NOT EXISTS retention_until DATE",
 ]
 
 
@@ -133,6 +135,35 @@ async def patch_schema(engine):
         except Exception as exc:
             print(f"[!] Schema statement skipped ({stmt}): {exc}")
     print("[+] Schema index/enum statements applied.")
+
+
+async def clear_unknown_alembic_stamp(engine):
+    """If alembic_version points at a revision that no longer exists in
+    alembic/versions (e.g. the pre-baseline 20260205_001, retired when
+    the full-schema baseline replaced it), delete the row so upgrade /
+    stamp can proceed instead of erroring with "Can't locate revision".
+    """
+    from sqlalchemy import text
+    versions_dir = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    known = {p.stem.split("_")[2] if p.stem.count("_") >= 2 else p.stem
+             for p in versions_dir.glob("*.py")}
+    # Revision ids also appear verbatim inside the filenames; collect both forms.
+    known |= {part for p in versions_dir.glob("*.py") for part in p.stem.split("_")}
+    try:
+        async with engine.begin() as conn:
+            res = await conn.execute(text(
+                "SELECT version_num FROM alembic_version"))
+            rows = [r[0] for r in res]
+            for rev in rows:
+                if rev not in known:
+                    await conn.execute(text(
+                        "DELETE FROM alembic_version WHERE version_num = :v"),
+                        {"v": rev})
+                    print(f"[+] Cleared stale alembic stamp {rev} "
+                          f"(revision no longer in alembic/versions).")
+    except Exception:
+        # Table may not exist yet (fresh DB) — nothing to clear.
+        pass
 
 
 def run_migrations():
@@ -255,7 +286,9 @@ async def main():
     # 1b. Patch schema for columns added after first deploy
     await patch_schema(engine)
 
-    # 2. Run Alembic migrations
+    # 2. Run Alembic migrations (clearing any stamp pointing at a
+    #    revision retired by the 2026-07 full-schema baseline first)
+    await clear_unknown_alembic_stamp(engine)
     run_migrations()
 
     # 3. Seed admin user (skipped with a warning if ADMIN_PASSWORD is

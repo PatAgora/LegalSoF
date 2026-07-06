@@ -8,6 +8,7 @@ import { API_BASE_URL, authFetch } from '../lib/api'
 import { useCurrentMatter } from '../stores/currentMatterStore'
 import { useAuthStore } from '../stores/authStore'
 import MatterStatusBadge from '../components/ui/MatterStatusBadge'
+import Modal from '../components/ui/Modal'
 import { RationaleModal } from '../components/ui/RationaleModal'
 import { showToast } from '../lib/toast'
 import { formatCurrencyWhole, formatDate, formatDateTime } from '../lib/format'
@@ -35,6 +36,7 @@ export default function MatterDetailPage() {
   const [matter, setMatter] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showClientLinksModal, setShowClientLinksModal] = useState(false)
 
   const setCurrentMatter = useCurrentMatter((s) => s.setMatter)
   const clearCurrentMatter = useCurrentMatter((s) => s.clearMatter)
@@ -112,8 +114,22 @@ export default function MatterDetailPage() {
             </p>
             <MatterMetaRow matter={matter} onSaved={() => refreshMatter()} />
           </div>
+          <div className="flex-shrink-0">
+            <button
+              onClick={() => setShowClientLinksModal(true)}
+              className="px-3.5 py-2 text-sm font-medium rounded border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors"
+            >
+              Request client documents
+            </button>
+          </div>
         </div>
       </div>
+
+      <ClientUploadLinksModal
+        matterId={matter.id}
+        isOpen={showClientLinksModal}
+        onClose={() => setShowClientLinksModal(false)}
+      />
 
       {/* Compliance review panel - Compliance route, plus admins anywhere. */}
       {showCompliancePanel && (
@@ -129,6 +145,196 @@ export default function MatterDetailPage() {
         {activeTab === 'audit-trail' && <AuditTrailTab matterId={matter.id} />}
       </div>
     </div>
+  )
+}
+
+// ──────────────────────────────────────────
+// Client evidence-upload links (portal)
+// ──────────────────────────────────────────
+
+interface ClientUploadLink {
+  id: number
+  token: string
+  url_path: string
+  expires_at: string | null
+  max_uploads: number
+  upload_count: number
+  revoked: boolean
+  active: boolean
+  created_at: string | null
+}
+
+function ClientUploadLinksModal({ matterId, isOpen, onClose }: {
+  matterId: number
+  isOpen: boolean
+  onClose: () => void
+}) {
+  const [links, setLinks] = useState<ClientUploadLink[]>([])
+  const [loading, setLoading] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [expiresInDays, setExpiresInDays] = useState('14')
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  const fullUrl = (link: ClientUploadLink) => `${window.location.origin}${link.url_path}`
+
+  const loadLinks = async () => {
+    setLoading(true)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/client-upload-links`)
+      if (r.ok) {
+        const d = await r.json()
+        setLinks(d.links || [])
+      }
+    } catch {
+      // Non-blocking — the list simply stays empty.
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isOpen) loadLinks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, matterId])
+
+  const generateLink = async () => {
+    setGenerating(true)
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/client-upload-link`, {
+        method: 'POST',
+        body: JSON.stringify({ expires_in_days: Number(expiresInDays) }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        showToast(`Could not create the link: ${err.detail || r.statusText}`, 'error')
+        return
+      }
+      showToast('Client upload link created.', 'success')
+      await loadLinks()
+    } catch (e: any) {
+      showToast(`Could not create the link: ${e?.message || 'Unknown error'}`, 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const copyLink = async (link: ClientUploadLink) => {
+    try {
+      await navigator.clipboard.writeText(fullUrl(link))
+      setCopiedId(link.id)
+      window.setTimeout(() => setCopiedId((prev) => (prev === link.id ? null : prev)), 2000)
+    } catch {
+      showToast('Could not copy the link — copy it manually from the box.', 'error')
+    }
+  }
+
+  const revokeLink = async (link: ClientUploadLink) => {
+    try {
+      const r = await authFetch(`${API_BASE_URL}/api/v1/matters/${matterId}/client-upload-link/${link.id}`, {
+        method: 'DELETE',
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        showToast(`Could not revoke the link: ${err.detail || r.statusText}`, 'error')
+        return
+      }
+      showToast('Upload link revoked.', 'success')
+      await loadLinks()
+    } catch (e: any) {
+      showToast(`Could not revoke the link: ${e?.message || 'Unknown error'}`, 'error')
+    }
+  }
+
+  const activeLinks = links.filter((l) => l.active)
+  const inactiveCount = links.length - activeLinks.length
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Request client documents" size="lg">
+      <div className="space-y-5">
+        <p className="text-sm text-zinc-600 leading-relaxed">
+          Generate a secure link the client can use to upload bank statements
+          and supporting documents directly to this matter — no account
+          needed. Links are time-limited and can be revoked at any time.
+        </p>
+
+        {/* Generate */}
+        <div className="flex items-end gap-3 rounded-md border border-zinc-200 bg-zinc-50/60 px-4 py-3">
+          <div>
+            <label htmlFor="client-link-expiry" className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1">
+              Link valid for
+            </label>
+            <select
+              id="client-link-expiry"
+              value={expiresInDays}
+              onChange={(e) => setExpiresInDays(e.target.value)}
+              className="rounded border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-900 focus:border-zinc-300 focus:ring-2 focus:ring-zinc-200 focus:outline-none"
+            >
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+              <option value="30">30 days</option>
+            </select>
+          </div>
+          <button
+            onClick={generateLink}
+            disabled={generating}
+            className="px-3.5 py-2 text-sm font-semibold rounded bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-60 transition-colors"
+          >
+            {generating ? 'Generating…' : 'Generate link'}
+          </button>
+        </div>
+
+        {/* Active links */}
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            Active links
+          </div>
+          {loading ? (
+            <div className="py-6 text-center text-sm text-zinc-400">Loading…</div>
+          ) : activeLinks.length === 0 ? (
+            <div className="py-4 text-sm text-zinc-400 italic">
+              No active links. Generate one above and send it to the client.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {activeLinks.map((link) => (
+                <li key={link.id} className="rounded-md border border-zinc-200 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={fullUrl(link)}
+                      onFocus={(e) => e.target.select()}
+                      className="flex-1 min-w-0 rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-700 font-mono focus:outline-none"
+                    />
+                    <button
+                      onClick={() => copyLink(link)}
+                      className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors"
+                    >
+                      {copiedId === link.id ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={() => revokeLink(link)}
+                      className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded border border-red-200 bg-white text-red-700 hover:bg-red-50 transition-colors"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                  <div className="mt-1.5 text-xs text-zinc-400">
+                    Expires {formatDate(link.expires_at)}
+                    <span className="mx-1.5">·</span>
+                    {link.upload_count} of {link.max_uploads} uploads used
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {inactiveCount > 0 && (
+            <p className="mt-2 text-xs text-zinc-400">
+              {inactiveCount} expired or revoked link{inactiveCount === 1 ? '' : 's'} not shown.
+            </p>
+          )}
+        </div>
+      </div>
+    </Modal>
   )
 }
 

@@ -7,13 +7,14 @@ Tables:
 """
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, Text, Boolean,
-    Float, JSON, LargeBinary, Enum as SQLEnum, case
+    Float, JSON, Enum as SQLEnum, case
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, deferred
 import enum
 
 from app.db.base import Base
+from app.services.crypto import EncryptedLargeBinary
 
 
 class VerificationVerdict(str, enum.Enum):
@@ -41,7 +42,10 @@ class DocumentVerification(Base):
     # ephemeral). The serve endpoint falls back to this when the
     # on-disk copy is missing. Deferred so list/summary queries do not
     # drag every raw upload into memory; access dv.file_bytes to load.
-    file_bytes = deferred(Column(LargeBinary, nullable=True))
+    # EncryptedLargeBinary transparently encrypts at rest when
+    # DOCUMENT_ENCRYPTION_KEY is set; legacy plaintext rows read back
+    # unchanged (SOFENC1 prefix check in app/services/crypto.py).
+    file_bytes = deferred(Column(EncryptedLargeBinary, nullable=True))
 
     # Pipeline results
     authenticity_score = Column(Float, nullable=False, default=0.0)

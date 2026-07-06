@@ -99,6 +99,34 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
     
+    # Document encryption at rest. A urlsafe base64 32-byte Fernet key —
+    # generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # When unset, documents are stored unencrypted (legacy behaviour);
+    # encrypted and plaintext payloads can coexist — see
+    # app/services/crypto.py.
+    DOCUMENT_ENCRYPTION_KEY: str = ""
+
+    @model_validator(mode="after")
+    def _warn_unencrypted_production(self):
+        """Warn (but do not block boot) when running in production
+        without a document encryption key — plaintext storage remains
+        supported for existing deployments."""
+        if (
+            self.ENVIRONMENT.lower() == "production"
+            and not self.DOCUMENT_ENCRYPTION_KEY
+        ):
+            logging.getLogger(__name__).warning(
+                "DOCUMENT_ENCRYPTION_KEY is not set — uploaded documents "
+                "will be stored UNENCRYPTED at rest. Set a Fernet key to "
+                "enable document encryption in production."
+            )
+        return self
+
+    # Record retention (SRA / MLR 2017 Reg 40) — years to retain
+    # archived matter records before disposal may be considered.
+    RETENTION_YEARS: int = 6
+
     # Storage
     STORAGE_TYPE: str = "local"  # local, s3, minio
     STORAGE_LOCAL_PATH: str = "./uploads"

@@ -894,6 +894,56 @@ def run_automated_funds_lineage(
     }
 
 
+def _resolve_file_type(filename: Optional[str], file_category: str) -> str:
+    """Map (filename extension, category) to the file_processor file_type.
+
+    Raises the same HTTP 400s the upload endpoint always raised for
+    unsupported extensions / categories. Shared by the staff upload
+    endpoint and the client portal.
+    """
+    file_ext = filename.split('.')[-1].lower() if filename else ''
+
+    if file_category == 'client_info':
+        # Accept JSON (structured) plus free-text formats — PDF, Word,
+        # CSV. The file_processor turns the free-text content into the
+        # same shape the frontend manual form uses via regex
+        # extraction.
+        if file_ext == 'json':
+            return 'json'
+        elif file_ext in ('pdf', 'docx', 'doc', 'csv', 'txt'):
+            return 'client_info_document'
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Client info must be JSON, PDF, Word, CSV or TXT.",
+            )
+
+    elif file_category == 'bank_statement':
+        if file_ext == 'csv':
+            return 'csv'
+        elif file_ext == 'pdf':
+            return 'pdf'
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Bank statement must be CSV or PDF"
+            )
+
+    elif file_category == 'supporting_doc':
+        if file_ext != 'pdf':
+            raise HTTPException(
+                status_code=400,
+                detail="Supporting documents must be PDF"
+            )
+        return 'pdf_document'  # Use specific type for documents (NOT bank statements)
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file category: {file_category}"
+        )
+
+
 @router.post("/matters/{matter_id}/sof-assessment/upload")
 async def upload_sof_files(
     matter_id: int,
@@ -904,80 +954,22 @@ async def upload_sof_files(
 ):
     """
     Upload and process a file for SoF assessment
-    
+
     File categories:
     - client_info: JSON with client details, purchase info, SoF explanation
     - bank_statement: CSV or PDF bank statement
     - supporting_doc: PDF supporting document
     """
-    
+
     # Verify matter exists and the current user may access it
     matter = require_matter_access(matter_id, current_user, db)
 
     logger.info("sof_upload_start", matter_id=matter_id, file_category=file_category)
 
-    # Load existing storage for this matter from DB (or create new)
-    storage = _db_load_storage(db, matter_id)
-    if storage is None:
-        logger.info("sof_upload_new_storage", matter_id=matter_id)
-        storage = {
-            "client_info": None,
-            "bank_statements": [],
-            "supporting_docs": [],
-            "uploaded_files": [],
-            "status": "pending",
-            "last_updated": None
-        }
+    # Validate extension / category up-front so the caller gets the same
+    # 400 it always did before any bytes are read.
+    _resolve_file_type(file.filename, file_category)
 
-    # Determine file type from extension and MIME
-    file_ext = file.filename.split('.')[-1].lower() if file.filename else ''
-    
-    if file_category == 'client_info':
-        # Accept JSON (structured) plus free-text formats — PDF, Word,
-        # CSV. The file_processor turns the free-text content into the
-        # same shape the frontend manual form uses via regex
-        # extraction.
-        if file_ext == 'json':
-            file_type = 'json'
-        elif file_ext == 'pdf':
-            file_type = 'client_info_document'
-        elif file_ext in ('docx', 'doc'):
-            file_type = 'client_info_document'
-        elif file_ext == 'csv':
-            file_type = 'client_info_document'
-        elif file_ext == 'txt':
-            file_type = 'client_info_document'
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Client info must be JSON, PDF, Word, CSV or TXT.",
-            )
-    
-    elif file_category == 'bank_statement':
-        if file_ext == 'csv':
-            file_type = 'csv'
-        elif file_ext == 'pdf':
-            file_type = 'pdf'
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Bank statement must be CSV or PDF"
-            )
-    
-    elif file_category == 'supporting_doc':
-        if file_ext != 'pdf':
-            raise HTTPException(
-                status_code=400,
-                detail="Supporting documents must be PDF"
-            )
-        file_type = 'pdf_document'  # Use specific type for documents (NOT bank statements)
-    
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file category: {file_category}"
-        )
-    
     # Enforce the upload size limit BEFORE reading the whole file into
     # memory: reject on the declared size when available, then read in
     # 1 MB chunks and abort as soon as the limit is crossed.
@@ -1002,9 +994,70 @@ async def upload_sof_files(
                 detail=f"File exceeds the {getattr(settings, 'MAX_UPLOAD_SIZE_MB', 50)}MB upload limit"
             )
         _chunks.append(_chunk)
-    file_content_for_verification = b"".join(_chunks)
+    file_content = b"".join(_chunks)
     del _chunks
-    await file.seek(0)  # Reset for process_upload
+
+    return await process_uploaded_file(
+        db=db,
+        matter=matter,
+        raw_bytes=file_content,
+        filename=file.filename,
+        file_category=file_category,
+        content_type=file.content_type,
+    )
+
+
+async def process_uploaded_file(
+    db: Session,
+    matter: Matter,
+    raw_bytes: bytes,
+    filename: Optional[str],
+    file_category: str,
+    actor_label: Optional[str] = None,
+    content_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Per-file processing core shared by the staff upload endpoint and
+    the client portal upload endpoint.
+
+    Runs the full pipeline for one file on one matter: extension and
+    size validation, magic-byte check, disk persistence (encrypted when
+    document encryption is enabled), file parsing, document
+    verification, cross-document corroboration, and assessment-storage
+    merge. Returns the response dict the staff endpoint has always
+    returned.
+
+    `actor_label` is recorded against the uploaded-file entry when set
+    (e.g. "Client (portal)"); staff uploads pass None so their stored
+    data is unchanged.
+    """
+    matter_id = matter.id
+    file_content_for_verification = raw_bytes
+
+    # Load existing storage for this matter from DB (or create new)
+    storage = _db_load_storage(db, matter_id)
+    if storage is None:
+        logger.info("sof_upload_new_storage", matter_id=matter_id)
+        storage = {
+            "client_info": None,
+            "bank_statements": [],
+            "supporting_docs": [],
+            "uploaded_files": [],
+            "status": "pending",
+            "last_updated": None
+        }
+
+    # Determine file type from extension (raises HTTP 400 when invalid)
+    file_ext = filename.split('.')[-1].lower() if filename else ''
+    file_type = _resolve_file_type(filename, file_category)
+
+    # Size cap — belt and braces; both callers already stream-read with
+    # the same cap before handing us the bytes.
+    max_upload_bytes = getattr(settings, 'MAX_UPLOAD_SIZE_MB', 50) * 1024 * 1024
+    if len(raw_bytes) > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {getattr(settings, 'MAX_UPLOAD_SIZE_MB', 50)}MB upload limit"
+        )
 
     # Magic-byte check: a file claiming to be a PDF must actually start
     # with the %PDF header — reject renamed images/executables outright.
@@ -1015,11 +1068,14 @@ async def upload_sof_files(
                    "Please upload the original PDF exported from the bank or source system."
         )
 
-    # Persist file to disk for later retrieval (PDF viewer)
+    # Persist file to disk for later retrieval (PDF viewer). When
+    # document encryption is enabled the bytes are encrypted at rest;
+    # the crypto service is imported defensively so uploads keep
+    # working (plaintext) if it is not present yet.
     import os as _os
     _upload_dir = f"/app/uploads/{matter_id}"
     _os.makedirs(_upload_dir, exist_ok=True)
-    _safe_filename = _os.path.basename(file.filename or "unknown")
+    _safe_filename = _os.path.basename(filename or "unknown")
     _dest_path = _os.path.join(_upload_dir, _safe_filename)
     _counter = 1
     _base, _ext = _os.path.splitext(_safe_filename)
@@ -1027,11 +1083,29 @@ async def upload_sof_files(
         _safe_filename = f"{_base}_{_counter}{_ext}"
         _dest_path = _os.path.join(_upload_dir, _safe_filename)
         _counter += 1
+    _disk_bytes = file_content_for_verification
+    try:
+        from app.services.crypto import encrypt_bytes, encryption_enabled
+        if encryption_enabled():
+            _disk_bytes = encrypt_bytes(file_content_for_verification)
+    except ImportError:
+        # Crypto service not available — store plaintext, as before.
+        pass
     with open(_dest_path, "wb") as _f_out:
-        _f_out.write(file_content_for_verification)
+        _f_out.write(_disk_bytes)
 
-    # Process the file
-    result = await file_processor.process_upload(file, file_type)
+    # Process the file. file_processor expects an UploadFile; rebuild
+    # one from the raw bytes so the parsing path (including its MIME
+    # validation against the caller-supplied content type) is identical
+    # for both the staff endpoint and the portal.
+    import io as _io
+    from starlette.datastructures import Headers as _Headers
+    _upload_for_processing = UploadFile(
+        file=_io.BytesIO(raw_bytes),
+        filename=filename,
+        headers=_Headers({"content-type": content_type}) if content_type else None,
+    )
+    result = await file_processor.process_upload(_upload_for_processing, file_type)
 
     if not result['success']:
         raise HTTPException(
@@ -1100,7 +1174,7 @@ async def upload_sof_files(
                 None,
                 document_verification_pipeline.verify_document,
                 file_content_for_verification,
-                file.filename or "",
+                filename or "",
                 file_category,
             )
             verification_verdict = doc_ver_result.verdict
@@ -1145,7 +1219,7 @@ async def upload_sof_files(
                 _created_new_record = True
                 doc_ver_record = DocumentVerification(
                     matter_id=matter_id,
-                    filename=file.filename or "unknown",
+                    filename=filename or "unknown",
                     file_hash=doc_ver_result.file_hash_sha256,
                     file_category=file_category,
                     disk_filename=_safe_filename,
@@ -1316,7 +1390,7 @@ async def upload_sof_files(
                 _created_new_record = True
                 doc_ver_record = DocumentVerification(
                     matter_id=matter_id,
-                    filename=file.filename or "unknown",
+                    filename=filename or "unknown",
                     file_hash=file_hash,
                     file_category=file_category,
                     disk_filename=_safe_filename,
@@ -1439,7 +1513,7 @@ async def upload_sof_files(
             file_hash = _hashlib.sha256(file_content_for_verification).hexdigest()
             doc_ver_record = DocumentVerification(
                 matter_id=matter_id,
-                filename=file.filename or "unknown",
+                filename=filename or "unknown",
                 file_hash=file_hash,
                 file_category=file_category,
                 disk_filename=_safe_filename,
@@ -1459,7 +1533,7 @@ async def upload_sof_files(
                     code="NON_PDF_FILE",
                     severity="info",
                     message=(
-                        f"File is not a PDF ({file.filename}). Structural verification "
+                        f"File is not a PDF ({filename}). Structural verification "
                         "not applicable."
                     ),
                     details=None,
@@ -1497,7 +1571,7 @@ async def upload_sof_files(
                 if doc_ver_record is None:
                     doc_ver_record = DocumentVerification(
                         matter_id=matter_id,
-                        filename=file.filename or "unknown",
+                        filename=filename or "unknown",
                         file_hash=_err_hash,
                         file_category=file_category,
                         disk_filename=_safe_filename,
@@ -1560,7 +1634,7 @@ async def upload_sof_files(
         # / extracted text so the savings → current matcher works.
         if new_transactions:
             import re as _re
-            filename_lower = (file.filename or '').lower()
+            filename_lower = (filename or '').lower()
 
             # ------------------------------------------------------------
             # Extract a real UK bank account number so two statements
@@ -1656,7 +1730,7 @@ async def upload_sof_files(
             elif sort_code:
                 file_account_id = f"sc:{sort_code}"
             else:
-                file_account_id = f"file:{file.filename or 'unknown'}"
+                file_account_id = f"file:{filename or 'unknown'}"
 
             # Detect account type from filename hints (only override
             # when the parser left it blank or returned 'Unknown').
@@ -1668,7 +1742,7 @@ async def upload_sof_files(
 
             for txn in new_transactions:
                 txn['account_id'] = file_account_id
-                txn['source_filename'] = file.filename
+                txn['source_filename'] = filename
                 if sort_code:
                     txn['sort_code'] = txn.get('sort_code') or sort_code
                 if acct_last4:
@@ -1698,18 +1772,23 @@ async def upload_sof_files(
     elif file_category == 'supporting_doc':
         # Add filename and upload timestamp to the document data for audit trail
         doc_data = result['data'].copy()
-        doc_data['filename'] = file.filename
+        doc_data['filename'] = filename
         doc_data['uploaded_at'] = datetime.now(timezone.utc).isoformat()
         storage['supporting_docs'].append(doc_data)
     
     # Track uploaded file
-    storage['uploaded_files'].append({
-        "filename": file.filename,
+    _uploaded_entry = {
+        "filename": filename,
         "category": file_category,
         "file_type": result['file_type'],
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "records_count": result['data'].get('transaction_count') or 1
-    })
+    }
+    if actor_label:
+        # Portal uploads are attributed; staff uploads keep the exact
+        # entry shape they always had.
+        _uploaded_entry["uploaded_by"] = actor_label
+    storage['uploaded_files'].append(_uploaded_entry)
     
     storage['last_updated'] = datetime.now(timezone.utc).isoformat()
     storage['status'] = 'files_uploaded'
@@ -1721,7 +1800,7 @@ async def upload_sof_files(
         "success": True,
         "matter_id": matter_id,
         "file_category": file_category,
-        "filename": file.filename,
+        "filename": filename,
         "records_processed": result['data'].get('transaction_count') or 1,
         "message": "File processed successfully",
     }

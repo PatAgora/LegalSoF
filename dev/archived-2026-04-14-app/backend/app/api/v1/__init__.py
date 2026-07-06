@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth, transactions, sof_assessment, matters,
     statement_validation, mfa, audit, notifications,
-    document_verification, analytics, users,
+    document_verification, analytics, users, client_portal,
 )
 
 api_router = APIRouter()
@@ -22,3 +22,4 @@ api_router.include_router(notifications.router, tags=["notifications"])
 api_router.include_router(document_verification.router, tags=["document-verification"])
 api_router.include_router(analytics.router, tags=["analytics"])
 api_router.include_router(users.router, tags=["users"])
+api_router.include_router(client_portal.router, tags=["client-portal"])

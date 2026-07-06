@@ -21,6 +21,7 @@ from app.models.document_verification import (
     DocumentVerification, DocumentVerificationFlag, DocumentVerificationTransaction,
     VerificationVerdict,
 )
+from app.models.portal import ClientUploadToken
 
 __all__ = [
     # User
@@ -81,4 +82,6 @@ __all__ = [
     "DocumentVerificationFlag",
     "DocumentVerificationTransaction",
     "VerificationVerdict",
+    # Client Portal
+    "ClientUploadToken",
 ]

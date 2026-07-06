@@ -32,6 +32,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:?err}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-sof_platform}
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - DOCUMENT_ENCRYPTION_KEY=${DOCUMENT_ENCRYPTION_KEY:-}
       - CORS_ORIGINS=["http://localhost","http://localhost:8080","http://127.0.0.1","http://127.0.0.1:8080"]
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
