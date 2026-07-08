@@ -304,20 +304,19 @@ def adjudicate_hit(
 # Batch re-screen (admin) — the cron story after a dataset update
 # ---------------------------------------------------------------------------
 
-@router.post("/screening/rescreen-all", tags=["screening"])
-def rescreen_all(
-    current_user: User = Depends(require_admin),
-    db: Session = Depends(get_sync_db),
-):
-    """Re-run every non-archived matter's latest screening subjects
-    against the CURRENT dataset. A new check is created only where the
-    hit set differs from the subject's latest check (so a quiet re-screen
-    leaves no noise). Local UK-list provider only — external providers are
-    only queried on user-initiated runs.
+def rescreen_all_matters(db: Session, actor_user_id: int | None) -> dict:
+    """Re-run every non-archived matter's latest screening subjects against
+    the CURRENT dataset. A new check is created only where the hit set
+    differs from the subject's latest check (quiet re-screens leave no
+    noise). Local UK-list provider only.
+
+    Shared by the admin endpoint and the daily cron script;
+    `actor_user_id` is the audit actor (None for an automated system run).
+    Raises RuntimeError if no dataset is imported.
     """
     dataset = get_latest_dataset(db)
     if dataset is None:
-        raise HTTPException(409, "No sanctions dataset imported — run the update script first")
+        raise RuntimeError("No sanctions dataset imported — run the update script first")
 
     provider = LocalUKListProvider(db)
     matters_scanned = 0
@@ -366,11 +365,11 @@ def rescreen_all(
                 hits=hits,
                 providers_used=[provider.name],
                 dataset_version=dataset.version,
-                created_by_id=current_user.id,
+                created_by_id=actor_user_id,
             )
             db.add(AuditLog(
                 matter_id=matter_id,
-                user_id=current_user.id,
+                user_id=actor_user_id,
                 action=AuditLogAction.CREATED,
                 entity_type="screening_check",
                 entity_id=check.id,
@@ -402,6 +401,19 @@ def rescreen_all(
         "new_checks_created": len(new_checks),
         "new_checks": new_checks,
     }
+
+
+@router.post("/screening/rescreen-all", tags=["screening"])
+def rescreen_all(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_sync_db),
+):
+    """Admin-triggered batch re-screen of every non-archived matter against
+    the current dataset (see rescreen_all_matters for the logic)."""
+    try:
+        return rescreen_all_matters(db, actor_user_id=current_user.id)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
 
 
 # ---------------------------------------------------------------------------
